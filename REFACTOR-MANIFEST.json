@@ -1,0 +1,218 @@
+{
+  "name": "GenOffice browser Windows refactor overlay",
+  "applyTo": "The uploaded genoffice.zip / genoffice-main repository root",
+  "delivery": "Source changes only; not a prebuilt executable; original project required",
+  "validation": "22 Node tests passed. Source-only DOM harness passed. Full native rich-editor integration and Windows build not executed.",
+  "files": [
+    {
+      "path": ".github/workflows/browser-windows.yml",
+      "change": "added",
+      "sha256": "062247d3091c2f18a32cabd7a538656db16a7450d4c49f858d2ccf60c2831c10"
+    },
+    {
+      "path": "BROWSER-README.md",
+      "change": "added",
+      "sha256": "1de8ffe2ef3ac8c4f9e2dde6716f2210a817c22c4e96aeeb200e32421baf5f27"
+    },
+    {
+      "path": "BROWSER-VALIDATION.md",
+      "change": "added",
+      "sha256": "c9ce71f23e2dddefe818d51705759bfe8e8b89a5afb786f59c7257a52adcbf3b"
+    },
+    {
+      "path": "Start GenOffice Source Only.cmd",
+      "change": "added",
+      "sha256": "78ab0ccc06f1ecb383d9d80cccdb73218b3d8707577aa83e8b197de37a7a7290"
+    },
+    {
+      "path": "Start GenOffice.cmd",
+      "change": "added",
+      "sha256": "ca2cc11bae837b9b8a4e1d2a339b948de88be477c9aa3a107316b61a7387ee94"
+    },
+    {
+      "path": "apps/browser/e2e/playwright.config.mjs",
+      "change": "added",
+      "sha256": "773077f49091dbe46b0d5f8739408646f4114d50bad349ba6a6a49ea449ed3ba"
+    },
+    {
+      "path": "apps/browser/e2e/workspace.spec.mjs",
+      "change": "added",
+      "sha256": "cd1f3c2fb636ad5530d67c8d686caaea7cec2f26321b9447b0f9812faefd66f4"
+    },
+    {
+      "path": "apps/browser/electron.vite.config.ts",
+      "change": "added",
+      "sha256": "b1e7743d15471b861c40cb555be5e22836f50cc52ec8d7c164385e07f4a0f5bf"
+    },
+    {
+      "path": "apps/browser/package.json",
+      "change": "added",
+      "sha256": "0c6da77e4e97458abbefd4674e06ab85a66fab18f16059099c613031f6c2334a"
+    },
+    {
+      "path": "apps/browser/public/index.html",
+      "change": "added",
+      "sha256": "a9752da912a89b9e33a005f4188d756e40bc3ac55665dfb9e87bbc2624f2a0b1"
+    },
+    {
+      "path": "apps/browser/public/workspace.css",
+      "change": "added",
+      "sha256": "d860e706a97230a3404531dce1513a03723bef9df6d409ea398cde21155e1774"
+    },
+    {
+      "path": "apps/browser/public/workspace.js",
+      "change": "added",
+      "sha256": "92ab7854c7e8f5dc9120e318b904e3d2a3c3f2bf96cfafec04b22dcea4bcab54"
+    },
+    {
+      "path": "apps/browser/server/channels.mjs",
+      "change": "added",
+      "sha256": "b77d44d0d9531ccfe8aacdeaa75827487602cd6db1a6849d516d4ad4dba024ac"
+    },
+    {
+      "path": "apps/browser/server/errors.mjs",
+      "change": "added",
+      "sha256": "b95c13edea8259828ae8580c905f62c9b6243bf686c4d9ffa29a679c3f1bc584"
+    },
+    {
+      "path": "apps/browser/server/http-server.mjs",
+      "change": "added",
+      "sha256": "f8d487f82c04af55700b219151ff5432bafd7076a540ed9ae5b59fdb5f4ce4ce"
+    },
+    {
+      "path": "apps/browser/server/policy.mjs",
+      "change": "added",
+      "sha256": "f93dd376674645f6b84c096da3e29e3c1c9e0a2447b29a353b33cd7ba5a2b385"
+    },
+    {
+      "path": "apps/browser/server/start.mjs",
+      "change": "added",
+      "sha256": "528659443abb2c04ecbc9f01a8cfb8aedf17d81bbbdf5148cf6349cf11ede05d"
+    },
+    {
+      "path": "apps/browser/server/wire.mjs",
+      "change": "added",
+      "sha256": "56a42209a5036d10f6294bb071304b50cb02972e922e2fa5723c23028d64635e"
+    },
+    {
+      "path": "apps/browser/server/workspace.mjs",
+      "change": "added",
+      "sha256": "66a4adb84eb8dc97cfb110eed0e7d8c1b438dec5646bc6008a2945db9449e450"
+    },
+    {
+      "path": "apps/browser/src/client/drop-open.ts",
+      "change": "added",
+      "sha256": "823722b4775abb2976db840535ab057e966c9b8bdd3d215abdbe672b168723a3"
+    },
+    {
+      "path": "apps/browser/src/client/electron.ts",
+      "change": "added",
+      "sha256": "da69621c389bea135e3a15f706b131705b7c462ce680ff861d9aeac1f1257ce0"
+    },
+    {
+      "path": "apps/browser/src/main/empty.ts",
+      "change": "added",
+      "sha256": "ab5899d63cb1e078690bcf09ac0a20d9297cced60713aee5cc892ac27518ea40"
+    },
+    {
+      "path": "apps/browser/src/main/env.d.ts",
+      "change": "added",
+      "sha256": "0c249b1d574aefc2daf2ef39bc3bca57515f1338de8adfdb4836bc52453ee775"
+    },
+    {
+      "path": "apps/browser/src/main/host.ts",
+      "change": "added",
+      "sha256": "d4970fdc082ae14d6aa83a027eb566846b76973c27bdd2ca7588aad4707afcd2"
+    },
+    {
+      "path": "apps/browser/src/main/index.ts",
+      "change": "added",
+      "sha256": "2523e027042fb38d15638bca99bff0cc8c12a650e642464417d9271d861bb2ba"
+    },
+    {
+      "path": "apps/browser/test/http.test.mjs",
+      "change": "added",
+      "sha256": "607a0e885d7802d60b148a5dec47aa69461d57089e6aa40741210a19efedd848"
+    },
+    {
+      "path": "apps/browser/test/wire-policy.test.mjs",
+      "change": "added",
+      "sha256": "1de2e48ed83abe6aaaa64c2fbf6670a6019b4ede690b4643fdc4e946509d8c41"
+    },
+    {
+      "path": "apps/browser/test/workspace.test.mjs",
+      "change": "added",
+      "sha256": "569d15f98711cfe8dbaddf2bf75a85b2184b66ef848d4049f186501d3da583ec"
+    },
+    {
+      "path": "apps/docs/src/main/lazy-media.ts",
+      "change": "modified",
+      "sha256": "77e7e46c4110f1ccbb07a83bed5b253c0fbb9cac709f0cecd4757ba0aa71ceb5"
+    },
+    {
+      "path": "apps/markdown/src/renderer/editor/localImage.ts",
+      "change": "modified",
+      "sha256": "acbb79f83bee3ec8691a002d7e2118bc6e84a1b68db3e2561896f504dca6f8cf"
+    },
+    {
+      "path": "eslint.config.mjs",
+      "change": "modified",
+      "sha256": "751734a765aaed8a27919a7269ee61ad0221c6bdecd1855b1aaec283ab348776"
+    },
+    {
+      "path": "package-lock.json",
+      "change": "modified",
+      "sha256": "5f93809c0d88848287572257cd221268d9c92e6c0a1882cc1b85c21b88a16549"
+    },
+    {
+      "path": "package.json",
+      "change": "modified",
+      "sha256": "58c1ff2a1a8c1a9e5f6413f8705fc1afc9c831eab0947c652a68cfd695cb0c6a"
+    },
+    {
+      "path": "packages/electron-utils/src/default-save-dir.ts",
+      "change": "modified",
+      "sha256": "2af3030998d86e7ab5b20bc65b024960113da7f88f721bb36eeb9f867aac7c0e"
+    },
+    {
+      "path": "packages/electron-utils/src/index.ts",
+      "change": "modified",
+      "sha256": "97095595da6ac0e55b7ba48a2d4a6719da12064e060f18740c77b9260e554695"
+    },
+    {
+      "path": "setup-windows.cmd",
+      "change": "added",
+      "sha256": "eba3eba3090771f84ecb677579948dc2d651fdc897a79b7f96d00b55b3dc8d7f"
+    },
+    {
+      "path": "tools/browser/build-editors.mjs",
+      "change": "added",
+      "sha256": "a96b14eddc046ee746e3f54373a199e47be85a5a0119194dd68ba0bbae6f9fd9"
+    },
+    {
+      "path": "tools/browser/check-prerequisites.mjs",
+      "change": "added",
+      "sha256": "ffc5f90f171f64fc05210ddbfc2c0cd514e9af53c4fbe304b1343b7c46f2ef57"
+    },
+    {
+      "path": "tools/browser/test.mjs",
+      "change": "added",
+      "sha256": "29ef916cfe231e62059ef8e8be42d5b865cbbd045d35648c4e1ef6911dc28083"
+    },
+    {
+      "path": "validation/genoffice-core-tests.tap",
+      "change": "added",
+      "sha256": "c5786c89e79a11da3b868f6989957aea3918fa0925e3f0c92d44f8faf6a93b10"
+    },
+    {
+      "path": "validation/genoffice-syntax-check.json",
+      "change": "added",
+      "sha256": "39972876218e1ffebe78b6e59e56af42ae66eaaa287c151a7c5fc9d0f610e970"
+    },
+    {
+      "path": "validation/source-dom-checks.txt",
+      "change": "added",
+      "sha256": "84deb655843aa9fcd73ce66b9b397be088b9c5acb7a2d72b8e5b18b9f044b2ec"
+    }
+  ]
+}

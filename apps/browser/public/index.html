@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Nawa · Browser workspace</title>
+    <link rel="stylesheet" href="/workspace.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-icon" aria-hidden="true">G</span
+        ><span>Nawa<small>Browser workspace</small></span>
+      </div>
+      <div class="connection">
+        <span id="connection-dot"></span><span id="connection-status">Connecting…</span>
+      </div>
+      <button id="mount-top" class="primary">＋ Mount folder</button>
+    </header>
+    <main class="layout">
+      <aside class="sidebar">
+        <div class="section-heading">
+          WORKSPACE
+          <button
+            id="refresh"
+            class="icon-button"
+            title="Refresh folders"
+            aria-label="Refresh folders"
+          >
+            ↻
+          </button>
+        </div>
+        <div id="mounts"></div>
+        <div class="sidebar-note">
+          <b>Your files stay on this computer.</b>
+          <p>
+            Only mounted folders are available. Saving writes back to the real file, not a
+            downloaded copy.
+          </p>
+        </div>
+        <div id="mode-note" class="mode-note"></div>
+      </aside>
+      <section class="workspace">
+        <nav class="toolbar" aria-label="Workspace actions">
+          <button id="home">▦ Files</button>
+          <div class="divider"></div>
+          <button id="new-file">＋ New</button>
+          <button id="save">Save <kbd>Ctrl S</kbd></button>
+          <button id="save-as">Save As</button>
+          <button id="reload">Reload</button>
+          <div class="spacer"></div>
+          <button id="download">Download</button>
+        </nav>
+        <div id="notice" class="notice" role="status" hidden></div>
+        <nav id="tabs" class="tabs" aria-label="Open files"></nav>
+        <div id="views" class="views">
+          <section id="files-view" class="files-view">
+            <div class="file-heading">
+              <div>
+                <div class="eyebrow">LOCAL FILES</div>
+                <h1 id="folder-title">A home for your work.</h1>
+                <div id="breadcrumbs" class="breadcrumbs"></div>
+              </div>
+              <input
+                id="filter"
+                type="search"
+                placeholder="Filter this folder"
+                aria-label="Filter files"
+              />
+            </div>
+            <div id="file-list"></div>
+          </section>
+        </div>
+        <footer class="statusbar">
+          <span id="status-left">Mount a folder to get started</span
+          ><span id="status-right">Local service · No Docker or WSL</span>
+        </footer>
+      </section>
+    </main>
+    <dialog id="modal">
+      <form method="dialog" id="modal-form">
+        <div class="modal-heading">
+          <h2 id="modal-title"></h2>
+          <button type="button" id="modal-close" class="icon-button" aria-label="Close dialog">
+            ×
+          </button>
+        </div>
+        <div id="modal-body"></div>
+        <div id="modal-error" role="alert"></div>
+        <div id="modal-actions" class="modal-actions"></div>
+      </form>
+    </dialog>
+    <script type="module" src="/workspace.js"></script>
+  </body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "name": "@genoffice/browser",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "Windows-local GenOffice engine service and mounted-folder browser client",
+  "main": "out/main/index.js",
+  "scripts": {
+    "build": "electron-vite build",
+    "start": "electron .",
+    "test": "node ../../tools/browser/test.mjs"
+  }
+}

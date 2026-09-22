@@ -1,0 +1,149 @@
+TAP version 13
+# Subtest: authentication, CSRF, Origin and Host are enforced; errors reveal no paths
+ok 1 - authentication, CSRF, Origin and Host are enforced; errors reveal no paths
+  ---
+  duration_ms: 75.808845
+  type: 'test'
+  ...
+# [GenOffice browser] HttpError: The native editor service is not built. Run setup-windows.cmd.
+#     at requireValue (file:///mnt/data/work/genoffice-main/apps/browser/server/errors.mjs:10:25)
+#     at handle (file:///mnt/data/work/genoffice-main/apps/browser/server/http-server.mjs:220:11)
+#     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+#   status: 501,
+#   code: 'REQUEST_FAILED'
+# }
+# Subtest: HTTP reads, revision saves, conflict responses, new files and folders persist on disk
+ok 2 - HTTP reads, revision saves, conflict responses, new files and folders persist on disk
+  ---
+  duration_ms: 38.492957
+  type: 'test'
+  ...
+# Subtest: workspace HTML is static and authored HTML downloads instead of executing
+ok 3 - workspace HTML is static and authored HTML downloads instead of executing
+  ---
+  duration_ms: 13.749594
+  type: 'test'
+  ...
+# Subtest: native relay roundtrips binary, enforces tab ownership and revokes resource capabilities
+ok 4 - native relay roundtrips binary, enforces tab ownership and revokes resource capabilities
+  ---
+  duration_ms: 17.09565
+  type: 'test'
+  ...
+# Subtest: one workspace SSE stream multiplexes tab events and replays by sequence
+ok 5 - one workspace SSE stream multiplexes tab events and replays by sequence
+  ---
+  duration_ms: 14.152923
+  type: 'test'
+  ...
+# Subtest: binary IPC roundtrips nested buffers, slices and typed arrays
+ok 6 - binary IPC roundtrips nested buffers, slices and typed arrays
+  ---
+  duration_ms: 2.428422
+  type: 'test'
+  ...
+# Subtest: wire rejects prototype injection, invalid base64 and malformed typed lengths
+ok 7 - wire rejects prototype injection, invalid base64 and malformed typed lengths
+  ---
+  duration_ms: 0.440965
+  type: 'test'
+  ...
+# Subtest: RPC policy isolates editor scopes and denies OS, AI, clipboard and arbitrary channels
+ok 8 - RPC policy isolates editor scopes and denies OS, AI, clipboard and arbitrary channels
+  ---
+  duration_ms: 4.016668
+  type: 'test'
+  ...
+# Subtest: RPC policy rejects unsafe filenames and mounted-path escapes
+ok 9 - RPC policy rejects unsafe filenames and mounted-path escapes
+  ---
+  duration_ms: 1.013328
+  type: 'test'
+  ...
+# Subtest: direct automation save targets and relative filesystem DTO paths are rejected
+ok 10 - direct automation save targets and relative filesystem DTO paths are rejected
+  ---
+  duration_ms: 0.60984
+  type: 'test'
+  ...
+# Subtest: scalar open paths and workbook merge arrays cannot bypass mount boundaries
+ok 11 - scalar open paths and workbook merge arrays cannot bypass mount boundaries
+  ---
+  duration_ms: 0.515928
+  type: 'test'
+  ...
+# Subtest: Windows filename and traversal validation on every platform
+ok 12 - Windows filename and traversal validation on every platform
+  ---
+  duration_ms: 2.918721
+  type: 'test'
+  ...
+# Subtest: mounts survive a fresh Workspace instance; removed roots are not substituted
+ok 13 - mounts survive a fresh Workspace instance; removed roots are not substituted
+  ---
+  duration_ms: 12.740192
+  type: 'test'
+  ...
+# Subtest: create, read, overwrite with revision, enumerate and create directories
+ok 14 - create, read, overwrite with revision, enumerate and create directories
+  ---
+  duration_ms: 19.34052
+  type: 'test'
+  ...
+# Subtest: external modifications, stale revisions and duplicate creates never clobber
+ok 15 - external modifications, stale revisions and duplicate creates never clobber
+  ---
+  duration_ms: 5.879917
+  type: 'test'
+  ...
+# Subtest: only one concurrent writer can use a revision or create a new path
+ok 16 - only one concurrent writer can use a revision or create a new path
+  ---
+  duration_ms: 13.773536
+  type: 'test'
+  ...
+# Subtest: text decoding preserves UTF-8 BOM and reports CRLF/mixed newlines
+ok 17 - text decoding preserves UTF-8 BOM and reports CRLF/mixed newlines
+  ---
+  duration_ms: 22.195801
+  type: 'test'
+  ...
+# Subtest: relative traversal and absolute paths cannot escape a mount
+ok 18 - relative traversal and absolute paths cannot escape a mount
+  ---
+  duration_ms: 11.944532
+  type: 'test'
+  ...
+# Subtest: symlinks, Windows junctions and hardlinked files are blocked
+ok 19 - symlinks, Windows junctions and hardlinked files are blocked
+  ---
+  duration_ms: 16.119979
+  type: 'test'
+  ...
+# Subtest: read-only mounts and maximum file size are enforced
+ok 20 - read-only mounts and maximum file size are enforced
+  ---
+  duration_ms: 2.290654
+  type: 'test'
+  ...
+# Subtest: failed lock holders do not poison later operations
+ok 21 - failed lock holders do not poison later operations
+  ---
+  duration_ms: 0.358761
+  type: 'test'
+  ...
+# Subtest: overlapping mounts share the same file lock
+ok 22 - overlapping mounts share the same file lock
+  ---
+  duration_ms: 12.404286
+  type: 'test'
+  ...
+1..22
+# tests 22
+# suites 0
+# pass 22
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 249.927357
