@@ -43,6 +43,6 @@ export interface WorkspaceApi {
   listWorkspaceDirectories(folder: string): Promise<WorkspaceScopeDirectory[]>
   searchWorkspaceFiles(folder: string, query: string, limit?: number): Promise<WorkspaceScopeFile[]>
   /** Validates both the registered root and the currently selected chat directory. */
-  readFolderChatFile(folder: string, path: string, maxChars: number): Promise<WorkspaceFileText>
+  readFolderChatFile(folder: string, path: string, maxChars: number, offset?: number): Promise<WorkspaceFileText>
   onWorkspaceRootsChanged(handler: () => void): () => void
 }

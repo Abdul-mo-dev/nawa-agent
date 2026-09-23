@@ -2885,7 +2885,8 @@ async function extractAttachmentText(filePath: string): Promise<string> {
 export async function readWorkspaceFileText(
   filePath: string,
   maxChars: number,
-): Promise<{ ok: boolean; name?: string; text?: string; totalChars?: number; error?: string }> {
+  offset = 0,
+): Promise<{ ok: boolean; name?: string; text?: string; offset?: number; totalChars?: number; error?: string }> {
   const name = basename(filePath)
   const ext = name.split('.').pop()?.toLowerCase() ?? ''
   if (!ATTACHMENT_EXTS.has(ext)) return { ok: false, error: `${name}: unsupported file type` }
@@ -2895,7 +2896,8 @@ export async function readWorkspaceFileText(
   try {
     const text = await extractAttachmentText(filePath)
     const size = Math.min(Math.max(1, Math.floor(maxChars) || 1), 48_000)
-    return { ok: true, name, totalChars: text.length, text: text.slice(0, size) }
+    const start = Math.min(Math.max(0, Math.floor(offset) || 0), text.length)
+    return { ok: true, name, offset: start, totalChars: text.length, text: text.slice(start, start + size) }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }

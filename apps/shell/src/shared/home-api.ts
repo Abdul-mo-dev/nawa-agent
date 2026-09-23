@@ -358,6 +358,8 @@ export interface WorkspaceFileText {
   ok: boolean
   name?: string
   text?: string
+  /** start character position of this slice */
+  offset?: number
   totalChars?: number
   error?: string
 }

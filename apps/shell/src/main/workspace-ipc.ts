@@ -9,7 +9,7 @@ interface WorkspaceIpcOptions {
   initialRoot: () => string
   isHomeSender: (sender: WebContents) => boolean
   getWindow: () => BrowserWindow | null
-  readFile: (path: string, maxChars: number) => Promise<WorkspaceFileText>
+  readFile: (path: string, maxChars: number, offset?: number) => Promise<WorkspaceFileText>
   starredPaths: () => ReadonlySet<string>
 }
 
@@ -111,7 +111,7 @@ export function registerWorkspaceIpc(options: WorkspaceIpcOptions): {
     if (typeof folder !== 'string' || typeof query !== 'string') throw new Error('Invalid search.')
     return getStore().searchFiles(folder, query, typeof limit === 'number' ? limit : 50)
   })
-  handle('home:workspace-read-file', async (_sender, folder, path, maxChars) => {
+  handle('home:workspace-read-file', async (_sender, folder, path, maxChars, offset) => {
     if (typeof folder !== 'string' || typeof path !== 'string') {
       return { ok: false, error: 'Invalid chat file.' }
     }
@@ -119,7 +119,9 @@ export function registerWorkspaceIpc(options: WorkspaceIpcOptions): {
       const canonical = await getStore().authorizeFile(folder, path)
       const limit = typeof maxChars === 'number' && Number.isFinite(maxChars)
         ? Math.max(1, Math.min(12_000, Math.floor(maxChars))) : 12_000
-      const result = await options.readFile(canonical, limit)
+      const start = typeof offset === 'number' && Number.isFinite(offset)
+        ? Math.max(0, Math.floor(offset)) : 0
+      const result = await options.readFile(canonical, limit, start)
       // A removal while extraction was running must not deliver newly unauthorized content.
       await getStore().authorizeFile(folder, canonical)
       return result

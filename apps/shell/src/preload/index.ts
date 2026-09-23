@@ -95,8 +95,8 @@ const homeApi: HomeApi = {
     const result = (await ipcRenderer.invoke('home:workspace-search-files', folder, query, limit)) as unknown
     return Array.isArray(result) ? result as import('../shared/workspace-api').WorkspaceScopeFile[] : []
   },
-  async readFolderChatFile(folder, path, maxChars) {
-    return (await ipcRenderer.invoke('home:workspace-read-file', folder, path, maxChars)) as WorkspaceFileText
+  async readFolderChatFile(folder, path, maxChars, offset) {
+    return (await ipcRenderer.invoke('home:workspace-read-file', folder, path, maxChars, offset)) as WorkspaceFileText
   },
   onWorkspaceRootsChanged(handler) {
     const listener = () => handler()
