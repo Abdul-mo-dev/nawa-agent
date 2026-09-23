@@ -13,6 +13,7 @@ import type {
 } from '@genoffice/ai-provider'
 import type { UpdateChannel } from './update-api'
 import type { AiPanelPrefs } from '@genoffice/ui/ai-panel-prefs'
+import type { WorkspaceApi } from './workspace-api'
 
 /** UI language; kept self-contained here (mirrors Lang in @genoffice/i18n) */
 export type UiLanguage =
@@ -98,7 +99,7 @@ export interface RecentPage {
   totalAll: number
 }
 
-export interface HomeApi {
+export interface HomeApi extends WorkspaceApi {
   /** unified recents across document types, newest first (paged) */
   recents(query?: RecentQuery): Promise<RecentPage>
   /** starred files (independent of the recent list), newest first (paged) */

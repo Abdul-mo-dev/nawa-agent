@@ -1,0 +1,52 @@
+/* Loaded after the existing home styles; all colors follow Nawa's shared theme tokens. */
+.home.workspace-home .sidebar { width: 286px; min-width: 240px; }
+.workspace-home .folder-panel-head { display: flex; align-items: center; gap: 8px; }
+.workspace-home .folder-panel-title { flex: 1; }
+.workspace-home .folder-add-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; min-height: 28px; }
+.workspace-home .tree-row.workspace-root { margin-top: 6px; min-height: 36px; border: 1px solid transparent; border-radius: 7px; }
+.workspace-home .tree-row.workspace-root-active { background: var(--accent-soft); border-color: var(--accent); }
+.workspace-home .tree-row { min-width: 0; }
+.workspace-home .tree-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-home .workspace-remove { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; width: 26px; height: 26px; border: 0; border-radius: 5px; font: inherit; font-size: 20px; color: var(--text); background: transparent; cursor: pointer; }
+.workspace-home .workspace-remove:hover { background: var(--bg-hover); }
+.workspace-home .workspace-remove:disabled, .workspace-home .folder-add-btn:disabled { opacity: .5; cursor: wait; }
+.workspace-home .workspace-tree-file { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 32px; border: 0; border-radius: 5px; background: transparent; color: var(--text); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.workspace-home .workspace-tree-file:hover { background: var(--bg-hover); }
+.workspace-home .workspace-tree-file .tree-icon { display: inline-flex; flex-shrink: 0; }
+.workspace-home .workspace-tree-status, .workspace-home .workspace-folder-notice { padding: 10px 8px; margin: 0; color: var(--text-secondary, var(--text)); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.workspace-home .workspace-folder-notice[role='alert'] { border-left: 2px solid var(--accent); }
+.workspace-home .workspace-text-button { border: 0; border-radius: 4px; padding: 4px 6px; background: none; color: var(--accent); font: inherit; font-size: 12px; cursor: pointer; }
+.workspace-home button:focus-visible, .workspace-home [role='treeitem']:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.workspace-content { display: flex; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
+.workspace-content > .workspace-chat-main { display: flex; flex-direction: column; flex: 1; width: 100%; min-width: 0; max-width: none; border: 0; background: var(--surface); }
+.workspace-chat-main .ws-chat-head { display: flex; gap: 16px; align-items: center; padding: 24px 28px 16px; border-bottom: 1px solid var(--border); }
+.workspace-chat-heading { flex: 1; min-width: 0; }
+.workspace-eyebrow { display: block; margin-bottom: 6px; color: var(--accent); font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+.workspace-chat-main .ws-chat-title { margin: 0; font-size: 21px; font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.workspace-chat-path { margin-top: 5px; color: var(--text-secondary, var(--text)); font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.workspace-chat-main .ws-chat-close { width: auto; height: auto; padding: 7px 12px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); font: inherit; font-size: 12px; background: transparent; cursor: pointer; }
+.workspace-chat-main .ws-chat-scope { padding: 12px 28px; border-bottom: 1px solid var(--border); }
+.workspace-scope-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.workspace-scope-help { margin: 4px 0 8px; font-size: 12px; color: var(--text-secondary, var(--text)); line-height: 1.5; }
+.workspace-chat-main .ws-chat-files { display: flex; flex-wrap: wrap; gap: 6px; max-height: 84px; overflow-y: auto; }
+.workspace-chat-main .ws-chat-file { display: inline-block; max-width: 100%; padding: 4px 8px; border: 1px solid var(--border); border-radius: 5px; color: var(--text); background: var(--bg-hover); font: inherit; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.workspace-chat-main .ws-chat-log { display: flex; flex: 1; flex-direction: column; gap: 18px; min-height: 0; padding: 24px max(28px, calc((100% - 900px) / 2)); overflow-y: auto; }
+.workspace-chat-main .ws-chat-empty { margin: auto; padding: 24px 0; max-width: 500px; text-align: center; line-height: 1.65; }
+.workspace-chat-main .ws-chat-empty h2 { color: var(--text); font-size: 22px; font-weight: 600; }
+.workspace-chat-main .ws-chat-msg { padding: 14px 16px; border-radius: 10px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; max-width: 90%; font-size: 14px; }
+.workspace-chat-main .ws-chat-user { align-self: flex-end; background: var(--accent-soft); }
+.workspace-chat-main .ws-chat-assistant { align-self: flex-start; background: var(--bg-hover); }
+.workspace-message-role { display: block; margin-bottom: 5px; font-size: 11px; font-weight: 600; color: var(--accent); }
+.workspace-chat-main .ws-chat-input-row { display: flex; align-items: flex-end; gap: 10px; margin: 0 28px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.workspace-chat-main .ws-chat-input { flex: 1; width: 100%; min-width: 0; max-height: 180px; resize: vertical; border: 0; padding: 4px; color: var(--text); background: transparent; font: inherit; font-size: 14px; line-height: 1.5; }
+.workspace-chat-main .ws-chat-send { min-height: 34px; border: 0; border-radius: 6px; padding: 7px 14px; color: white; background: var(--accent); cursor: pointer; }
+.workspace-chat-main .ws-chat-send:disabled { opacity: .45; cursor: not-allowed; }
+.workspace-chat-main .ws-chat-notice { margin: 8px 28px; font-size: 12px; line-height: 1.5; }
+.workspace-chat-main .ws-chat-scope .ws-chat-notice { margin: 6px 0; }
+.workspace-privacy-note { padding: 8px 28px 14px; font-size: 11px; color: var(--text-secondary, var(--text)); text-align: center; }
+@media (max-width: 900px) {
+  .home.workspace-home .sidebar { width: 240px; min-width: 220px; }
+  .workspace-chat-main .ws-chat-head { padding: 18px; }
+  .workspace-chat-main .ws-chat-scope, .workspace-chat-main .ws-chat-log { padding: 14px 18px; }
+  .workspace-chat-main .ws-chat-input-row { margin-inline: 18px; }
+}

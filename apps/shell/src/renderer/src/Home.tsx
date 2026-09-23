@@ -23,6 +23,7 @@ import { useI18n } from './locale'
 import type { I18n, StringKey } from './locale'
 import { SettingsModal } from './SettingsModal'
 import { WorkspaceChat } from './WorkspaceChat'
+import './workspace.css'
 import { skillUpdateDue } from './IntegrationsPane'
 
 declare global {
@@ -262,8 +263,9 @@ function SortCheck({ visible }: { visible: boolean }): ReactElement {
 
 interface TreeState {
   expanded: string[]
-  /** the root the layout was saved for; a layout for another root is not applied */
+  /** Active root tab; expansions may belong to any registered workspace. */
   root: string | null
+  selected?: string | null
 }
 
 function readTreeState(): TreeState {
@@ -273,6 +275,7 @@ function readTreeState(): TreeState {
       return {
         expanded: raw.expanded.filter((p): p is string => typeof p === 'string'),
         root: typeof raw.root === 'string' ? raw.root : null,
+        selected: typeof raw.selected === 'string' ? raw.selected : null,
       }
     }
   } catch {
@@ -294,7 +297,7 @@ function writeTreeState(state: TreeState): void {
  * already cached is a no-op; `invalidate` drops entries so the next render
  * refetches them (the main process reports changed directories via watch).
  */
-function useFolderListings() {
+function useFolderListings(workspace = false) {
   const [listings, setListings] = useState<ReadonlyMap<string, FolderListing>>(new Map())
   // dir → whether a reload was requested while its request was in flight (the
   // in-flight answer may predate the change, so it is fetched once more)
@@ -306,12 +309,19 @@ function useFolderListings() {
       return
     }
     inflight.current.set(dir, false)
-    void window.aiOffice
-      .listFolder(dir)
+    const list = workspace ? window.aiOffice.listWorkspaceFolder : window.aiOffice.listFolder
+    void list(dir)
       .then((listing) => {
         setListings((prev) => {
           const next = new Map(prev)
           next.set(dir, listing)
+          return next
+        })
+      })
+      .catch(() => {
+        setListings((prev) => {
+          const next = new Map(prev)
+          next.set(dir, { dir, folders: [], files: [], missing: true })
           return next
         })
       })
@@ -320,7 +330,7 @@ function useFolderListings() {
         inflight.current.delete(dir)
         if (again) load(dir, true)
       })
-  }, [])
+  }, [workspace])
 
   const invalidate = useCallback(
     (dirs: readonly string[]) => {
@@ -1061,22 +1071,30 @@ export function Home() {
     () => GREET_ASK_KEYS[Math.floor(Math.random() * GREET_ASK_KEYS.length)]!,
   )
 
-  // ── Folder tree state ──
-  const [root, setRoot] = useState<FolderRoot | null>(null)
+  // ── Sidebar-owned, independent folder workspaces ──
   const [treeState] = useState(readTreeState)
-  const [selectedFolder, setSelectedFolder] = useState<string | null>(null)
-  // right directory-chat panel (scoped to the selected folder + checked files)
-  const [wsChatOpen, setWsChatOpen] = useState(false)
+  const [workspaceRoots, setWorkspaceRoots] = useState<FolderRoot[]>([])
+  const [workspaceLoading, setWorkspaceLoading] = useState(true)
+  const [workspaceChanging, setWorkspaceChanging] = useState(false)
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null)
+  const [activeRootPath, setActiveRootPath] = useState<string | null>(treeState.root)
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(treeState.selected ?? null)
+  const root = workspaceRoots.find((entry) => entry.path === activeRootPath
+    && (!selectedFolder || isUnder(entry.path, selectedFolder)))
+    ?? workspaceRoots.find((entry) => selectedFolder && isUnder(entry.path, selectedFolder))
+    ?? workspaceRoots[0] ?? null
+  const [wsChatOpen, setWsChatOpen] = useState(true)
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set(treeState.expanded))
-  // a root without a saved layout of its own is opened once when first seen
-  const seededRoot = useRef<string | null>(null)
+  const knownRoots = useRef(new Set<string>())
+  const rootsInitialized = useRef(false)
+  const rootLoadSequence = useRef(0)
   const {
     listings,
     load: loadFolder,
     invalidate: invalidateFolders,
     reset: resetFolders,
     tracked: trackedFolder,
-  } = useFolderListings()
+  } = useFolderListings(true)
   // open folder menu: path + fixed-position anchor (viewport coords), so the
   // popup can escape the scrollable tree without the tree losing overflow-y
   const [folderMenu, setFolderMenu] = useState<{
@@ -1105,53 +1123,60 @@ export function Home() {
   const dragExpandTimer = useRef<number | null>(null)
 
   const loadRoot = useCallback(() => {
-    void window.aiOffice.folderRoot().then((next) => {
-      setRoot((prev) => {
-        if (prev && prev.path !== next.path) {
-          // the default save folder changed in settings: the old tree is meaningless
-          resetFolders()
-          setSelectedFolder(null)
-          setExpanded(new Set([next.path]))
-        }
-        return next
+    const sequence = ++rootLoadSequence.current
+    void window.aiOffice.workspaceRoots().then((next) => {
+      if (sequence !== rootLoadSequence.current) return
+      const firstLoad = !rootsInitialized.current
+      const nextPaths = new Set(next.map((entry) => entry.path))
+      const added = next.filter((entry) => !knownRoots.current.has(entry.path))
+      const removed = [...knownRoots.current].some((path) => !nextPaths.has(path))
+      rootsInitialized.current = true
+      knownRoots.current = nextPaths
+      setWorkspaceRoots(next)
+      setWorkspaceLoading(false)
+      setWorkspaceError(null)
+      setActiveRootPath((previous) => next.some((entry) => entry.path === previous)
+        ? previous : next[0]?.path ?? null)
+      setSelectedFolder((previous) => {
+        if (previous && next.some((entry) => isUnder(entry.path, previous))) return previous
+        return firstLoad || previous ? next[0]?.path ?? null : null
       })
+      setExpanded((previous) => new Set([
+        ...[...previous].filter((path) => next.some((entry) => isUnder(entry.path, path))),
+        ...added.filter(() => !firstLoad || treeState.root === null)
+          .map((entry) => entry.path),
+      ]))
+      if (removed) resetFolders()
+    }).catch((error) => {
+      if (sequence !== rootLoadSequence.current) return
+      setWorkspaceLoading(false)
+      setWorkspaceError(error instanceof Error ? error.message : String(error))
     })
-  }, [resetFolders])
-
-  useEffect(loadRoot, [loadRoot])
+  }, [resetFolders, treeState])
 
   useEffect(() => {
-    if (root?.usable) writeTreeState({ expanded: [...expanded], root: root.path })
-  }, [expanded, root])
+    loadRoot()
+    const off = window.aiOffice.onWorkspaceRootsChanged(loadRoot)
+    return () => { rootLoadSequence.current++; off() }
+  }, [loadRoot])
 
   useEffect(() => {
-    if (!root?.usable) return
-    if (seededRoot.current !== root.path) {
-      seededRoot.current = root.path
-      if (treeState.root !== root.path) {
-        // a layout saved for another root is not ours: start from just the root
-        setExpanded(new Set([root.path]))
-        return
-      }
+    if (!workspaceLoading && rootsInitialized.current) writeTreeState({
+      expanded: [...expanded], root: root?.path ?? null, selected: selectedFolder,
+    })
+  }, [expanded, root, selectedFolder, workspaceLoading])
+
+  useEffect(() => {
+    for (const dir of expanded) {
+      if (workspaceRoots.some((entry) => entry.usable && isUnder(entry.path, dir))) loadFolder(dir)
     }
-    for (const dir of expanded) loadFolder(dir)
-  }, [root, expanded, loadFolder, treeState])
+  }, [workspaceRoots, expanded, loadFolder])
 
   useEffect(() => {
-    if (selectedFolder) loadFolder(selectedFolder)
-  }, [selectedFolder, loadFolder])
-
-  // a remembered selection that no longer exists (deleted in Finder) falls back to the root
-  useEffect(() => {
-    if (!root?.usable || !selectedFolder) return
-    if (!isUnder(root.path, selectedFolder)) {
-      setSelectedFolder(null)
-      return
+    if (selectedFolder && workspaceRoots.some((entry) => entry.usable && isUnder(entry.path, selectedFolder))) {
+      loadFolder(selectedFolder)
     }
-    if (listings.get(selectedFolder)?.missing) {
-      setSelectedFolder(selectedFolder === root.path ? null : dirOf(selectedFolder))
-    }
-  }, [root, selectedFolder, listings])
+  }, [selectedFolder, workspaceRoots, loadFolder])
 
   useEffect(() => {
     return window.aiOffice.onFolderChanged((dirs) => {
@@ -1372,11 +1397,58 @@ export function Home() {
     setRowMenu(null)
   }
 
-  const selectFolder = (dir: string) => {
+  const selectFolder = (dir: string, ownerRoot?: string) => {
+    const owner = ownerRoot ?? (root && isUnder(root.path, dir) ? root.path
+      : workspaceRoots.find((entry) => isUnder(entry.path, dir))?.path)
+    if (owner) setActiveRootPath(owner)
     setSelectedFolder(dir)
+    setWsChatOpen(true)
+    setExpanded((previous) => new Set([...previous, ...(owner ? [owner] : []), dir]))
     setSelected(new Set())
     setRowMenu(null)
     setFolderMenu(null)
+  }
+
+  const addWorkspaceFolder = async () => {
+    if (workspaceChanging) return
+    setWorkspaceChanging(true)
+    setWorkspaceError(null)
+    try {
+      const picked = await window.aiOffice.pickWorkspaceFolder()
+      if (!picked) return
+      // The picker deduplicates canonical paths. Re-adding a root just activates it.
+      setWorkspaceRoots((previous) => previous.some((entry) => entry.path === picked.path)
+        ? previous : [...previous, picked])
+      selectFolder(picked.path, picked.path)
+      loadRoot()
+    } catch (error) {
+      setWorkspaceError(error instanceof Error ? error.message : String(error))
+    } finally { setWorkspaceChanging(false) }
+  }
+
+  const removeWorkspaceFolder = async (path: string) => {
+    if (workspaceChanging) return
+    setWorkspaceChanging(true)
+    setWorkspaceError(null)
+    try {
+      await window.aiOffice.removeWorkspaceFolder(path)
+      const next = workspaceRoots.filter((entry) => entry.path !== path)
+      const index = workspaceRoots.findIndex((entry) => entry.path === path)
+      const fallback = next[Math.min(Math.max(0, index), next.length - 1)] ?? null
+      setWorkspaceRoots(next)
+      setActiveRootPath((previous) => previous === path ? fallback?.path ?? null : previous)
+      setSelectedFolder((previous) => previous && next.some((entry) => isUnder(entry.path, previous))
+        ? previous : fallback?.path ?? null)
+      setSelected(new Set())
+      setFolderMenu(null)
+      setExpanded((previous) => new Set([...previous]
+        .filter((dir) => next.some((entry) => isUnder(entry.path, dir)))))
+      // Only the sidebar registration was removed. Files and per-directory history remain intact.
+      resetFolders()
+      loadRoot()
+    } catch (error) {
+      setWorkspaceError(error instanceof Error ? error.message : String(error))
+    } finally { setWorkspaceChanging(false) }
   }
 
   const toggleExpanded = (dir: string) => {
@@ -1795,27 +1867,37 @@ export function Home() {
   function renderTreeNode(
     entry: { path: string; name: string; hasSubfolders: boolean },
     depth: number,
+    ownerRoot: string,
   ): ReactElement {
-    const isRoot = root !== null && entry.path === root.path
+    const isRoot = entry.path === ownerRoot
     const isOpen = expanded.has(entry.path)
-    const children = listings.get(entry.path)?.folders ?? []
+    const listing = listings.get(entry.path)
+    const unavailableRoot = isRoot && workspaceRoots.some((candidate) => candidate.path === entry.path && !candidate.usable)
+    const children = listing?.folders ?? []
+    const documents = listing?.files ?? []
     const isActive = selectedFolder === entry.path
+    const activeRoot = isRoot && root?.path === ownerRoot && selectedFolder !== null
     const isRenaming = folderRenaming?.where === 'tree' && folderRenaming.path === entry.path
-    const showChevron = isRoot || entry.hasSubfolders || children.length > 0
+    const showChevron = isRoot || !listing || children.length > 0 || documents.length > 0
     return (
       <li key={entry.path} className="tree-item">
         <div
-          className={`tree-row${isActive ? ' active' : ''}${dropTarget === entry.path ? ' drop-target' : ''}`}
+          className={`tree-row${isActive ? ' active' : ''}${isRoot ? ' workspace-root' : ''}${activeRoot ? ' workspace-root-active' : ''}${dropTarget === entry.path ? ' drop-target' : ''}`}
           style={{ paddingLeft: 8 + depth * 14 }}
           role="treeitem"
           aria-selected={isActive}
           aria-expanded={showChevron ? isOpen : undefined}
+          title={entry.path}
           tabIndex={0}
-          onClick={() => selectFolder(entry.path)}
+          onClick={() => selectFolder(entry.path, ownerRoot)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') selectFolder(entry.path)
-            if (e.key === 'ArrowRight' && !isOpen) toggleExpanded(entry.path)
-            if (e.key === 'ArrowLeft' && isOpen) toggleExpanded(entry.path)
+            if (e.target !== e.currentTarget) return
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              selectFolder(entry.path, ownerRoot)
+            }
+            if (e.key === 'ArrowRight' && !isOpen) { e.preventDefault(); toggleExpanded(entry.path) }
+            if (e.key === 'ArrowLeft' && isOpen) { e.preventDefault(); toggleExpanded(entry.path) }
           }}
           onContextMenu={(e) => {
             e.preventDefault()
@@ -1866,12 +1948,40 @@ export function Home() {
           ) : (
             <span className="tree-name">{entry.name}</span>
           )}
+          {activeRoot && (
+            <button type="button" className="workspace-remove" disabled={workspaceChanging}
+              aria-label={`Remove ${entry.name} from workspace`}
+              title="Remove from sidebar only — files and chat history are kept"
+              onClick={(event) => { event.stopPropagation(); void removeWorkspaceFolder(entry.path) }}>
+              −
+            </button>
+          )}
           {renderFolderMenu(entry, isRoot)}
         </div>
-        {isOpen && (children.length > 0 || creating?.parent === entry.path) && (
+        {isOpen && (
           <ul className="tree-children" role="group">
             {creating?.parent === entry.path && renderNewFolderInput(depth + 1)}
-            {children.map((child) => renderTreeNode(child, depth + 1))}
+            {children.map((child) => renderTreeNode(child, depth + 1, ownerRoot))}
+            {documents.map((document) => (
+              <li key={document.path} className="tree-item" role="none">
+                <button type="button" className="workspace-tree-file" role="treeitem"
+                  style={{ paddingLeft: 8 + (depth + 1) * 14 }} title={document.path}
+                  onClick={() => void window.aiOffice.openPath(document.path)
+                    .catch((error) => setWorkspaceError(String(error)))}>
+                  <span className="tree-chevron" aria-hidden="true" />
+                  <span className="tree-icon" aria-hidden="true"><FileBadge ext={document.ext} size={16} /></span>
+                  <span className="tree-name">{document.name}</span>
+                </button>
+              </li>
+            ))}
+            {!listing && !unavailableRoot && <li className="workspace-tree-status" role="none">Loading documents…</li>}
+            {(listing?.missing || unavailableRoot) && <li className="workspace-tree-status" role="none">
+              Folder unavailable or too large.
+              <button type="button" className="workspace-text-button" onClick={() => { loadRoot(); loadFolder(entry.path, true) }}>Retry</button>
+            </li>}
+            {listing && !listing.missing && !children.length && !documents.length && (
+              <li className="workspace-tree-status" role="none">No supported documents in this folder.</li>
+            )}
           </ul>
         )}
       </li>
@@ -1880,43 +1990,31 @@ export function Home() {
 
   function renderFolderPanel() {
     return (
-      <div className="folder-panel">
+      <section className="folder-panel" aria-label="Folder workspaces">
         <div className="folder-panel-head">
           <span className="folder-panel-title">{t('folders')}</span>
-          {root?.usable && (
-            <button
-              className="folder-add-btn"
-              data-tip={t('newFolder')}
-              aria-label={t('newFolder')}
-              onClick={() => startCreateFolder(selectedFolder ?? root.path)}
-            >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                <path
-                  d="M7 1v12M1 7h12"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </button>
-          )}
+          <button type="button" className="folder-add-btn" aria-label="Add folder to workspace"
+            title="Choose a folder to chat with" disabled={workspaceChanging || workspaceLoading}
+            onClick={() => void addWorkspaceFolder()}>
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+              <path d="M7 1v12M1 7h12" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+            </svg>
+          </button>
         </div>
-        {root && !root.usable ? (
-          <div className="folder-unusable">
-            <p>{t('rootUnusable')}</p>
-            <button
-              className="btn btn-secondary"
-              onClick={() => void window.aiOffice.pickDefaultSaveDir().then(() => loadRoot())}
-            >
-              {t('pickSaveDir')}
-            </button>
-          </div>
-        ) : (
-          <ul className="tree" role="tree">
-            {root && renderTreeNode({ path: root.path, name: root.name, hasSubfolders: true }, 0)}
-          </ul>
-        )}
-      </div>
+        {workspaceError && <div className="workspace-folder-notice" role="alert">
+          {workspaceError}
+          <button type="button" className="workspace-text-button" onClick={loadRoot}>Retry</button>
+        </div>}
+        {workspaceLoading ? <p className="workspace-folder-notice" role="status">Loading folders…</p>
+          : workspaceRoots.length === 0 && <p className="workspace-folder-notice">
+            Click + to add a folder. Each folder and subfolder has its own chat.
+          </p>}
+        <ul className="tree" role="tree" aria-label="Workspace documents">
+          {workspaceRoots.map((entry) => renderTreeNode(
+            { path: entry.path, name: entry.name, hasSubfolders: true }, 0, entry.path,
+          ))}
+        </ul>
+      </section>
     )
   }
 
@@ -2475,7 +2573,7 @@ export function Home() {
     })
 
   return (
-    <div className="home">
+    <div className="home workspace-home">
       <aside className="sidebar">
         <div className="sidebar-logo">
           <img className="logo-lockup" src={logoLockup} alt="Nawa" />
@@ -2517,16 +2615,18 @@ export function Home() {
         {renderFolderPanel()}
         <AccountEntry onStatusChange={handleAccountStatus} />
       </aside>
-      {selectedFolder && root?.usable ? renderFolderContent() : renderGlobalContent()}
-      {wsChatOpen && selectedFolder && root?.usable && (
-        <WorkspaceChat
-          folder={selectedFolder}
-          folderName={selectedFolder.split(/[/\\]/).pop() || root?.name || 'Folder'}
-          scopePaths={folderSelectedPaths}
-          onOpenFile={(path) => void window.aiOffice.openPath(path)}
-          onClose={() => setWsChatOpen(false)}
-        />
-      )}
+      {wsChatOpen && selectedFolder && root ? (
+        <main className="workspace-content">
+          <WorkspaceChat
+            folder={selectedFolder}
+            folderName={selectedFolder.split(/[/\\]/).pop() || root.name || 'Folder'}
+            scopePaths={folderSelectedPaths}
+            onOpenFile={(path) => void window.aiOffice.openPath(path)
+              .catch((error) => setWorkspaceError(String(error)))}
+            onClose={() => setWsChatOpen(false)}
+          />
+        </main>
+      ) : selectedFolder && root?.usable ? renderFolderContent() : renderGlobalContent()}
       {confirmDelete && (
         <div className="modal-overlay" onClick={() => setConfirmDelete(null)}>
           <div

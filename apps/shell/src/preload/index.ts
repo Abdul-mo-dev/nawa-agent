@@ -24,6 +24,7 @@ import type {
   WorkspaceFileText,
 } from '../shared/home-api'
 import { HOME_CHANNELS } from '../shared/home-api'
+import type { WorkspaceScope } from '../shared/workspace-api'
 import { INTEGRATIONS_CHANNELS } from '../shared/integrations-api'
 import type {
   IntegrationsApi,
@@ -70,6 +71,30 @@ function asRecentPage(result: unknown): RecentPage {
 }
 
 const homeApi: HomeApi = {
+  async workspaceRoots() {
+    return (await ipcRenderer.invoke('home:workspace-roots')) as FolderRoot[]
+  },
+  async pickWorkspaceFolder() {
+    return (await ipcRenderer.invoke('home:workspace-pick-folder')) as FolderRoot | null
+  },
+  async removeWorkspaceFolder(path) {
+    if (typeof path !== 'string' || !path) throw new Error('Invalid folder.')
+    await ipcRenderer.invoke('home:workspace-remove-folder', path)
+  },
+  async listWorkspaceFolder(dir) {
+    return (await ipcRenderer.invoke('home:workspace-list-folder', dir)) as FolderListing
+  },
+  async folderChatFiles(folder) {
+    return (await ipcRenderer.invoke('home:workspace-scope', folder)) as WorkspaceScope
+  },
+  async readFolderChatFile(folder, path, maxChars) {
+    return (await ipcRenderer.invoke('home:workspace-read-file', folder, path, maxChars)) as WorkspaceFileText
+  },
+  onWorkspaceRootsChanged(handler) {
+    const listener = () => handler()
+    ipcRenderer.on('home:workspace-roots-changed', listener)
+    return () => ipcRenderer.removeListener('home:workspace-roots-changed', listener)
+  },
   async recents(query) {
     return asRecentPage(await ipcRenderer.invoke(HOME_CHANNELS.recents, query))
   },

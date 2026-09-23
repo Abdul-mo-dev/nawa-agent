@@ -1,4 +1,5 @@
 import { execSync, spawn } from 'node:child_process'
+import { registerWorkspaceIpc } from './workspace-ipc'
 import {
   copyFileSync,
   cpSync,
@@ -3194,6 +3195,14 @@ function statEntries(paths: string[]): RecentEntry[] {
 }
 
 function registerHomeIpc(): void {
+  const workspaces = registerWorkspaceIpc({
+    initialRoot: defaultSaveDir,
+    getWindow: () => shellWindow,
+    // Home is rendered in the shell window; its TabRecord intentionally has no view.
+    isHomeSender: (sender) => !shellWindow?.isDestroyed() && shellWindow?.webContents.id === sender.id,
+    readFile: readWorkspaceFileText,
+    starredPaths: () => new Set(readStarredFiles()),
+  })
   // signed-in means Nawa's own device-code login; the shared gsk CLI key
   // is only a silent fallback, deliberately not shown here to nudge users onto our key
   ipcMain.handle(HOME_CHANNELS.accountStatus, async () => {
@@ -3561,8 +3570,9 @@ function registerHomeIpc(): void {
     failed: tm('errRenameFailed'),
   })
   const insideRoot = (path: unknown): path is string =>
-    typeof path === 'string' && isInsideRoot(defaultSaveDir(), path)
-  const isRoot = (path: string) => resolve(path) === resolve(defaultSaveDir())
+    typeof path === 'string' && (workspaces.contains(path) || isInsideRoot(defaultSaveDir(), path))
+  // A registered root can be detached with minus, never renamed/moved/deleted as a tree child.
+  const isRoot = (path: string) => workspaces.isRoot(path) || resolve(path) === resolve(defaultSaveDir())
 
   ipcMain.handle(HOME_CHANNELS.folderRoot, (): FolderRoot => {
     // describeRoot creates a missing root, so the watcher has something to attach to
@@ -3628,7 +3638,7 @@ function registerHomeIpc(): void {
         }
       }
       // files may come from anywhere (the Recent list); folders only from inside the tree
-      const sources = list.filter((p) => !isDir(p) || isInsideRoot(defaultSaveDir(), p))
+      const sources = list.filter((p) => !isRoot(p) && (!isDir(p) || insideRoot(p)))
       const dirFiles = new Map(sources.filter(isDir).map((p) => [p, collectTreeFiles(p)]))
       // 'replace' must not destroy data: the displaced target goes to the trash,
       // and everything keyed on its path (recents, stars, chat history) leaves
