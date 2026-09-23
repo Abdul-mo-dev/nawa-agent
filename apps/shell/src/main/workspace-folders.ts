@@ -3,7 +3,7 @@ import { access, mkdir, open, readFile, readdir, realpath, rename, stat, unlink 
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { FolderRoot, FolderListing } from '../shared/home-api'
-import type { WorkspaceScope } from '../shared/workspace-api'
+import type { WorkspaceScope, WorkspaceScopeDirectory, WorkspaceScopeFile } from '../shared/workspace-api'
 
 const MAX_ROOTS = 32
 const MAX_ENTRIES = 10_000
@@ -234,6 +234,20 @@ export class WorkspaceFolderStore {
     const root = await this.authorize(folder)
     const queue = [{ path: root, depth: 0 }]
     const paths: string[] = []
+    const files: WorkspaceScopeFile[] = []
+    const directories: WorkspaceScopeDirectory[] = []
+    const dirIndex = new Map<string, WorkspaceScopeDirectory>()
+    const ensureDir = (path: string, depth: number): WorkspaceScopeDirectory => {
+      let entry = dirIndex.get(path)
+      if (!entry) {
+        entry = { path, name: path === root ? basename(path) || path : basename(path),
+          depth, fileCount: 0, totalBytes: 0 }
+        dirIndex.set(path, entry)
+        directories.push(entry)
+      }
+      return entry
+    }
+    ensureDir(root, 0)
     let visited = 0
     let truncated = false
     while (queue.length && visited < MAX_SCOPE_DIRECTORIES && paths.length < MAX_SCOPE_FILES) {
@@ -241,6 +255,7 @@ export class WorkspaceFolderStore {
       visited++
       // Recheck on each awaited iteration: removing a root revokes outstanding scans too.
       await this.authorize(folder, current.path)
+      const dirEntry = ensureDir(current.path, current.depth)
       let entries
       try { entries = await readdir(current.path, { withFileTypes: true }) } catch {
         truncated = true
@@ -253,13 +268,38 @@ export class WorkspaceFolderStore {
         if (entry.isDirectory()) {
           if (current.depth >= MAX_SCOPE_DEPTH || queue.length + visited >= MAX_SCOPE_DIRECTORIES) {
             truncated = true
-          } else { queue.push({ path, depth: current.depth + 1 }) }
+          } else { queue.push({ path, depth: current.depth + 1 }); ensureDir(path, current.depth + 1) }
         } else if (entry.isFile() && supported(entry.name)) {
           if (paths.length >= MAX_SCOPE_FILES) { truncated = true; break }
-          paths.push(path)
+          try {
+            const info = await stat(path)
+            if (!info.isFile() || info.nlink !== 1) continue
+            paths.push(path)
+            files.push({ path, name: entry.name, ext: extname(entry.name).slice(1).toLowerCase(),
+              sizeBytes: info.size, mtimeMs: info.mtimeMs })
+            dirEntry.fileCount += 1
+            dirEntry.totalBytes += info.size
+          } catch { /* A concurrent rename must not discard the rest of the listing. */ }
         }
       }
     }
-    return { paths, truncated: truncated || queue.length > 0 }
+    return { paths, truncated: truncated || queue.length > 0, files, directories }
+  }
+
+  /** Directory inventory for folder chat: every visited subfolder with direct file counts. */
+  async listDirectories(folder: string): Promise<WorkspaceScopeDirectory[]> {
+    const scope = await this.scope(folder)
+    return scope.directories ?? []
+  }
+
+  /** Filename search inside a chat folder (case-insensitive substring, capped). */
+  async searchFiles(folder: string, query: string, limit = 50): Promise<WorkspaceScopeFile[]> {
+    const needle = query.trim().toLowerCase()
+    if (!needle) return []
+    const cap = Math.max(1, Math.min(200, Math.floor(limit) || 50))
+    const scope = await this.scope(folder)
+    const matches = (scope.files ?? []).filter((file) =>
+      file.name.toLowerCase().includes(needle))
+    return matches.slice(0, cap)
   }
 }

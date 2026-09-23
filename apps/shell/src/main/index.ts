@@ -63,6 +63,7 @@ import {
   checkUpdatesMenuItem,
   setUpdateCheckInvoker,
   installRendererProtocol,
+  registerRendererScheme,
 } from '@genoffice/electron-utils'
 import { readAppSettings, writeAppSetting, writeAppSettings } from './app-settings'
 import { OPEN_DOCUMENTS_FILE, clearOpenDocuments, publishOpenDocuments } from './open-documents'
@@ -4796,6 +4797,10 @@ app.on('second-instance', (_event, argv, _cwd, additionalData) => {
 })
 
 installNavigationGuard(app)
+// Custom schemes must be privileged before app ready, otherwise fetch() of a
+// docx handoff URL (genoffice-docx-media://) from a shell-hosted docs tab
+// fails with TypeError: fetch failed and the document never opens.
+registerRendererScheme()
 installContextMenu(app, () => contextMenuLabels(currentLang()))
 registerAiIpc()
 registerProjectIpc()
@@ -4808,8 +4813,8 @@ registerIntegrationsIpc({
     ? join(process.resourcesPath, 'cli')
     : join(APPS_ROOT, '..', 'packages', 'cli', 'bin'),
   skillPath: app.isPackaged
-    ? join(process.resourcesPath, 'cli', 'skills', 'Nawa', 'SKILL.md')
-    : join(APPS_ROOT, '..', 'skills', 'Nawa', 'SKILL.md'),
+    ? join(process.resourcesPath, 'cli', 'skills', 'genoffice', 'SKILL.md')
+    : join(APPS_ROOT, '..', 'skills', 'genoffice', 'SKILL.md'),
   cliPackageJson: app.isPackaged
     ? join(process.resourcesPath, 'cli', 'package.json')
     : join(APPS_ROOT, '..', 'packages', 'cli', 'package.json'),

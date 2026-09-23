@@ -17,6 +17,37 @@ export const CHARS_PER_FILE = 12_000
 /** Keep the original keys so existing conversations survive the sidebar upgrade. */
 export function historyKey(folder: string): string { return `home-ws-chat:${folder}` }
 export function draftKey(folder: string): string { return `home-ws-draft:${folder}` }
+export function excludedKey(folder: string): string { return `home-ws-excluded:${folder}` }
+
+export function clearMessages(storage: WorkspaceStorage, folder: string): void {
+  try {
+    storage.setItem(historyKey(folder), '[]')
+    storage.setItem(draftKey(folder), '')
+  } catch { /* Storage can be unavailable or full; the current session still works. */ }
+}
+
+export function loadExcluded(storage: WorkspaceStorage, folder: string): string[] {
+  try {
+    const value: unknown = JSON.parse(storage.getItem(excludedKey(folder)) ?? '[]')
+    return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []
+  } catch { return [] }
+}
+
+export function saveExcluded(storage: WorkspaceStorage, folder: string, excluded: readonly string[]): void {
+  try { storage.setItem(excludedKey(folder), JSON.stringify([...excluded].slice(0, 512))) } catch { /* ignore */ }
+}
+
+export function isUnderDir(dir: string, path: string): boolean {
+  const root = dir.replace(/\\/g, '/').replace(/\/$/, '')
+  const target = path.replace(/\\/g, '/')
+  return target === root || target.startsWith(`${root}/`)
+}
+
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return '—'
+  if (bytes >= 1048576) return `${(bytes / 1048576).toFixed(1)} MB`
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`
+}
 
 export function loadMessages(storage: WorkspaceStorage, folder: string): WorkspaceMessage[] {
   try {

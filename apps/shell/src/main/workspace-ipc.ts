@@ -103,6 +103,14 @@ export function registerWorkspaceIpc(options: WorkspaceIpcOptions): {
     if (typeof folder !== 'string') throw new Error('Invalid chat folder.')
     return getStore().scope(folder)
   })
+  handle('home:workspace-directories', async (_sender, folder) => {
+    if (typeof folder !== 'string') throw new Error('Invalid chat folder.')
+    return getStore().listDirectories(folder)
+  })
+  handle('home:workspace-search-files', async (_sender, folder, query, limit) => {
+    if (typeof folder !== 'string' || typeof query !== 'string') throw new Error('Invalid search.')
+    return getStore().searchFiles(folder, query, typeof limit === 'number' ? limit : 50)
+  })
   handle('home:workspace-read-file', async (_sender, folder, path, maxChars) => {
     if (typeof folder !== 'string' || typeof path !== 'string') {
       return { ok: false, error: 'Invalid chat file.' }

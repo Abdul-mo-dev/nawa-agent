@@ -38,23 +38,60 @@ export interface IntegrationsDeps {
 
 /** Settings → Integrations: probe, install, uninstall, zip. No write happens without a click in that pane. */
 export function registerIntegrationsIpc(deps: IntegrationsDeps): void {
-  const bundled = (): BundledSkill => bundledSkillFrom(readFileSync(deps.skillPath))
+  const readBundled = (): Buffer => {
+    // The rebrand renamed the skill directory in one call site before; try the
+    // configured path first, then the sibling genoffice/Nawa locations, so a
+    // missing file degrades the Integrations pane instead of throwing ENOENT.
+    const alternatives = [deps.skillPath]
+    if (deps.skillPath.includes('Nawa')) {
+      alternatives.push(deps.skillPath.split('Nawa').join('genoffice'))
+    }
+    if (deps.skillPath.includes('genoffice')) {
+      alternatives.push(deps.skillPath.split('genoffice').join('Nawa'))
+    }
+    for (const candidate of new Set(alternatives)) {
+      try {
+        return readFileSync(candidate)
+      } catch {
+        /* try the next candidate */
+      }
+    }
+    throw new Error(`Bundled skill not found (looked for ${deps.skillPath}).`)
+  }
+  const bundled = (): BundledSkill => bundledSkillFrom(readBundled())
   const ledger = (): SkillLedger => ledgerFromSettings(readAppSettings(deps.settingsPath()))
   const saveLedger = (l: SkillLedger) => writeAppSetting(deps.settingsPath(), LEDGER_KEY, l)
   const stateOf = (skillsDir: string): SkillInstallState =>
     readInstallState(skillsDir, bundled(), ledger())
 
   ipcMain.handle(INTEGRATIONS_CHANNELS.status, (): IntegrationsStatus => {
-    const skill = bundled()
-    const l = ledger()
     const launcher = join(deps.cliDir, process.platform === 'win32' ? 'genoffice.cmd' : 'genoffice')
+    const cliBase = {
+      ...inspectCliLink({ launcher }),
+      launcherDir: deps.cliDir,
+      ephemeral: app.isPackaged && isEphemeralInstall(process.resourcesPath, process.env),
+      version: cliVersion(deps.cliPackageJson),
+    }
+    let skill: BundledSkill
+    try {
+      skill = bundled()
+    } catch (error) {
+      // A missing bundled SKILL.md must not break unrelated flows (opening a
+      // document triggers a status probe); report it as a version-less skill.
+      console.error(`[integrations] bundled skill unreadable: ${error instanceof Error ? error.message : String(error)}`)
+      return {
+        cli: cliBase,
+        skillVersion: '',
+        skillNeedsCli: '',
+        agents: detectAgents().map((a) => ({
+          ...a,
+          state: { status: 'missing', path: join(a.skillsDir, 'genoffice', 'SKILL.md') } as SkillInstallState,
+        })),
+      }
+    }
+    const l = ledger()
     return {
-      cli: {
-        ...inspectCliLink({ launcher }),
-        launcherDir: deps.cliDir,
-        ephemeral: app.isPackaged && isEphemeralInstall(process.resourcesPath, process.env),
-        version: cliVersion(deps.cliPackageJson),
-      },
+      cli: cliBase,
       skillVersion: skill.version,
       skillNeedsCli: /^\s+cli:\s*['"]?>=\s*(\d+\.\d+\.\d+)/m.exec(skill.text)?.[1] ?? '',
       agents: detectAgents().map((a) => ({ ...a, state: readInstallState(a.skillsDir, skill, l) })),

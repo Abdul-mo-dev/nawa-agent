@@ -87,6 +87,14 @@ const homeApi: HomeApi = {
   async folderChatFiles(folder) {
     return (await ipcRenderer.invoke('home:workspace-scope', folder)) as WorkspaceScope
   },
+  async listWorkspaceDirectories(folder) {
+    const result = (await ipcRenderer.invoke('home:workspace-directories', folder)) as unknown
+    return Array.isArray(result) ? result as import('../shared/workspace-api').WorkspaceScopeDirectory[] : []
+  },
+  async searchWorkspaceFiles(folder, query, limit) {
+    const result = (await ipcRenderer.invoke('home:workspace-search-files', folder, query, limit)) as unknown
+    return Array.isArray(result) ? result as import('../shared/workspace-api').WorkspaceScopeFile[] : []
+  },
   async readFolderChatFile(folder, path, maxChars) {
     return (await ipcRenderer.invoke('home:workspace-read-file', folder, path, maxChars)) as WorkspaceFileText
   },

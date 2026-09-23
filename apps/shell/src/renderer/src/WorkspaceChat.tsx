@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentMessage } from '@genoffice/agent-core'
+import type { WorkspaceScopeDirectory, WorkspaceScopeFile } from '../../shared/workspace-api'
 import {
-  CHARS_PER_FILE, MAX_CHAT_FILES, WorkspaceRequestGate, draftKey, loadMessages,
+  CHARS_PER_FILE, MAX_CHAT_FILES, WorkspaceRequestGate, clearMessages, draftKey, formatBytes,
+  isUnderDir, loadMessages,
   relativeDocumentName, saveMessages, type WorkspaceMessage,
 } from './workspace-chat-state'
 
@@ -14,8 +16,10 @@ const SYSTEM_PROMPT = `You are the Nawa folder assistant. Answer using the suppl
 interface WorkspaceChatProps {
   folder: string | null
   folderName: string
-  /** Explicit selection from the Files view; otherwise the folder's documents are used. */
+  /** Explicit file selection from the Files view / sidebar checkboxes. */
   scopePaths: string[]
+  /** Explicit directory selection from sidebar checkboxes (whole subtrees). */
+  scopeDirs?: string[]
   onOpenFile: (path: string) => void
   onClose: () => void
 }
@@ -27,7 +31,7 @@ export function WorkspaceChat(props: WorkspaceChatProps) {
     : null
 }
 
-function DirectoryChat({ folder, folderName, scopePaths, onOpenFile, onClose }:
+function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenFile, onClose }:
   WorkspaceChatProps & { folder: string }) {
   const [messages, setMessages] = useState<WorkspaceMessage[]>(() => {
     try { return loadMessages(localStorage, folder) } catch { return [] }
@@ -38,14 +42,54 @@ function DirectoryChat({ folder, folderName, scopePaths, onOpenFile, onClose }:
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [discovered, setDiscovered] = useState<string[]>([])
+  const [discoveredFiles, setDiscoveredFiles] = useState<WorkspaceScopeFile[]>([])
+  const [discoveredDirs, setDiscoveredDirs] = useState<WorkspaceScopeDirectory[]>([])
   const [scopeTruncated, setScopeTruncated] = useState(false)
   const [scopeLoading, setScopeLoading] = useState(true)
   const [scopeError, setScopeError] = useState<string | null>(null)
   const [refresh, setRefresh] = useState(0)
+  const [filter, setFilter] = useState('')
+  const [checked, setChecked] = useState<Set<string> | null>(null)
   const logRef = useRef<HTMLDivElement>(null)
   const gate = useRef(new WorkspaceRequestGate())
   const requestRef = useRef<{ id: string; epoch: number } | null>(null)
-  const paths = scopePaths.length ? scopePaths : discovered
+
+  const fileMeta = useMemo(() => {
+    const map = new Map<string, WorkspaceScopeFile>()
+    for (const file of discoveredFiles) map.set(file.path, file)
+    return map
+  }, [discoveredFiles])
+
+  /** Base scope from sidebar/Files checkboxes; empty means the whole folder. Sorted so "first N" is predictable. */
+  const basePaths = useMemo(() => {
+    const order = (a: string, b: string) =>
+      relativeDocumentName(folder, a).localeCompare(relativeDocumentName(folder, b), undefined, { numeric: true })
+    if (!scopePaths.length && !scopeDirs.length) return [...discovered].sort(order)
+    const selected = new Set(scopePaths)
+    for (const dir of scopeDirs) {
+      for (const path of discovered) {
+        if (isUnderDir(dir, path)) selected.add(path)
+      }
+    }
+    return [...selected].sort(order)
+  }, [discovered, scopePaths, scopeDirs, folder])
+
+  const hasExplicitFilter = scopePaths.length > 0 || scopeDirs.length > 0 || checked !== null
+  const paths = useMemo(() => {
+    if (checked !== null) return basePaths.filter((path) => checked.has(path))
+    return basePaths
+  }, [basePaths, checked])
+
+  const allChecked = paths.length > 0 && checked !== null
+    ? basePaths.every((path) => checked.has(path))
+    : !checked && basePaths.length > 0
+
+  // Reset per-folder UI state when the folder changes.
+  useEffect(() => {
+    setChecked(null)
+    setFilter('')
+    setNotice(null)
+  }, [folder])
 
   useEffect(() => {
     let alive = true
@@ -58,10 +102,14 @@ function DirectoryChat({ folder, folderName, scopePaths, onOpenFile, onClose }:
         const result = await window.aiOffice.folderChatFiles(folder)
         if (!alive || current !== sequence) return
         setDiscovered(result.paths)
+        setDiscoveredFiles(result.files ?? [])
+        setDiscoveredDirs(result.directories ?? [])
         setScopeTruncated(result.truncated)
       } catch (error) {
         if (!alive || current !== sequence) return
         setDiscovered([])
+        setDiscoveredFiles([])
+        setDiscoveredDirs([])
         setScopeError(error instanceof Error ? error.message : String(error))
       } finally {
         if (alive && current === sequence) setScopeLoading(false)
@@ -137,19 +185,70 @@ function DirectoryChat({ folder, folderName, scopePaths, onOpenFile, onClose }:
     setNotice('Stopped. Any partial answer has been kept in this folder’s chat.')
   }
 
+  const newChat = () => {
+    if (busy) return
+    if (messages.length && !window.confirm('Start a new chat? The current conversation for this folder will be cleared.')) return
+    gate.current.cancel()
+    requestRef.current = null
+    setMessages([])
+    setNotice('Started a new chat for this folder.')
+    try { clearMessages(localStorage, folder) } catch { /* unavailable storage */ }
+  }
+
+  const materialize = (current: readonly string[]): Set<string> => {
+    if (checked !== null) return new Set(checked)
+    return new Set(current)
+  }
+
+  const toggleFile = (path: string, on: boolean) => {
+    setChecked(() => {
+      const next = materialize(basePaths)
+      if (on) next.add(path)
+      else next.delete(path)
+      return next
+    })
+  }
+
+  const toggleDir = (dir: string, on: boolean) => {
+    setChecked(() => {
+      const next = materialize(basePaths)
+      for (const path of basePaths) {
+        if (isUnderDir(dir, path)) {
+          if (on) next.add(path)
+          else next.delete(path)
+        }
+      }
+      // Checking an unchecked directory also pulls in discovered files the
+      // explicit sidebar filter had excluded, so include the full subtree.
+      if (on) {
+        for (const path of discovered) {
+          if (isUnderDir(dir, path)) next.add(path)
+        }
+      }
+      return next
+    })
+  }
+
+  const toggleAll = () => {
+    if (allChecked) setChecked(new Set())
+    else setChecked(new Set(basePaths))
+  }
+
   const send = async () => {
     const question = input.trim()
     if (!question || busy || scopeLoading || scopeError) return
     const scope = [...new Set(paths)].slice(0, MAX_CHAT_FILES)
     if (!scope.length) {
-      setNotice('There are no supported documents in this folder. Choose a folder containing documents.')
+      setNotice(hasExplicitFilter
+        ? 'All documents are unchecked. Check at least one file or directory to chat about.'
+        : 'There are no supported documents in this folder. Choose a folder containing documents.')
       return
     }
     const epoch = gate.current.begin()
     if (epoch === null) return
     const current = () => gate.current.isCurrent(epoch)
     setInput('')
-    setNotice(null)
+    setNotice(paths.length > MAX_CHAT_FILES ? `Using the first ${MAX_CHAT_FILES} of ${paths.length} checked documents.` : null)
     setBusy(true)
     setMessages((previous) => [...previous,
       { role: 'user', text: question }, { role: 'assistant', text: '', streaming: true }])
@@ -173,8 +272,13 @@ function DirectoryChat({ folder, folderName, scopePaths, onOpenFile, onClose }:
         }
       }
       if (!current()) return
-      if (skipped.length) setNotice(`Not read: ${skipped.join(', ')}.`)
       if (!sections.length) throw new Error('None of the selected documents could be read. No AI request was sent.')
+      setNotice(
+        [`${sections.length} of ${paths.length} checked document${paths.length === 1 ? '' : 's'} sent to the AI`,
+          paths.length > scope.length ? `first ${scope.length} used` : '',
+          skipped.length ? `not read: ${skipped.join(', ')}` : '',
+        ].filter(Boolean).join('. ') + '.',
+      )
       const previous: AgentMessage[] = messages
         .filter((message) => !message.streaming && !message.error && message.text)
         .slice(-10).map((message) => ({ role: message.role, text: message.text }) as AgentMessage)
@@ -193,6 +297,21 @@ function DirectoryChat({ folder, folderName, scopePaths, onOpenFile, onClose }:
     }
   }
 
+  const needle = filter.trim().toLowerCase()
+  const visiblePaths = needle
+    ? basePaths.filter((path) => relativeDocumentName(folder, path).toLowerCase().includes(needle))
+    : basePaths
+  const visibleDirs = discoveredDirs.filter((dir) => dir.path !== folder &&
+    (!needle || dir.name.toLowerCase().includes(needle)))
+
+  const isChecked = (path: string) => checked !== null ? checked.has(path) : basePaths.includes(path)
+  const dirChecked = (dir: string) => {
+    const members = discovered.includes(dir) ? [] : basePaths.filter((path) => isUnderDir(dir, path))
+    const pool = members.length ? members : discovered.filter((path) => isUnderDir(dir, path))
+    if (!pool.length) return false
+    return pool.every((path) => (checked !== null ? checked.has(path) : true))
+  }
+
   return (
     <section className="ws-chat workspace-chat-main" aria-label={`Chat with ${folderName}`}>
       <header className="ws-chat-head">
@@ -201,28 +320,85 @@ function DirectoryChat({ folder, folderName, scopePaths, onOpenFile, onClose }:
           <h1 className="ws-chat-title" title={folder}>{folderName}</h1>
           <div className="workspace-chat-path" title={folder}>{folder}</div>
         </div>
-        <button type="button" className="ws-chat-close" onClick={onClose} aria-label="Show files in this folder">Files</button>
+        <button type="button" className="ws-chat-close" onClick={newChat} disabled={busy || !messages.length}
+          aria-label="Start a new chat" title="Start a new chat (clears this folder's conversation)">New chat</button>
+        <button type="button" className="ws-chat-close" onClick={onClose} aria-label="Hide the chat panel">Hide chat</button>
       </header>
       <div className="ws-chat-scope">
         <div className="workspace-scope-toolbar">
           <span className="ws-chat-scope-count">
-            {scopeLoading ? 'Finding documents…' : `${paths.length}${scopeTruncated && !scopePaths.length ? '+' : ''} document${paths.length === 1 ? '' : 's'}`}
+            {scopeLoading ? 'Finding documents…' : `${paths.length} of ${basePaths.length} checked`}
             {!scopeLoading && paths.length > MAX_CHAT_FILES ? ` · first ${MAX_CHAT_FILES} used per question` : ''}
           </span>
-          <button type="button" className="workspace-text-button" onClick={() => setRefresh((value) => value + 1)} disabled={scopeLoading || busy}>Refresh</button>
+          <span className="workspace-scope-actions">
+            <button type="button" className="workspace-text-button" onClick={toggleAll} disabled={scopeLoading || busy}>
+              {allChecked ? 'Uncheck all' : 'Check all'}
+            </button>
+            <button type="button" className="workspace-text-button" onClick={() => setRefresh((value) => value + 1)} disabled={scopeLoading || busy}>Refresh</button>
+          </span>
         </div>
         <p className="workspace-scope-help">
-          {scopePaths.length ? 'Using the documents checked in Files.' : 'Using documents in this folder and its subfolders. Open a subfolder to narrow the chat.'}
+          {hasExplicitFilter
+            ? 'Using checked files and folders. Uncheck to narrow the chat, or check all to use everything found.'
+            : 'Using documents in this folder and its subfolders. Open the picker to chat about a subset.'}
         </p>
-        {scopeTruncated && !scopePaths.length && <p className="ws-chat-notice">The folder scan reached its limit. Select a smaller subfolder for a more focused chat.</p>}
+        {scopeTruncated && <p className="ws-chat-notice">The folder scan reached its limit. Select a smaller subfolder for a more focused chat.</p>}
         {scopeError && <p className="ws-chat-notice" role="alert">{scopeError}</p>}
-        <div className="ws-chat-files">
-          {paths.slice(0, MAX_CHAT_FILES).map((path) => (
-            <button key={path} type="button" className="ws-chat-file" title={`Open ${path}`} onClick={() => onOpenFile(path)}>
-              {relativeDocumentName(folder, path)}
-            </button>
-          ))}
-        </div>
+        {!scopeLoading && paths.length > 0 && (
+          <div className="ws-chat-files ws-chat-chips" aria-label="Checked files">
+            {paths.slice(0, 8).map((path) => (
+              <span key={path} className="ws-chat-chip" title={path}>
+                <button type="button" className="ws-chat-chip-name" title={`Open ${path}`} onClick={() => onOpenFile(path)}>
+                  {relativeDocumentName(folder, path)}
+                </button>
+                <button type="button" className="ws-chat-chip-remove" onClick={() => toggleFile(path, false)}
+                  aria-label={`Remove ${relativeDocumentName(folder, path)} from chat`}>×</button>
+              </span>
+            ))}
+            {paths.length > 8 && <span className="ws-chat-meta">+{paths.length - 8} more</span>}
+          </div>
+        )}
+        {!scopeLoading && !paths.length && hasExplicitFilter && (
+          <p className="ws-chat-notice">All documents are unchecked. Open the picker below to check files or folders.</p>
+        )}
+        <details className="workspace-scope-picker">
+          <summary>Choose files and folders ({basePaths.length} found)</summary>
+          <input className="workspace-scope-search" type="search" placeholder="Filter files and folders…"
+            value={filter} onChange={(event) => setFilter(event.target.value)} aria-label="Filter chat files and folders" />
+          {!scopeLoading && visibleDirs.length > 0 && (
+            <div className="ws-chat-dirs" aria-label="Folders in this chat">
+              {visibleDirs.slice(0, 12).map((dir) => {
+                const on = dirChecked(dir.path)
+                return (
+                  <div key={dir.path} className="ws-chat-dir" title={dir.path}>
+                    <input type="checkbox" checked={on} onChange={(event) => toggleDir(dir.path, event.target.checked)}
+                      aria-label={`Include ${relativeDocumentName(folder, dir.path) || dir.name} in chat`} />
+                    <span className="ws-chat-dir-name">{relativeDocumentName(folder, dir.path) || dir.name}</span>
+                    <span className="ws-chat-meta">{dir.fileCount} · {formatBytes(dir.totalBytes)}</span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          <div className="ws-chat-files ws-chat-files-checkable">
+            {visiblePaths.slice(0, 60).map((path) => {
+              const meta = fileMeta.get(path)
+              const on = isChecked(path)
+              return (
+                <div key={path} className={`ws-chat-file-check${on ? '' : ' unchecked'}`} title={path}>
+                  <input type="checkbox" checked={on} onChange={(event) => toggleFile(path, event.target.checked)}
+                    aria-label={`Include ${relativeDocumentName(folder, path)} in chat`} />
+                  <button type="button" className="ws-chat-file-name" title={`Open ${path}`} onClick={() => onOpenFile(path)}>
+                    {relativeDocumentName(folder, path)}
+                  </button>
+                  {meta && <span className="ws-chat-meta">{formatBytes(meta.sizeBytes)}</span>}
+                </div>
+              )
+            })}
+            {visiblePaths.length > 60 && <p className="ws-chat-notice">Showing 60 of {visiblePaths.length}. Use the filter to narrow the list.</p>}
+            {!visiblePaths.length && <p className="ws-chat-notice">No files match this filter.</p>}
+          </div>
+        </details>
       </div>
       <div ref={logRef} className="ws-chat-log" role="log" aria-label="Folder conversation" aria-live="polite" aria-relevant="additions text">
         {!messages.length && <div className="ws-chat-empty">

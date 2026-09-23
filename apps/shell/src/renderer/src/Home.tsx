@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { DragEvent as ReactDragEvent, ReactElement } from 'react'
 import logoLockup from './assets/nawa-logo.svg'
 import iconDocx from './assets/file-docx.svg'
@@ -155,6 +155,34 @@ function formatModified(mtimeMs: number, i18n: I18n): string {
 function formatSize(bytes: number): string {
   if (bytes >= 1048576) return `${(bytes / 1048576).toFixed(1)} MB`
   return `${Math.max(1, Math.round(bytes / 1024))} KB`
+}
+
+/** Explorer-style type column: Word/Excel/PowerPoint/PDF/Markdown/HTML. */
+function fileTypeLabel(ext: string): string {
+  switch (ext) {
+    case 'docx':
+    case 'doc':
+      return 'Microsoft Word Document'
+    case 'xlsx':
+    case 'xlsm':
+    case 'xls':
+      return 'Microsoft Excel Worksheet'
+    case 'csv':
+      return 'CSV File'
+    case 'pptx':
+    case 'ppt':
+      return 'Microsoft PowerPoint Presentation'
+    case 'pdf':
+      return 'PDF File'
+    case 'md':
+    case 'markdown':
+      return 'Markdown File'
+    case 'html':
+    case 'htm':
+      return 'HTML File'
+    default:
+      return ext ? `${ext.toUpperCase()} File` : 'File'
+  }
 }
 
 function splitPath(path: string): string[] {
@@ -1084,6 +1112,36 @@ export function Home() {
     ?? workspaceRoots.find((entry) => selectedFolder && isUnder(entry.path, selectedFolder))
     ?? workspaceRoots[0] ?? null
   const [wsChatOpen, setWsChatOpen] = useState(true)
+  /** Sidebar directory checkboxes: whole subtrees included in the folder chat. */
+  const [chatDirs, setChatDirs] = useState<ReadonlySet<string>>(new Set())
+  /** Width of the folder tree pane beside the chat; dragged on the splitter. */
+  const [filesPaneWidth, setFilesPaneWidth] = useState(() => {
+    const raw = Number(localStorage.getItem('home.filesPaneWidth') ?? 360)
+    return Number.isFinite(raw) ? Math.min(720, Math.max(240, raw)) : 360
+  })
+  const filesPaneWidthRef = useRef(filesPaneWidth)
+  filesPaneWidthRef.current = filesPaneWidth
+  const splitRef = useRef<HTMLDivElement>(null)
+  const splitterDrag = useRef<{ x: number; width: number } | null>(null)
+
+  useEffect(() => {
+    const move = (event: MouseEvent) => {
+      const start = splitterDrag.current
+      if (!start) return
+      setFilesPaneWidth(Math.min(720, Math.max(240, start.width + event.clientX - start.x)))
+    }
+    const up = () => {
+      if (!splitterDrag.current) return
+      splitterDrag.current = null
+      try { localStorage.setItem('home.filesPaneWidth', String(filesPaneWidthRef.current)) } catch { /* ignore */ }
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+    return () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+    }
+  }, [])
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set(treeState.expanded))
   const knownRoots = useRef(new Set<string>())
   const rootsInitialized = useRef(false)
@@ -1118,9 +1176,13 @@ export function Home() {
   // move-to-folder picker for these paths; then the conflict prompt for the ones that collided
   const [movePicker, setMovePicker] = useState<string[] | null>(null)
   const [conflict, setConflict] = useState<{ paths: string[]; targetDir: string } | null>(null)
+  /** Explorer-style selected row highlight in the folder tree (single click). */
+  const [activeRow, setActiveRow] = useState<string | null>(null)
   // folder row currently hovered by a drag (sidebar or table)
   const [dropTarget, setDropTarget] = useState<string | null>(null)
   const dragExpandTimer = useRef<number | null>(null)
+  /** folders the user explicitly collapsed: the auto-expander leaves them alone */
+  const userCollapsed = useRef(new Set<string>())
 
   const loadRoot = useCallback(() => {
     const sequence = ++rootLoadSequence.current
@@ -1183,6 +1245,67 @@ export function Home() {
       invalidateFolders(dirs.filter(trackedFolder))
     })
   }, [invalidateFolders, trackedFolder])
+
+  // A new chat folder starts fully expanded; manual collapses are remembered.
+  useEffect(() => {
+    userCollapsed.current = new Set()
+  }, [selectedFolder])
+
+  // Auto-expand the document tree as listings arrive (depth + count capped),
+  // so files appear nested under their folders like Explorer. Folders the
+  // user explicitly collapsed are left alone.
+  useEffect(() => {
+    if (!selectedFolder) return
+    const queue: Array<{ dir: string; depth: number }> = [{ dir: selectedFolder, depth: 0 }]
+    const seen = new Set([selectedFolder])
+    const found: string[] = []
+    while (queue.length && found.length < 150) {
+      const current = queue.shift()!
+      if (current.depth >= 4) continue
+      const listing = listings.get(current.dir)
+      if (!listing || listing.missing) continue
+      for (const sub of listing.folders) {
+        if (seen.has(sub.path)) continue
+        seen.add(sub.path)
+        if (!userCollapsed.current.has(sub.path)) found.push(sub.path)
+        queue.push({ dir: sub.path, depth: current.depth + 1 })
+      }
+    }
+    if (!found.length) return
+    setExpanded((previous) => {
+      const missing = found.filter((dir) => !previous.has(dir))
+      if (!missing.length) return previous
+      return new Set([...previous, ...missing])
+    })
+  }, [listings, selectedFolder])
+
+  const expandAllFolders = () => {
+    if (!selectedFolder) return
+    userCollapsed.current = new Set()
+    const queue = [selectedFolder]
+    const seen = new Set(queue)
+    const found: string[] = []
+    while (queue.length && found.length < 300) {
+      const dir = queue.shift()!
+      const listing = listings.get(dir)
+      if (!listing || listing.missing) continue
+      for (const sub of listing.folders) {
+        if (seen.has(sub.path)) continue
+        seen.add(sub.path)
+        found.push(sub.path)
+        queue.push(sub.path)
+      }
+    }
+    setExpanded((previous) => new Set([...previous, ...found]))
+  }
+
+  const collapseAllFolders = () => {
+    if (!selectedFolder) return
+    setExpanded((previous) => {
+      userCollapsed.current = new Set([...previous].filter((dir) => dir !== selectedFolder))
+      return new Set([selectedFolder])
+    })
+  }
 
   // ── Paged loading ──
   // stale responses are dropped via a request sequence number (when views/filters switch quickly)
@@ -1380,9 +1503,27 @@ export function Home() {
   const folderListing = selectedFolder ? listings.get(selectedFolder) : undefined
   const folderFiles = (folderListing?.files ?? []).filter((e) => matchesFilter(e, filter))
   const folderSubfolders = folderListing?.folders ?? []
-  const folderSelectedPaths = folderFiles.filter((e) => selected.has(e.path)).map((e) => e.path)
+  /**
+   * Every known file under the chat folder (any depth, loaded listings) —
+   * the tree lets users check files in expanded subfolders, and those checks
+   * must reach the chat and bulk actions, not just top-level files.
+   */
+  const folderKnownFiles = useMemo(() => {
+    if (!selectedFolder) return []
+    const out: string[] = []
+    for (const [dir, listing] of listings) {
+      if (listing.missing) continue
+      if (dir === selectedFolder || isUnder(selectedFolder, dir)) {
+        for (const file of listing.files) {
+          if (matchesFilter(file, filter)) out.push(file.path)
+        }
+      }
+    }
+    return out
+  }, [listings, selectedFolder, filter])
+  const folderSelectedPaths = folderKnownFiles.filter((path) => selected.has(path))
   const folderAllSelected =
-    folderFiles.length > 0 && folderSelectedPaths.length === folderFiles.length
+    folderKnownFiles.length > 0 && folderSelectedPaths.length === folderKnownFiles.length
 
   const changeView = (next: 'recent' | 'starred') => {
     setView(next)
@@ -1405,8 +1546,21 @@ export function Home() {
     setWsChatOpen(true)
     setExpanded((previous) => new Set([...previous, ...(owner ? [owner] : []), dir]))
     setSelected(new Set())
+    // Directory chat picks only make sense inside the newly selected folder.
+    setChatDirs((previous) => new Set([...previous].filter((path) => path === dir || isUnder(dir, path))))
     setRowMenu(null)
     setFolderMenu(null)
+  }
+
+  const toggleChatDir = (dir: string, on: boolean) => {
+    setChatDirs((previous) => {
+      const next = new Set(previous)
+      if (on) next.add(dir)
+      else next.delete(dir)
+      return next
+    })
+    // Checking a directory implies chatting: open the chat pane for the current folder.
+    if (on) setWsChatOpen(true)
   }
 
   const addWorkspaceFolder = async () => {
@@ -1454,8 +1608,13 @@ export function Home() {
   const toggleExpanded = (dir: string) => {
     setExpanded((prev) => {
       const next = new Set(prev)
-      if (next.has(dir)) next.delete(dir)
-      else next.add(dir)
+      if (next.has(dir)) {
+        next.delete(dir)
+        userCollapsed.current.add(dir)
+      } else {
+        next.add(dir)
+        userCollapsed.current.delete(dir)
+      }
       return next
     })
   }
@@ -1483,7 +1642,7 @@ export function Home() {
   }
 
   const toggleSelectAllFolder = () => {
-    setSelected(folderAllSelected ? new Set() : new Set(folderFiles.map((e) => e.path)))
+    setSelected(folderAllSelected ? new Set() : new Set(folderKnownFiles))
   }
 
   const toggleStar = (path: string) => {
@@ -1836,159 +1995,9 @@ export function Home() {
     </div>
   )
 
-  const renderNewFolderInput = (depth: number) => (
-    <li className="tree-item">
-      <div className="tree-row" style={{ paddingLeft: 8 + depth * 14 }}>
-        <span className="tree-chevron" aria-hidden="true" />
-        <span className="tree-icon" aria-hidden="true">
-          <FolderIcon />
-        </span>
-        <input
-          className="folder-rename-input inline"
-          autoFocus
-          placeholder={t('untitledFolder')}
-          value={newFolderName}
-          onChange={(e) => setNewFolderName(e.target.value)}
-          onBlur={() => void commitCreateFolder()}
-          onKeyDown={(e) => {
-            e.stopPropagation()
-            if (e.nativeEvent.isComposing) return
-            if (e.key === 'Enter') void commitCreateFolder()
-            if (e.key === 'Escape') {
-              setCreating(null)
-              setNewFolderName('')
-            }
-          }}
-        />
-      </div>
-    </li>
-  )
-
-  function renderTreeNode(
-    entry: { path: string; name: string; hasSubfolders: boolean },
-    depth: number,
-    ownerRoot: string,
-  ): ReactElement {
-    const isRoot = entry.path === ownerRoot
-    const isOpen = expanded.has(entry.path)
-    const listing = listings.get(entry.path)
-    const unavailableRoot = isRoot && workspaceRoots.some((candidate) => candidate.path === entry.path && !candidate.usable)
-    const children = listing?.folders ?? []
-    const documents = listing?.files ?? []
-    const isActive = selectedFolder === entry.path
-    const activeRoot = isRoot && root?.path === ownerRoot && selectedFolder !== null
-    const isRenaming = folderRenaming?.where === 'tree' && folderRenaming.path === entry.path
-    const showChevron = isRoot || !listing || children.length > 0 || documents.length > 0
-    return (
-      <li key={entry.path} className="tree-item">
-        <div
-          className={`tree-row${isActive ? ' active' : ''}${isRoot ? ' workspace-root' : ''}${activeRoot ? ' workspace-root-active' : ''}${dropTarget === entry.path ? ' drop-target' : ''}`}
-          style={{ paddingLeft: 8 + depth * 14 }}
-          role="treeitem"
-          aria-selected={isActive}
-          aria-expanded={showChevron ? isOpen : undefined}
-          title={entry.path}
-          tabIndex={0}
-          onClick={() => selectFolder(entry.path, ownerRoot)}
-          onKeyDown={(e) => {
-            if (e.target !== e.currentTarget) return
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault()
-              selectFolder(entry.path, ownerRoot)
-            }
-            if (e.key === 'ArrowRight' && !isOpen) { e.preventDefault(); toggleExpanded(entry.path) }
-            if (e.key === 'ArrowLeft' && isOpen) { e.preventDefault(); toggleExpanded(entry.path) }
-          }}
-          onContextMenu={(e) => {
-            e.preventDefault()
-            setFolderMenu({
-              path: entry.path,
-              where: 'tree',
-              top: e.clientY + 2,
-              right: window.innerWidth - e.clientX,
-            })
-          }}
-          draggable={!isRoot && !isRenaming}
-          onDragStart={(e) => onRowDragStart(e, [entry.path])}
-          {...folderDropProps(entry.path, { autoExpand: true })}
-        >
-          <button
-            className="tree-chevron"
-            tabIndex={-1}
-            aria-hidden="true"
-            style={{ visibility: showChevron ? undefined : 'hidden' }}
-            onClick={(e) => {
-              e.stopPropagation()
-              toggleExpanded(entry.path)
-            }}
-          >
-            <Chevron open={isOpen} />
-          </button>
-          <span className="tree-icon" aria-hidden="true">
-            <FolderIcon open={isOpen} />
-          </span>
-          {isRenaming ? (
-            <input
-              className="folder-rename-input inline"
-              value={folderRenaming.value}
-              autoFocus
-              onFocus={(e) => e.target.select()}
-              onClick={(e) => e.stopPropagation()}
-              onChange={(e) =>
-                setFolderRenaming({ path: entry.path, where: 'tree', value: e.target.value })
-              }
-              onBlur={() => void commitRenameFolder()}
-              onKeyDown={(e) => {
-                e.stopPropagation()
-                if (e.nativeEvent.isComposing) return
-                if (e.key === 'Enter') void commitRenameFolder()
-                if (e.key === 'Escape') setFolderRenaming(null)
-              }}
-            />
-          ) : (
-            <span className="tree-name">{entry.name}</span>
-          )}
-          {activeRoot && (
-            <button type="button" className="workspace-remove" disabled={workspaceChanging}
-              aria-label={`Remove ${entry.name} from workspace`}
-              title="Remove from sidebar only — files and chat history are kept"
-              onClick={(event) => { event.stopPropagation(); void removeWorkspaceFolder(entry.path) }}>
-              −
-            </button>
-          )}
-          {renderFolderMenu(entry, isRoot)}
-        </div>
-        {isOpen && (
-          <ul className="tree-children" role="group">
-            {creating?.parent === entry.path && renderNewFolderInput(depth + 1)}
-            {children.map((child) => renderTreeNode(child, depth + 1, ownerRoot))}
-            {documents.map((document) => (
-              <li key={document.path} className="tree-item" role="none">
-                <button type="button" className="workspace-tree-file" role="treeitem"
-                  style={{ paddingLeft: 8 + (depth + 1) * 14 }} title={document.path}
-                  onClick={() => void window.aiOffice.openPath(document.path)
-                    .catch((error) => setWorkspaceError(String(error)))}>
-                  <span className="tree-chevron" aria-hidden="true" />
-                  <span className="tree-icon" aria-hidden="true"><FileBadge ext={document.ext} size={16} /></span>
-                  <span className="tree-name">{document.name}</span>
-                </button>
-              </li>
-            ))}
-            {!listing && !unavailableRoot && <li className="workspace-tree-status" role="none">Loading documents…</li>}
-            {(listing?.missing || unavailableRoot) && <li className="workspace-tree-status" role="none">
-              Folder unavailable or too large.
-              <button type="button" className="workspace-text-button" onClick={() => { loadRoot(); loadFolder(entry.path, true) }}>Retry</button>
-            </li>}
-            {listing && !listing.missing && !children.length && !documents.length && (
-              <li className="workspace-tree-status" role="none">No supported documents in this folder.</li>
-            )}
-          </ul>
-        )}
-      </li>
-    )
-  }
 
   function renderFolderPanel() {
+    const active = selectedFolder && root && isUnder(root.path, selectedFolder) ? selectedFolder : root?.path ?? null
     return (
       <section className="folder-panel" aria-label="Folder workspaces">
         <div className="folder-panel-head">
@@ -2006,44 +2015,109 @@ export function Home() {
           <button type="button" className="workspace-text-button" onClick={loadRoot}>Retry</button>
         </div>}
         {workspaceLoading ? <p className="workspace-folder-notice" role="status">Loading folders…</p>
-          : workspaceRoots.length === 0 && <p className="workspace-folder-notice">
+          : !root ? <p className="workspace-folder-notice">
             Click + to add a folder. Each folder and subfolder has its own chat.
-          </p>}
-        <ul className="tree" role="tree" aria-label="Workspace documents">
-          {workspaceRoots.map((entry) => renderTreeNode(
-            { path: entry.path, name: entry.name, hasSubfolders: true }, 0, entry.path,
-          ))}
-        </ul>
+          </p> : (
+            <>
+              {workspaceRoots.length > 1 && (
+                <select
+                  className="folder-root-switch"
+                  value={root.path}
+                  onChange={(event) => {
+                    const next = workspaceRoots.find((entry) => entry.path === event.target.value)
+                    if (next) selectFolder(next.path, next.path)
+                  }}
+                  aria-label="Selected folder"
+                  title="Switch the folder shown here"
+                >
+                  {workspaceRoots.map((entry) => (
+                    <option key={entry.path} value={entry.path}>{entry.name}</option>
+                  ))}
+                </select>
+              )}
+              <ul className="tree" role="tree" aria-label="Selected folder">
+                <li key={root.path} className="tree-item">
+                  <div
+                    className={`tree-row workspace-root${active ? ' workspace-root-active' : ''}`}
+                    role="treeitem"
+                    aria-selected={selectedFolder === root.path}
+                    title={root.path}
+                    tabIndex={0}
+                    onClick={() => selectFolder(root.path, root.path)}
+                    onKeyDown={(e) => {
+                      if (e.target !== e.currentTarget) return
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        selectFolder(root.path, root.path)
+                      }
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      setFolderMenu({
+                        path: root.path,
+                        where: 'tree',
+                        top: e.clientY + 2,
+                        right: window.innerWidth - e.clientX,
+                      })
+                    }}
+                  >
+                    <span className="tree-icon" aria-hidden="true">
+                      <FolderIcon open />
+                    </span>
+                    <span className="tree-name">{root.name}</span>
+                    <button type="button" className="workspace-remove" disabled={workspaceChanging}
+                      aria-label={`Remove ${root.name} from workspace`}
+                      title="Remove from sidebar only — files and chat history are kept"
+                      onClick={(event) => { event.stopPropagation(); void removeWorkspaceFolder(root.path) }}>
+                      −
+                    </button>
+                    {renderFolderMenu({ path: root.path, name: root.name }, true)}
+                  </div>
+                </li>
+              </ul>
+              <p className="workspace-folder-notice">Browse and check files in the folder panel.</p>
+            </>
+          )}
       </section>
     )
   }
 
   // ── File row rendering (shared by the plain view and the folder view) ──
 
-  function renderFileRow(entry: RecentEntry, context: 'global' | 'folder') {
+  function renderFileRow(entry: RecentEntry, context: 'global' | 'folder', depth = 0) {
     const isRenaming = renaming?.path === entry.path
+    const explorer = context === 'folder'
     const canDelete =
       context === 'folder' ? folderSelectedPaths.length === 0 : selectedPaths.length === 0
+    const openFile = () => {
+      if (entry.missing) setConfirmMissing(entry)
+      else void window.aiOffice.openPath(entry.path)
+    }
     return (
       <li className="recent-row" key={entry.path}>
         <div
-          className={`recent-item${entry.missing ? ' missing' : ''}`}
+          className={`recent-item${entry.missing ? ' missing' : ''}${explorer ? ' explorer-row' : ''}${explorer && activeRow === entry.path ? ' row-active' : ''}`}
           role="button"
           tabIndex={0}
           draggable={!isRenaming && !entry.missing}
           onDragStart={(e) => onRowDragStart(e, dragPathsFor(entry.path, context))}
           onClick={() => {
             if (isRenaming) return
-            if (entry.missing) setConfirmMissing(entry)
-            else void window.aiOffice.openPath(entry.path)
+            // Explorer: single click selects, double click opens.
+            setActiveRow(entry.path)
+            if (!explorer) openFile()
+          }}
+          onDoubleClick={() => {
+            if (isRenaming) return
+            if (explorer) openFile()
           }}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && event.target === event.currentTarget) {
-              if (entry.missing) setConfirmMissing(entry)
-              else void window.aiOffice.openPath(entry.path)
+              openFile()
             }
           }}
         >
+          {explorer && <span className="tree-expander" style={depth ? { marginLeft: depth * 18 } : undefined} aria-hidden="true" />}
           <span className="col-check" onClick={(event) => event.stopPropagation()}>
             <input
               type="checkbox"
@@ -2073,11 +2147,15 @@ export function Home() {
               }}
             />
           ) : (
-            <span className="recent-name">{entry.name}</span>
+            <span className="recent-name" style={explorer && depth ? { paddingLeft: depth * 18 } : undefined}>{entry.name}</span>
           )}
-          <span className="recent-path" title={dirOf(entry.path)}>
-            {locationLabel(entry.path, root)}
-          </span>
+          {explorer ? (
+            <span className="recent-type" title={fileTypeLabel(entry.ext)}>{fileTypeLabel(entry.ext)}</span>
+          ) : (
+            <span className="recent-path" title={dirOf(entry.path)}>
+              {locationLabel(entry.path, root)}
+            </span>
+          )}
           <span className="recent-time">
             {entry.missing ? '—' : formatModified(entry.mtimeMs, i18n)}
           </span>
@@ -2187,18 +2265,25 @@ export function Home() {
   }
 
   /** sub-folder row in the folder view's table: enter on click, same … menu as the tree */
-  function renderSubfolderRow(entry: FolderEntry) {
+  function renderSubfolderRow(entry: FolderEntry, depth = 0) {
     const isRenaming = folderRenaming?.where === 'table' && folderRenaming.path === entry.path
+    const isOpen = expanded.has(entry.path)
+    const isChatFolder = selectedFolder === entry.path
     return (
       <li className="recent-row" key={entry.path}>
         <div
-          className={`recent-item folder-item${dropTarget === entry.path ? ' drop-target' : ''}`}
+          className={`recent-item folder-item explorer-row${dropTarget === entry.path ? ' drop-target' : ''}${isChatFolder ? ' chat-folder' : ''}${activeRow === entry.path ? ' row-active' : ''}`}
           role="button"
           tabIndex={0}
           draggable={!isRenaming}
           onDragStart={(e) => onRowDragStart(e, [entry.path])}
           {...folderDropProps(entry.path, { autoExpand: false })}
           onClick={() => {
+            if (isRenaming) return
+            // Explorer: single click selects, double click opens the folder.
+            setActiveRow(entry.path)
+          }}
+          onDoubleClick={() => {
             if (isRenaming) return
             expandTo(entry.path)
             selectFolder(entry.path)
@@ -2219,7 +2304,27 @@ export function Home() {
             })
           }}
         >
-          <span className="col-check" aria-hidden="true" />
+          <span className="col-check" onClick={(event) => event.stopPropagation()}>
+            <input
+              type="checkbox"
+              className="row-check"
+              checked={chatDirs.has(entry.path)}
+              onChange={(event) => toggleChatDir(entry.path, event.target.checked)}
+              aria-label={`Include ${entry.name} and its files in chat`}
+            />
+          </span>
+          <button
+            type="button"
+            className="tree-chevron"
+            aria-label={isOpen ? `Collapse ${entry.name}` : `Expand ${entry.name}`}
+            aria-expanded={isOpen}
+            onClick={(e) => {
+              e.stopPropagation()
+              toggleExpanded(entry.path)
+            }}
+          >
+            <Chevron open={isOpen} />
+          </button>
           <span className="recent-icon folder-badge">
             <FolderIcon size={22} />
           </span>
@@ -2242,7 +2347,10 @@ export function Home() {
               }}
             />
           ) : (
-            <span className="recent-name">{entry.name}</span>
+            <span className="recent-name" style={depth ? { paddingLeft: depth * 18 } : undefined}>
+              {entry.name}
+              {isChatFolder && <span className="chat-folder-badge">chat</span>}
+            </span>
           )}
           <span className="recent-path">{t('folderType')}</span>
           <span className="recent-time">{formatModified(entry.mtimeMs, i18n)}</span>
@@ -2323,6 +2431,79 @@ export function Home() {
     )
   }
 
+  /** inline "new folder" row inside the document tree, under its parent */
+  function renderCreateFolderRow(depth: number) {
+    return (
+      <li className="recent-row" key="__new-folder">
+        <div className="recent-item folder-item">
+          <span className="col-check" aria-hidden="true" />
+          <span className="tree-chevron" aria-hidden="true" />
+          <span className="recent-icon folder-badge">
+            <FolderIcon size={22} />
+          </span>
+          <input
+            className="rename-input"
+            style={depth ? { marginLeft: depth * 18 } : undefined}
+            autoFocus
+            placeholder={t('untitledFolder')}
+            value={newFolderName}
+            onChange={(e) => setNewFolderName(e.target.value)}
+            onBlur={() => void commitCreateFolder()}
+            onKeyDown={(e) => {
+              e.stopPropagation()
+              if (e.nativeEvent.isComposing) return
+              if (e.key === 'Enter') void commitCreateFolder()
+              if (e.key === 'Escape') {
+                setCreating(null)
+                setNewFolderName('')
+              }
+            }}
+          />
+          <span className="recent-path" />
+          <span className="recent-time" />
+          <span className="recent-size" />
+          <span />
+          <span />
+        </div>
+      </li>
+    )
+  }
+
+  /**
+   * The document tree: subfolders expand inline (chevron) and carry chat
+   * checkboxes, files carry selection checkboxes. Top-level files honor the
+   * modified sort; deeper levels follow the backend name order.
+   */
+  function renderFolderTree(dir: string, depth: number): ReactElement[] {
+    const listing = listings.get(dir)
+    if (!listing || listing.missing) {
+      if (listing?.missing) return []
+      return [
+        <li className="recent-row" key={`${dir}/loading`}>
+          <div className="recent-item">
+            <span className="col-check" aria-hidden="true" />
+            <span className="recent-name" style={depth ? { paddingLeft: depth * 18 } : undefined}>Loading…</span>
+            <span className="recent-path" />
+            <span className="recent-time" />
+            <span className="recent-size" />
+            <span />
+            <span />
+          </div>
+        </li>,
+      ]
+    }
+    const rows: ReactElement[] = []
+    if (creating?.parent === dir) rows.push(renderCreateFolderRow(depth))
+    for (const sub of listing.folders) {
+      rows.push(renderSubfolderRow(sub, depth))
+      if (expanded.has(sub.path)) rows.push(...renderFolderTree(sub.path, depth + 1))
+    }
+    const files = listing.files.filter((e) => matchesFilter(e, filter))
+    const ordered = depth === 0 && fileSort === 'oldest' ? [...files].reverse() : files
+    for (const file of ordered) rows.push(renderFileRow(file, 'folder', depth))
+    return rows
+  }
+
   const renderEmpty = (hint: string) => (
     <p className="empty proj-empty">
       <svg
@@ -2353,35 +2534,54 @@ export function Home() {
   function renderFolderContent() {
     if (!root) return null
     const total = folderSubfolders.length + folderFiles.length
-    const sortedFiles = fileSort === 'oldest' ? [...folderFiles].reverse() : folderFiles
     return (
       <main className="content">
-        <section className="quick-start" aria-label={t('secQuickStart')}>
-          <div className="section-head">
-            <span className="section-label">{t('secQuickStart')}</span>
-          </div>
-          {renderQuickCards()}
-        </section>
+        {!wsChatOpen && (
+          <section className="quick-start" aria-label={t('secQuickStart')}>
+            <div className="section-head">
+              <span className="section-label">{t('secQuickStart')}</span>
+            </div>
+            {renderQuickCards()}
+          </section>
+        )}
 
         <section className="recents" aria-label={t('folders')}>
           <div className="recents-toolbar">
-            {folderSelectedPaths.length > 0 ? (
+            {folderSelectedPaths.length > 0 || chatDirs.size > 0 ? (
               <div className="selection-bar">
                 <span className="selection-count">
-                  {t('selectedCount', { n: folderSelectedPaths.length })}
+                  {chatDirs.size > 0
+                    ? `${folderSelectedPaths.length} file${folderSelectedPaths.length === 1 ? '' : 's'} + ${chatDirs.size} folder${chatDirs.size === 1 ? '' : 's'} for chat`
+                    : wsChatOpen
+                      ? `${t('selectedCount', { n: folderSelectedPaths.length })} for chat`
+                      : t('selectedCount', { n: folderSelectedPaths.length })}
                 </span>
-                <button className="selection-action" onClick={() => startMove(folderSelectedPaths)}>
-                  {t('moveToFolder')}
-                </button>
-                <button
-                  className="selection-action danger"
-                  onClick={() => deleteFiles(folderSelectedPaths)}
-                >
-                  {t('deleteFiles')}
-                </button>
-                <button className="selection-action" onClick={() => setSelected(new Set())}>
-                  {t('cancel')}
-                </button>
+                {wsChatOpen ? (
+                  <button
+                    className="selection-action"
+                    onClick={() => { setSelected(new Set()); setChatDirs(new Set()) }}
+                  >
+                    Clear chat selection
+                  </button>
+                ) : (
+                  <>
+                    <button className="selection-action" onClick={() => setWsChatOpen(true)}>
+                      Chat with selected
+                    </button>
+                    <button className="selection-action" onClick={() => startMove(folderSelectedPaths)}>
+                      {t('moveToFolder')}
+                    </button>
+                    <button
+                      className="selection-action danger"
+                      onClick={() => deleteFiles(folderSelectedPaths)}
+                    >
+                      {t('deleteFiles')}
+                    </button>
+                    <button className="selection-action" onClick={() => { setSelected(new Set()); setChatDirs(new Set()) }}>
+                      {t('cancel')}
+                    </button>
+                  </>
+                )}
               </div>
             ) : (
               <div className="filter-pills" role="tablist" aria-label={t('filterAria')}>
@@ -2402,41 +2602,75 @@ export function Home() {
               </span>
               <button
                 type="button"
+                className="selection-action"
+                onClick={expandAllFolders}
+                title="Expand every subfolder"
+              >
+                Expand all
+              </button>
+              <button
+                type="button"
+                className="selection-action"
+                onClick={collapseAllFolders}
+                title="Collapse every subfolder"
+              >
+                Collapse
+              </button>
+              <button
+                type="button"
                 className={`selection-action${wsChatOpen ? ' active' : ''}`}
                 onClick={() => setWsChatOpen((v) => !v)}
                 aria-expanded={wsChatOpen}
               >
-                Chat
+                {wsChatOpen ? 'Hide chat' : 'Chat'}
               </button>
             </div>
           </div>
+          {selectedFolder && (
+            <nav className="explorer-crumbs" aria-label="Folder path">
+              {crumbsOf(root, selectedFolder).map((crumb, index, crumbs) => (
+                <span key={crumb.path} className="crumb">
+                  {index > 0 && <span className="crumb-sep" aria-hidden="true">›</span>}
+                  <button
+                    type="button"
+                    className={index === crumbs.length - 1 ? 'current' : undefined}
+                    aria-current={index === crumbs.length - 1 ? 'page' : undefined}
+                    title={crumb.path}
+                    onClick={() => selectFolder(crumb.path)}
+                  >
+                    {crumb.name}
+                  </button>
+                </span>
+              ))}
+            </nav>
+          )}
 
           {total === 0 ? (
             renderEmpty(filter === 'all' ? t('emptyFolder') : t('emptyFiltered'))
           ) : (
             <div
-              className={`recent-table${folderSelectedPaths.length > 0 ? ' has-selection' : ''}`}
+              className={`recent-table explorer-tree${folderSelectedPaths.length > 0 ? ' has-selection' : ''}`}
             >
               <div className="recent-columns">
+                <span className="tree-expander" aria-hidden="true" />
                 <span className="col-check">
                   <input
                     type="checkbox"
                     checked={folderAllSelected}
-                    disabled={folderFiles.length === 0}
+                    disabled={folderKnownFiles.length === 0}
                     onChange={toggleSelectAllFolder}
                     aria-label={t('selectAll')}
                   />
                 </span>
                 <span className="col-name">{t('colName')}</span>
-                <span className="col-path">{t('colLocation')}</span>
                 {renderModifiedHeader()}
+                <span className="col-type">Type</span>
                 <span className="col-size">{t('colSize')}</span>
                 <span />
                 <span />
               </div>
               <ul className="recent-list">
-                {folderSubfolders.map((entry) => renderSubfolderRow(entry))}
-                {sortedFiles.map((entry) => renderFileRow(entry, 'folder'))}
+                {selectedFolder ? renderFolderTree(selectedFolder, 0) : null}
               </ul>
             </div>
           )}
@@ -2615,18 +2849,42 @@ export function Home() {
         {renderFolderPanel()}
         <AccountEntry onStatusChange={handleAccountStatus} />
       </aside>
-      {wsChatOpen && selectedFolder && root ? (
-        <main className="workspace-content">
-          <WorkspaceChat
-            folder={selectedFolder}
-            folderName={selectedFolder.split(/[/\\]/).pop() || root.name || 'Folder'}
-            scopePaths={folderSelectedPaths}
-            onOpenFile={(path) => void window.aiOffice.openPath(path)
-              .catch((error) => setWorkspaceError(String(error)))}
-            onClose={() => setWsChatOpen(false)}
-          />
-        </main>
-      ) : selectedFolder && root?.usable ? renderFolderContent() : renderGlobalContent()}
+      {selectedFolder && root ? (
+        <div className="workspace-split" ref={splitRef}>
+          <div
+            className="workspace-files-pane"
+            style={wsChatOpen ? { width: filesPaneWidth, flex: 'none' } : undefined}
+          >
+            {renderFolderContent()}
+          </div>
+          {wsChatOpen && (
+            <div
+              className="workspace-splitter"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize folder and chat panels"
+              title="Drag to resize"
+              onMouseDown={(event) => {
+                event.preventDefault()
+                splitterDrag.current = { x: event.clientX, width: filesPaneWidthRef.current }
+              }}
+            />
+          )}
+          {wsChatOpen && (
+            <main className="workspace-content workspace-content-split">
+              <WorkspaceChat
+                folder={selectedFolder}
+                folderName={selectedFolder.split(/[/\\]/).pop() || root.name || 'Folder'}
+                scopePaths={folderSelectedPaths}
+                scopeDirs={[...chatDirs]}
+                onOpenFile={(path) => void window.aiOffice.openPath(path)
+                  .catch((error) => setWorkspaceError(String(error)))}
+                onClose={() => setWsChatOpen(false)}
+              />
+            </main>
+          )}
+        </div>
+      ) : renderGlobalContent()}
       {confirmDelete && (
         <div className="modal-overlay" onClick={() => setConfirmDelete(null)}>
           <div
