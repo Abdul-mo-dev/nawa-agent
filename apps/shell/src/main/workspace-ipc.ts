@@ -1,3 +1,4 @@
+import { registerHistoryIpc } from './history/history-ipc'
 import { app, BrowserWindow, dialog, ipcMain, type WebContents } from 'electron'
 import { watch, type FSWatcher } from 'node:fs'
 import { join } from 'node:path'
@@ -21,6 +22,10 @@ export function registerWorkspaceIpc(options: WorkspaceIpcOptions): {
   const getStore = () => store ??= new WorkspaceFolderStore({
     statePath: join(app.getPath('userData'), 'workspace-folders.json'),
     initialRoot: options.initialRoot,
+  })
+  registerHistoryIpc({
+    isHomeSender: options.isHomeSender,
+    roots: async () => (await getStore().list()).map(root => root.path),
   })
   const clients = new Set<WebContents>()
   const watchers = new Map<string, FSWatcher>()

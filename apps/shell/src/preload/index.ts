@@ -1,3 +1,4 @@
+import './conversation-history'
 import { contextBridge, ipcRenderer } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 import {
