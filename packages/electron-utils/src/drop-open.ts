@@ -11,6 +11,7 @@
 /// before it bubbles here (`defaultPrevented`), and this bridge stays out of
 /// the way. Text/media drags without OS files are untouched.
 import { ipcRenderer, webUtils } from 'electron'
+export { installDirectoryEditorBridge } from './directory-editor-preload'
 
 export const DROP_OPEN_CHANNEL = 'app:open-dropped-files'
 

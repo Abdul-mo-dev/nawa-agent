@@ -77,6 +77,8 @@ export class TabManager {
   private explorerLayout: ExplorerLayout = { ...DEFAULT_EXPLORER_LAYOUT }
   private activeId: string = HOME_ID
   private nextId = 1
+  private directoryStageDepth = 0
+  private readonly directoryStageIds = new Set<string>()
   /** tab whose page entered HTML fullscreen (e.g. slides slideshow) — its view covers the tab strip */
   private htmlFullScreenId: string | null = null
   /** webContents ids whose view must cover the tab strip without HTML fullscreen
@@ -199,7 +201,7 @@ export class TabManager {
   }
 
   list(): TabSummary[] {
-    return this.tabs.map((t) => ({
+    return this.tabs.filter(t => !this.directoryStageIds.has(t.id)).map((t) => ({
       id: t.id,
       kind: t.kind,
       title: t.title,
@@ -219,7 +221,7 @@ export class TabManager {
    * renderer. Hence the async signature.
    */
   async openDocuments(): Promise<OpenDocumentTab[]> {
-    const tabs = this.tabs.filter((tab) => tab.kind !== 'home' && !tab.present && tab.view)
+    const tabs = this.tabs.filter((tab) => tab.kind !== 'home' && !tab.present && tab.view && !this.directoryStageIds.has(tab.id))
     return Promise.all(
       tabs.map(async (tab) => ({
         id: tab.id,
@@ -252,6 +254,29 @@ export class TabManager {
       default:
         return false
     }
+  }
+
+  /** Private staging views are invisible to tabs, MCP open-document lists and user focus. */
+  openDirectoryStage(kind: DocumentTabKind, path: string): string {
+    this.directoryStageDepth++
+    try {
+      switch (kind) {
+        case 'docs': return this.openDocsTab(path)
+        case 'sheets': return this.openSheetsTab(path)
+        case 'slides': return this.openSlidesTab(path)
+        case 'pdf': return this.openPdfTab(path)
+        case 'markdown': return this.openMarkdownTab(path)
+        case 'html': return this.openHtmlTab(path)
+        default: throw new Error('Unsupported directory staging editor.')
+      }
+    } finally { this.directoryStageDepth--; this.refreshActiveTargets() }
+  }
+
+  closeDirectoryStage(id: string): void {
+    if (!this.directoryStageIds.has(id)) return
+    this.closeTabWithoutPrompt(id)
+    this.directoryStageIds.delete(id)
+    this.refreshActiveTargets()
   }
 
   openHomeTab(): void {
@@ -399,6 +424,14 @@ export class TabManager {
   }
 
   activateTab(id: string): void {
+    if (this.directoryStageDepth > 0) {
+      this.directoryStageIds.add(id)
+      const view = this.tabs.find(tab => tab.id === id)?.view
+      view?.setBounds(this.contentBounds())
+      view?.setVisible(false)
+      return
+    }
+    if (this.directoryStageIds.has(id)) return
     const target = this.tabs.find((t) => t.id === id)
     if (!target) return
     for (const t of this.tabs) t.view?.setVisible(t.id === id && !this.explorerLayout.suspended)
@@ -535,6 +568,7 @@ export class TabManager {
   }
 
   async closeTab(id: string): Promise<void> {
+    if (this.directoryStageIds.has(id)) { this.closeDirectoryStage(id); return }
     if (id === HOME_ID) return
     const tab = this.tabs.find((t) => t.id === id)
     if (!tab || this.closingIds.has(id)) return
@@ -595,7 +629,7 @@ export class TabManager {
     if (this.htmlFullScreenId === id) this.htmlFullScreenId = null
     const [removed] = this.tabs.splice(idx, 1)
     if (this.activeId === id) {
-      const fallback = this.tabs[idx - 1] ?? this.tabs[0]
+      const fallback = this.tabs.slice(0, idx).reverse().find(tab => !this.directoryStageIds.has(tab.id)) ?? this.tabs[0]
       this.activateTab(fallback.id)
     } else {
       this.onChanged()
@@ -634,7 +668,7 @@ export class TabManager {
     view.setVisible(false)
     this.shellWindow.contentView.removeChildView(view)
     if (this.activeId === id) {
-      const fallback = this.tabs[idx - 1] ?? this.tabs[0]
+      const fallback = this.tabs.slice(0, idx).reverse().find(tab => !this.directoryStageIds.has(tab.id)) ?? this.tabs[0]
       this.activateTab(fallback.id)
     } else {
       this.onChanged()

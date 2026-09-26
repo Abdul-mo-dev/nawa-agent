@@ -1,3 +1,4 @@
+import { registerDirectoryEditor } from '@genoffice/agent-core'
 import { ChatModelPicker } from '@genoffice/ui'
 import { setRendererChatModel, getRendererChatModel } from '@genoffice/ai-provider/browser'
 import '@genoffice/ui/chat-model-picker.css'
@@ -318,6 +319,11 @@ export function AiPanel({
 
   // The loop is built once; every mutable value goes through a ref getter
   const loopRef = useRef<AgentLoop | null>(null)
+  const directoryEditorPath = useRef(filePath)
+  directoryEditorPath.current = filePath
+  useEffect(() => registerDirectoryEditor(() => ({
+    kind: 'pdf', path: directoryEditorPath.current, loop: loopRef.current,
+  })), [])
   if (!loopRef.current) {
     const deps: PdfAiDeps = {
       doc: () => apiRef.current.doc(),

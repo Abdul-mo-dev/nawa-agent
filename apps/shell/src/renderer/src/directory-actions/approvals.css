@@ -1,0 +1,10 @@
+.nawa-file-approval { flex: 0 0 auto; max-height: 48vh; overflow: auto; margin: 8px 12px; padding: 12px; border: 1px solid var(--border, #8b9098); border-radius: 8px; background: var(--surface, transparent); font-size: 12px; }
+.nawa-file-approval h3 { margin: 0 0 8px; font-size: 14px; }
+.nawa-file-approval p { margin: 7px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.nawa-approval-path { display: block; overflow-wrap: anywhere; }
+.nawa-file-approval pre { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.5 ui-monospace, monospace; border: 1px solid currentColor; padding: 8px; }
+.nawa-approval-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+.nawa-file-approval button { cursor: pointer; }
+.nawa-history-dropdown { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; margin: 8px 12px; font-size: 12px; }
+.nawa-history-dropdown select { width: 100%; min-width: 0; color: inherit; background: var(--surface, transparent); border: 1px solid var(--border, #8b9098); border-radius: 5px; padding: 7px; font: inherit; }
+.nawa-history-dropdown select option { color: CanvasText; background: Canvas; }

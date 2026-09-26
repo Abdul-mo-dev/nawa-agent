@@ -1,3 +1,4 @@
+import { registerDirectoryEditor } from '@genoffice/agent-core'
 import { ChatModelPicker } from '@genoffice/ui'
 import { setRendererChatModel, getRendererChatModel } from '@genoffice/ai-provider/browser'
 import '@genoffice/ui/chat-model-picker.css'
@@ -643,6 +644,11 @@ export function AiPanel({
   runBriefWriterRef.current = runBriefWriter
 
   const loopRef = useRef<AgentLoop<DocSnapshot> | null>(null)
+  const directoryEditorPath = useRef(filePath)
+  directoryEditorPath.current = filePath
+  useEffect(() => registerDirectoryEditor(() => ({
+    kind: 'html', path: directoryEditorPath.current, loop: loopRef.current,
+  })), [])
   if (!loopRef.current) {
     loopRef.current = new AgentLoop<DocSnapshot>({
       transport: transportRef.current,

@@ -58,6 +58,7 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
   const [dialogError, setDialogError] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [cutItems, setCutItems] = useState<Item[]>([])
+  const [clipboardMode, setClipboardMode] = useState<'copy' | 'cut'>('cut')
   const [page, setPage] = useState<RecentPage>({ entries: [], total: 0, totalAll: 0 })
   const [pageLoading, setPageLoading] = useState(false)
   const [pageError, setPageError] = useState<string | null>(null)
@@ -193,7 +194,7 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
   const protectedItem = (item: Item) => item.kind === 'folder' && roots.some(root => isWithin(root.path, item.path))
   const canMutate = selectedItems.length > 0 && !selectedItems.some(protectedItem)
   const currentContext: Item | undefined = selectedItems.length === 1 ? selectedItems[0] : undefined
-  const cutPaths = new Set(cutItems.map(item => item.path))
+  const cutPaths = new Set(clipboardMode === 'cut' ? cutItems.map(item => item.path) : [])
   const choose = (path: string, options: { toggle?: boolean; range?: boolean; additive?: boolean }) => {
     if (options.range) setSelected(previous => selectRange(items.map(item => item.path), anchor.current, path, previous, !!options.additive))
     else if (options.toggle) { setSelected(previous => { const next = new Set(previous); next.has(path) ? next.delete(path) : next.add(path); return next }); anchor.current = path }
@@ -205,7 +206,8 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
   const copyPaths = (paths: string[]) => { void navigator.clipboard.writeText(paths.join('\n')).then(() => notify(t('copied'))).catch(() => notify(t('clipboardError'), true)) }
   const requestRename = (list = selectedItems) => { if (list.length === 1 && !protectedItem(list[0])) beginDialog({ kind: 'rename', item: list[0] }) }
   const requestDelete = (list = selectedItems) => { if (list.length && !list.some(protectedItem)) beginDialog({ kind: 'delete', items: list }) }
-  const beginCut = (list: Item[]) => { if (list.length && !list.some(protectedItem)) { setCutItems(list); notify(t('moveHelp')) } }
+  const beginCopy = (list: Item[]) => { if (list.length) { setClipboardMode('copy'); setCutItems([...list]); notify(t('copyHelp')) } }
+  const beginCut = (list: Item[]) => { if (list.length && !list.some(protectedItem)) { setClipboardMode('cut'); setCutItems([...list]); notify(t('moveHelp')) } }
   const sort = (key: SortKey) => changePrefs({ sort: key, descending: prefs.sort === key ? !prefs.descending : false })
   const moveFiles = async (paths: string[], destination: string, keepBoth = false) => {
     const result = await window.aiOffice.movePaths(paths, destination, keepBoth ? 'keepBoth' : 'ask')
@@ -220,7 +222,16 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
   const paste = async () => {
     if (!folder || !cutItems.length || busy) return
     setBusy(true)
-    try { await moveFiles(cutItems.map(item => item.path), folder) } catch (error) { failure(error) } finally { setBusy(false) }
+    try {
+      if (clipboardMode === 'cut') await moveFiles(cutItems.map(item => item.path), folder)
+      else {
+        const result = await window.nawaDirectory.copyPaths(cutItems.map(item => item.path), folder)
+        refresh()
+        if (result.failed.length) notify(`${result.copied.length} copied. ` + result.failed.map(item => `${basename(item.path)}: ${item.error}`).join('\n'), true)
+        else notify(`${result.copied.length} ${t('itemsCopied')}`)
+        if (result.copied.length) setSelected(new Set(result.copied.map(item => item.to)))
+      }
+    } catch (error) { failure(error) } finally { setBusy(false) }
   }
   const ask = (list: Item[]) => {
     if (!list.length) { changePrefs({ pane: 'ai' }); return }
@@ -238,7 +249,9 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
       { label: t('open'), icon: 'open', disabled: !one, shortcut: 'Enter', action: () => { if (one) openItem(one) } },
       { label: t('ask'), icon: 'sparkles', action: () => ask(list) },
       { label: t('cut'), icon: 'cut', disabled: protectedSelection, shortcut: 'Ctrl+X', divider: true, action: () => beginCut(list) },
-      { label: t('copyPath'), icon: 'copy', action: () => copyPaths(list.map(item => item.path)) },
+      { label: t('copy'), icon: 'copy', shortcut: 'Ctrl+C', action: () => beginCopy(list) },
+      { label: t('paste'), icon: 'paste', shortcut: 'Ctrl+V', disabled: !folder || !cutItems.length || busy, action: () => { void paste() } },
+      { label: t('copyPath'), icon: 'copy', shortcut: 'Ctrl+Shift+C', action: () => copyPaths(list.map(item => item.path)) },
       { label: t('rename'), icon: 'rename', shortcut: 'F2', disabled: !one || protectedSelection, action: () => requestRename(list) },
       { label: t('duplicate'), icon: 'copy', disabled: !one || one.kind !== 'file', action: () => { if (one) void act(async () => { await window.aiOffice.duplicateFile(one.path); refresh() }) } },
       { label: t('starred'), icon: 'star', checked: !!one?.starred, disabled: !one || one.kind !== 'file', divider: true, action: () => { if (one) void act(async () => { await window.aiOffice.toggleStar(one.path); refresh() }) } },
@@ -324,11 +337,13 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
       navigate({ kind: 'folder', path: result.dir })
     })
   }
-  const keyboardRef = useRef({ startAddress, moveHistory, refresh, paste, selectedItems, beginCut })
-  keyboardRef.current = { startAddress, moveHistory, refresh, paste, selectedItems, beginCut }
+  const keyboardRef = useRef({ startAddress, moveHistory, refresh, paste, selectedItems, beginCut, beginCopy, copyPaths })
+  keyboardRef.current = { startAddress, moveHistory, refresh, paste, selectedItems, beginCut, beginCopy, copyPaths }
   useEffect(() => {
     const keyboard = (e: globalThis.KeyboardEvent) => {
       if (e.defaultPrevented || e.isComposing || document.querySelector('.ex-dialog-backdrop, .settings-overlay')) return
+      // File commands must not hijack text copying, typing, history controls or approvals.
+      if (e.target instanceof Element && e.target.closest('.ex-inspector, .workspace-chat-main, .ex-menu')) return
       const input = e.target instanceof HTMLElement && (e.target.matches('input,textarea,select') || e.target.isContentEditable)
       const ctrl = e.ctrlKey || e.metaKey, commands = keyboardRef.current
       if (ctrl && (e.key.toLowerCase() === 'l' || e.key.toLowerCase() === 'd')) { e.preventDefault(); commands.startAddress() }
@@ -336,6 +351,11 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
       else if (e.key === 'F5' && !editorActive) { e.preventDefault(); commands.refresh() }
       else if (e.altKey && e.key === 'ArrowLeft') { e.preventDefault(); commands.moveHistory(-1) }
       else if (e.altKey && e.key === 'ArrowRight') { e.preventDefault(); commands.moveHistory(1) }
+      else if (!input && !editorActive && ctrl && e.key.toLowerCase() === 'c' && !window.getSelection()?.toString()) {
+        e.preventDefault()
+        if (e.shiftKey) commands.copyPaths(commands.selectedItems.map(item => item.path))
+        else commands.beginCopy(commands.selectedItems)
+      }
       else if (!input && !editorActive && ctrl && e.key.toLowerCase() === 'x') { e.preventDefault(); commands.beginCut(commands.selectedItems) }
       else if (!input && !editorActive && ctrl && e.key.toLowerCase() === 'v') { e.preventDefault(); void commands.paste() }
       else if (e.key === 'Escape' && !input) { closeMenu(); setSelected(new Set()); setCutItems([]) }
@@ -378,7 +398,7 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
     </header>
     <div className="ex-command-bar" role="toolbar" aria-label="File commands">
       <button className="ex-tool with-label ex-new-button" disabled={busy} onClick={e => toolbarMenu(e, newActions())}><Icon name="plus" /><span>{t('new')}</span><Icon name="down" size={12} /></button><span className="ex-command-divider" />
-      {editorActive ? <button className="ex-tool with-label" onClick={() => navigate(folder ? { kind: 'folder', path: folder } : { kind: 'recent' })}><Icon name="left" /><span>{t('backFiles')}</span></button> : <><ToolButton icon="cut" label={t('cut')} disabled={!canMutate || busy} onClick={() => beginCut(selectedItems)} /><ToolButton icon="copy" label={t('copyPath')} disabled={!selectedItems.length} onClick={() => copyPaths(selectedItems.map(item => item.path))} /><ToolButton icon="paste" label={t('paste')} disabled={!folder || !cutItems.length || busy} onClick={() => { void paste() }} /><ToolButton icon="rename" label={t('rename')} disabled={!canMutate || selectedItems.length !== 1 || busy} onClick={() => requestRename()} /><ToolButton icon="trash" label={t('trash')} disabled={!canMutate || busy} onClick={() => requestDelete()} /></>}
+      {editorActive ? <button className="ex-tool with-label" onClick={() => navigate(folder ? { kind: 'folder', path: folder } : { kind: 'recent' })}><Icon name="left" /><span>{t('backFiles')}</span></button> : <><ToolButton icon="cut" label={t('cut')} disabled={!canMutate || busy} onClick={() => beginCut(selectedItems)} /><ToolButton icon="copy" label={`${t('copy')} (Ctrl+C)`} disabled={!selectedItems.length || busy} onClick={() => beginCopy(selectedItems)} /><ToolButton icon="paste" label={t('paste')} disabled={!folder || !cutItems.length || busy} onClick={() => { void paste() }} /><ToolButton icon="rename" label={t('rename')} disabled={!canMutate || selectedItems.length !== 1 || busy} onClick={() => requestRename()} /><ToolButton icon="trash" label={t('trash')} disabled={!canMutate || busy} onClick={() => requestDelete()} /></>}
       <span className="ex-command-divider" /><button className="ex-tool with-label" disabled={editorActive} onClick={e => toolbarMenu(e, [...(['name', 'modified', 'type', 'size'] as const).map(key => ({ label: t(key), checked: prefs.sort === key, action: () => changePrefs({ sort: key }) })), { label: t('ascending'), divider: true, checked: !prefs.descending, action: () => changePrefs({ descending: false }) }, { label: t('descending'), checked: prefs.descending, action: () => changePrefs({ descending: true }) }])}><Icon name="sort" /><span>{t('sort')}</span><Icon name="down" size={11} /></button>
       <button className="ex-tool with-label" onClick={e => toolbarMenu(e, viewActions())}><Icon name="list" /><span>{t('view')}</span><Icon name="down" size={11} /></button>
       <button className="ex-tool" aria-label="More actions" title="More actions" onClick={e => toolbarMenu(e, [{ label: t('add'), icon: 'plus', action: () => { void addRoot() } }, { label: t('openFile'), icon: 'open', action: () => { void act(() => window.aiOffice.browse()) } }, { label: t('settings'), icon: 'settings', divider: true, action: () => setSettingsOpen(true) }, { label: 'Original home', icon: 'home', action: onOpenLegacy }])}><Icon name="more" /></button>
@@ -393,7 +413,16 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
         <div className="ex-tree-scroll">{rootsLoading && !roots.length ? <p className="ex-nav-help" role="status">{t('loading')}</p> : currentRoot ? <DirectoryTree root={currentRoot} revision={revision} selectedPath={editorActive && editorTab?.filePath ? editorTab.filePath : currentContext?.path ?? folder ?? undefined} get={directory} load={loadDirectory} navigate={path => navigate({ kind: 'folder', path })} openFile={openFile} onContext={(event, item, isRoot) => showItemMenu(event, item, isRoot, true)} /> : <button className="ex-add-empty" onClick={() => { void addRoot() }}><Icon name="plus" /><span>{t('rootsEmpty')}</span></button>}</div>
         <div className="ex-nav-footer"><button className="ex-nav-item" onClick={() => setSettingsOpen(true)}><Icon name="settings" /><span>{t('settings')}</span></button><div className="ex-local-badge"><span />{t('local')}</div></div>
       </aside><Splitter label={t('navigation')} value={effectiveNavWidth} min={180} max={380} onChange={navigationWidth => changePrefs({ navigationWidth })} /></>}
-      <main ref={center} className="ex-center" aria-label={editorActive ? t('editor') : t('files')}>
+      <main ref={center} className="ex-center" aria-label={editorActive ? t('editor') : t('files')}
+        onContextMenu={event => {
+          if (editorActive || event.defaultPrevented) return
+          event.preventDefault()
+          setMenu({ x: event.clientX, y: event.clientY, actions: [
+            { label: t('paste'), icon: 'paste', shortcut: 'Ctrl+V', disabled: !folder || !cutItems.length || busy, action: () => { void paste() } },
+            { label: t('newFolder'), icon: 'folder', disabled: !folder, action: () => { if (folder) beginDialog({ kind: 'newFolder', parent: folder }) } },
+            { label: t('refresh'), icon: 'refresh', action: refresh },
+          ] })
+        }}>
         {editorActive ? <div className="ex-editor-placeholder" aria-hidden="true"><Icon name="open" size={28} /><span>{editorTab?.title}</span></div> : <>
           <div className="ex-content-heading"><span className="ex-heading-icon">{headerIcon}</span><div><h1 dir="auto">{title}</h1><p>{loading ? t('loading') : `${itemCount.toLocaleString(dateLocale)} ${t('items')}`}{selectedItems.length > 0 && ` · ${selectedItems.length} ${t('selected')}`}</p></div><span className="ex-toolbar-spacer" />{folder && <button className="ex-text-button" title={t('ask')} onClick={() => { changePrefs({ pane: 'ai' }) }}><Icon name="sparkles" size={15} /><span>{t('folderScope')}</span></button>}</div>
           {notice && <div className={`ex-notice${notice.error ? ' is-error' : ''}`} role={notice.error ? 'alert' : 'status'}><span>{notice.text}</span><button aria-label={t('close')} onClick={() => setNotice(null)}><Icon name="close" size={14} /></button></div>}

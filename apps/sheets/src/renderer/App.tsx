@@ -1,3 +1,4 @@
+import { registerDirectoryEditor } from '@genoffice/agent-core'
 import { focusWorksheet } from './sheet-focus'
 import {
   activateFormulaClosure,
@@ -1162,6 +1163,10 @@ export function App(): React.JSX.Element {
   const runMutatedRef = useRef(false)
 
   const agentLoopRef = useRef<AgentLoop | null>(null)
+  useEffect(() => registerDirectoryEditor(() => ({
+    kind: 'sheets', path: lazyWorkbookRef.current?.file.path, loop: agentLoopRef.current,
+    settle: async () => { await Promise.all(aiApplyPromisesRef.current) },
+  })), [])
   if (!agentLoopRef.current) {
     agentLoopRef.current = new AgentLoop({
       transport: createElectronTransport(() => aiSettingsRef.current!),

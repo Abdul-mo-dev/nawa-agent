@@ -220,7 +220,8 @@ export class WorkspaceFolderStore {
     const files: FolderListing['files'] = []
     for (const entry of entries.sort(nameOrder)) {
       if (entry.isSymbolicLink() || hidden(canonical, entry.name, entry.isDirectory())) continue
-      if (!entry.isDirectory() && (!entry.isFile() || !supported(entry.name))) continue
+      // Explorer can manage all ordinary files; AI content reads still enforce supported().
+      if (!entry.isDirectory() && !entry.isFile()) continue
       const path = join(canonical, entry.name)
       try {
         const info = await stat(path)

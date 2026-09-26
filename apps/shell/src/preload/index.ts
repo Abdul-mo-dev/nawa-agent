@@ -1,5 +1,6 @@
 import './conversation-history'
 import { contextBridge, ipcRenderer } from 'electron'
+import { installDirectoryActionsApi } from './directory-actions'
 import type { IpcRendererEvent } from 'electron'
 import {
   AI_MEDIA_PROVIDERS,
@@ -34,6 +35,8 @@ import type {
 } from '../shared/integrations-api'
 import type { TabsApi, TabSummary } from '../shared/tabs-api'
 import { TABS_CHANNELS } from '../shared/tabs-api'
+
+installDirectoryActionsApi()
 
 const UI_LANGUAGES: readonly UiLanguage[] = [
   'zh',

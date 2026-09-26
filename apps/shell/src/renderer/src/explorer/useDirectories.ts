@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FolderListing } from '../../../shared/home-api'
 import { pathKey } from './model'
-export interface DirectoryState { listing?: FolderListing; loading: boolean; error?: string }
+export interface DirectoryState { listing?: FolderListing; loading: boolean; error?: string; stale?: boolean }
 /** Lazy, coalesced reads. A stale response can never replace a newer directory snapshot. */
 export function useDirectories() {
   const cache = useRef(new Map<string, DirectoryState>())
@@ -13,7 +13,7 @@ export function useDirectories() {
     const key = pathKey(path), active = requests.current.get(key)
     if (active) return active
     const prior = cache.current.get(key)
-    if (!force && prior?.listing) return Promise.resolve(prior.listing)
+    if (!force && prior?.listing && !prior.stale) return Promise.resolve(prior.listing)
     const current = generation.current
     cache.current.set(key, { ...prior, error: undefined, loading: true })
     paint(n => n + 1)
@@ -35,7 +35,7 @@ export function useDirectories() {
   const invalidate = useCallback(() => {
     generation.current++
     requests.current.clear()
-    cache.current.clear()
+    for (const [key, state] of cache.current) cache.current.set(key, { ...state, stale: true, loading: false })
     paint(n => n + 1)
   }, [])
   return { get, load, invalidate }

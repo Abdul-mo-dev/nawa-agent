@@ -3,7 +3,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 import type { RenderSlide } from '@genoffice/pptx-render'
 import type { ProjectApi } from '@genoffice/project-store'
-import { installDropOpenBridge } from '@genoffice/electron-utils/drop-open'
+import { installDirectoryEditorBridge, installDropOpenBridge } from '@genoffice/electron-utils/drop-open'
 import type {
   AddChartOp,
   AddElementOp,
@@ -492,4 +492,5 @@ const projectApi: ProjectApi = {
 contextBridge.exposeInMainWorld('projectApi', projectApi)
 
 // open documents dragged from the OS onto this tab as a new shell tab
+installDirectoryEditorBridge()
 installDropOpenBridge()

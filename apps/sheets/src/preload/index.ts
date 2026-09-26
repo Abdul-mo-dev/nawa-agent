@@ -53,7 +53,7 @@ import {
   MAX_SAVE_EDITS_TOTAL,
   SAVE_EDITS_CHUNK_JSON_MAX,
 } from '../shared/ipc-channels'
-import { installDropOpenBridge } from '@genoffice/electron-utils/drop-open'
+import { installDirectoryEditorBridge, installDropOpenBridge } from '@genoffice/electron-utils/drop-open'
 
 const desktopApi: DesktopApi = {
   getLanguage: () => ipcRenderer.invoke('app:get-language'),
@@ -686,6 +686,7 @@ if (process.env.GENOFFICE_DEBUG_HOOKS === '1') {
 }
 
 // open documents dragged from the OS onto this tab as a new shell tab
+installDirectoryEditorBridge()
 installDropOpenBridge()
 
 function parseWorkbookFile(input: unknown): WorkbookFile {

@@ -1,5 +1,6 @@
 import { execSync, spawn } from 'node:child_process'
 import { registerWorkspaceIpc } from './workspace-ipc'
+import { configureDirectoryNative } from './directory-actions/native-runtime'
 import {
   copyFileSync,
   cpSync,
@@ -3391,16 +3392,15 @@ function registerHomeIpc(): void {
 
   ipcMain.handle(HOME_CHANNELS.deleteFiles, async (_event, paths: unknown) => {
     const list = stringPaths(paths)
+    const removed: string[] = []
+    const failed: string[] = []
     for (const p of list) {
-      try {
-        await shell.trashItem(p)
-      } catch {
-        // file already gone or trash unavailable; still drop it from the list
-      }
+      try { await shell.trashItem(p); removed.push(p) }
+      catch (cause) { failed.push(`${p}: ${cause instanceof Error ? cause.message : String(cause)}`) }
     }
-    removeRecentFiles(list)
-    // the files were deliberately destroyed — stars must not survive as ghosts
-    removeStarredFiles(list)
+    removeRecentFiles(removed)
+    removeStarredFiles(removed)
+    if (failed.length) throw new Error(`Some items could not be moved to the Recycle Bin:\n${failed.join('\n')}`)
   })
 
   ipcMain.handle(HOME_CHANNELS.openTrash, () => {
@@ -3678,13 +3678,10 @@ function registerHomeIpc(): void {
   )
 
   ipcMain.handle(HOME_CHANNELS.deleteFolder, async (_event, dir: unknown) => {
-    if (!insideRoot(dir) || isRoot(dir)) return
+    if (!insideRoot(dir) || isRoot(dir)) throw new Error('This directory cannot be removed from the workspace.')
     const files = collectTreeFiles(dir)
-    try {
-      await shell.trashItem(dir)
-    } catch {
-      return
-    }
+    // Propagate a Recycle Bin failure; do not report deletion or remove history entries.
+    await shell.trashItem(dir)
     removeRecentFiles(files)
     removeStarredFiles(files)
   })
@@ -4967,6 +4964,21 @@ app.whenReady().then(async () => {
     openBlankTab: () => openBlankSheetsTabForMcp(),
     authorizeSave: authorizeMcpSheetWrite,
     abandonBlankTab: (wcId) => abandonBlankSheetsTabForMcp(wcId),
+  })
+  configureDirectoryNative({
+    tabs: () => tabManager,
+    listOpen: async () => [...(tabManager?.list() ?? []), ...(await detachedOpenDocuments())],
+    save: async (kind, contents, path) => {
+      switch (kind) {
+        case 'docs': return mcpDocsControl.runCommand(contents.id, 'save_document', { path, overwrite: true })
+        case 'sheets': return mcpSheetsControl.runCommand(contents.id, 'save_sheet', { path, overwrite: true })
+        case 'slides': return mcpSlidesControl.saveDeck(contents.id, path, true)
+        case 'pdf': return flushPdfSave(contents)
+        case 'markdown': return markdownSaveToPath(contents, path)
+        case 'html': return htmlSaveToPath(contents, path)
+        default: throw new Error('Unsupported directory staging save.')
+      }
+    },
   })
   configureMcpRuntime({
     version: app.getVersion(),

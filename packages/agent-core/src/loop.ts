@@ -232,6 +232,9 @@ export class AgentLoop<TSnapshot = unknown> {
     this.options = options
   }
 
+  /** Trusted directory staging bridge reuses the exact editor skill. */
+  get directorySkill(): AgentSkill { return this.options.skill }
+
   get busy(): boolean {
     return this.running
   }

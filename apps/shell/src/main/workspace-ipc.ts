@@ -1,4 +1,5 @@
 import { registerHistoryIpc } from './history/history-ipc'
+import { registerDirectoryActionsIpc } from './directory-actions/ipc'
 import { app, BrowserWindow, dialog, ipcMain, type WebContents } from 'electron'
 import { watch, type FSWatcher } from 'node:fs'
 import { join } from 'node:path'
@@ -75,6 +76,16 @@ export function registerWorkspaceIpc(options: WorkspaceIpcOptions): {
     })
   }
 
+  registerDirectoryActionsIpc({
+    roots: async () => (await getStore().list()).map(root => root.path),
+    isHomeSender: options.isHomeSender,
+    extract: async path => {
+      const result = await options.readFile(path, 12000, 0)
+      if (!result.ok) throw new Error(result.error || 'Text extraction failed.')
+      return result.text || ''
+    },
+    changed: dirs => send(HOME_CHANNELS.folderChanged, dirs),
+  })
   handle('home:workspace-roots', () => getStore().list())
   handle('home:workspace-pick-folder', async (sender) => {
     if (picking) return null

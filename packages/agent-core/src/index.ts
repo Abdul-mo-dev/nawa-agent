@@ -1,3 +1,6 @@
+export { registerDirectoryEditor } from './directory-editor-host'
+export type { DirectoryEditorDescription } from './directory-editor-host'
+
 export type {
   AgentImage,
   AgentMessage,

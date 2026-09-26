@@ -1,3 +1,4 @@
+import { registerDirectoryEditor } from '@genoffice/agent-core'
 import { ChatModelPicker } from '@genoffice/ui'
 import { setRendererChatModel, getRendererChatModel } from '@genoffice/ai-provider/browser'
 import '@genoffice/ui/chat-model-picker.css'
@@ -746,6 +747,11 @@ export function AiPanel({
   }
 
   const loopRef = useRef<AgentLoop<PmNode> | null>(null)
+  const directoryEditorPath = useRef(filePath)
+  directoryEditorPath.current = filePath
+  useEffect(() => registerDirectoryEditor(() => ({
+    kind: 'docs', path: directoryEditorPath.current, loop: loopRef.current,
+  })), [])
   if (!loopRef.current) {
     const numIds = (): NumIds => ({
       bullet: findNumId(blocksRef.current, 'bullet') ?? numIdFallbackRef.current?.bullet ?? null,

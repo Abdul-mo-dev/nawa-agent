@@ -11,6 +11,9 @@ import { createShellTransport } from './ai/transport'
 import { DocumentIcon, FolderGlyph, NawaIcon } from './explorer/Icons'
 import { ConversationBuffer, flushDetachedBuffers, initializeHistory, retainUntilSaved } from './history/conversation-buffer'
 import { HistoryPanel } from './history/HistoryPanel'
+import { HistoryDropdown } from './history/HistoryDropdown'
+import { ApprovalCard } from './directory-actions/ApprovalCard'
+import { ApprovalController, DirectoryActionClient, directoryMutationSkill } from './directory-actions/controller'
 import { ChangeNotice } from './history/ChangeNotice'
 import './workspace-selection.css'
 import './history/history.css'
@@ -124,6 +127,7 @@ function HistoryWorkspace(props: WorkspaceChatProps) {
     onNew={() => { void newChat().catch(() => undefined) }} onHide={() => { void hide().catch(() => undefined) }}
     historyOpen={historyOpen} toggleHistory={() => setHistoryOpen(value => !value)}
     onSaved={() => { if (alive.current) setHistoryVersion(value => value + 1) }}
+    historyDropdown={<HistoryDropdown folder={props.folder} currentId={session.id} title={session.title} version={historyVersion} disabled={transitioning} onOpen={openChat} />}
     historyPanel={historyOpen ? <HistoryPanel folder={props.folder} currentId={session.id} version={historyVersion}
       databasePath={databasePath} onOpen={openChat} onRename={renameChat} onDelete={deleteChat} onClose={() => setHistoryOpen(false)} /> : null} />
 }
@@ -139,10 +143,11 @@ type DirectoryChatProps = WorkspaceChatProps & {
   toggleHistory: () => void
   onSaved: () => void
   historyPanel: ReactNode
+  historyDropdown: ReactNode
 }
 
 function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenFile, session, controls,
-  transitioning, parentError, onNew, onHide, historyOpen, toggleHistory, onSaved, historyPanel }: DirectoryChatProps) {
+  transitioning, parentError, onNew, onHide, historyOpen, toggleHistory, onSaved, historyPanel, historyDropdown }: DirectoryChatProps) {
   const buffer = useMemo(() => new ConversationBuffer(session, window.nawaHistory), [session])
   const data = useSyncExternalStore(buffer.subscribe, buffer.getSnapshot, buffer.getSnapshot)
   const messages = data.messages, input = data.draft, modelId = data.modelId
@@ -159,6 +164,8 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
   scopeRef.current = scopeKey; modelRef.current = modelId
   const logRef = useRef<HTMLDivElement>(null), inputRef = useRef<HTMLTextAreaElement>(null)
   const loopRef = useRef<AgentLoop | null>(null)
+  const approvals = useMemo(() => new ApprovalController(), [])
+  const actionClient = useRef<DirectoryActionClient | null>(null)
   const active = useRef<number | null>(null), epoch = useRef(0), alive = useRef(true)
   const activeScan = useRef<string | null>(null), comparisonScan = useRef<string | null>(null)
   const savedCallback = useRef(onSaved); savedCallback.current = onSaved
@@ -172,11 +179,13 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
   }, [])
   const invalidateRun = useCallback(() => {
     epoch.current++; active.current = null
+    actionClient.current?.cancel(); actionClient.current = null
+    approvals.cancel()
     const scan = activeScan.current; activeScan.current = null
     if (scan) void window.nawaHistory.cancelScan(scan).catch(() => undefined)
     const loop = loopRef.current; loopRef.current = null
     try { if (loop?.busy) loop.reset() } catch (cause) { console.warn('Nawa: cleanup failed.', cause) }
-  }, [])
+  }, [approvals])
   const sealPartial = useCallback(() => {
     const current = buffer.getSnapshot().messages
     if (current.some(message => message.streaming)) updateMessages(previous => previous.map(message => message.streaming
@@ -261,11 +270,28 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
         if (!current()) return
         updateMessages(previous => previous.map((message, index) => index === previous.length - 1 && message.streaming
           ? { ...message, text: text || message.text || 'Done.', streaming: false, error } : message))
+        actionClient.current?.cancel(); actionClient.current = null
         active.current = null; loopRef.current = null; setBusy(false); setActivity([]); persistFinished()
       }
+      const files = new DirectoryActionClient({
+        api: window.nawaDirectory, selection: selected, approvals, current,
+        transport: () => createShellTransport(() => settings),
+        activity: text => { if (current()) setActivity(previous => [...previous.slice(-3), text]) },
+        committed: result => {
+          // Record the actual commit even if deleting a selected file triggers a listing refresh.
+          const receipt: HistoryMessage = {
+            id: crypto.randomUUID(), createdAt: Date.now(), role: 'assistant', modelLabel: 'Nawa file action',
+            text: `${result.operation === 'delete' ? 'Moved to Recycle Bin' : result.operation === 'create' ? 'Created' : 'Updated'}: ${result.path}${result.backupPath ? `\nOriginal backup: ${result.backupPath}` : ''}`,
+          }
+          updateMessages(previous => previous.at(-1)?.streaming
+            ? [...previous.slice(0, -1), receipt, previous[previous.length - 1]] : [...previous, receipt])
+          retainUntilSaved(buffer)
+        },
+      })
+      actionClient.current = files
       const loop = new AgentLoop({
         transport: createShellTransport(() => settings),
-        skill: composeSkills('directory', '', [createDirectorySkill({ selection: selected })]),
+        skill: composeSkills('directory', '', [createDirectorySkill({ selection: selected }), directoryMutationSkill(files, selected)]),
         maxTurns: 24, maxHistory: 40,
         systemSuffix: () => '\nConversation history refers only to messages with matching selected paths and verified file fingerprints. Do not imply that historical file contents are current. Read selected files again when necessary.',
         events: {
@@ -302,10 +328,12 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
       <div className="nawa-history-conversation-folder" title={data.folder || 'Workspace selection'}>{data.folderName}</div>
     </div>
       <button type="button" className="ws-chat-close" disabled={transitioning} onClick={onNew}>New chat</button>
-      <button type="button" className="ws-chat-close" aria-expanded={historyOpen} onClick={toggleHistory}>History</button>
+      <button type="button" className="ws-chat-close" aria-expanded={historyOpen} onClick={toggleHistory}>Manage history</button>
       <button type="button" className="ws-chat-close" disabled={transitioning} onClick={onHide}>Hide chat</button></header>
     {parentError && <div className="ws-chat-notice" role="alert">{parentError}</div>}
+    {historyDropdown}
     {historyPanel}
+    <ApprovalCard controller={approvals} />
     {!historyOpen && <>
       <ChangeNotice report={comparison} checking={checking} error={checkError} recheck={() => void checkChanges()} />
       <div className="ws-chat-scope" aria-label="Main-panel selection"><div className="workspace-scope-toolbar">
@@ -319,7 +347,7 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
     {!!activity.length && <div className="ws-chat-notice" role="status">{activity.slice(-2).join(' · ')}</div>}
     <div ref={logRef} className="ws-chat-log" role="log" aria-live="polite">
       {messages.length > visibleMessages && <button type="button" className="ws-chat-close" onClick={() => setVisibleMessages(value => value + 100)}>Show earlier messages ({messages.length - visibleMessages} more)</button>}
-      {!messages.length && <div className="ws-chat-empty"><h2>Ask Nawa</h2><p>Select files to discuss their contents, or ask about folder listings.</p><p>New chat saves this conversation and starts another. Find previous conversations under History.</p></div>}
+      {!messages.length && <div className="ws-chat-empty"><h2>Ask Nawa</h2><p>Select files to read, edit, or delete them. Create files in the opened or selected folder. Every AI file change requires approval.</p><p>New chat saves this conversation and starts another. Find previous conversations under History.</p></div>}
       {messages.slice(-visibleMessages).map(message => !message.text && !message.streaming ? null : <div key={message.id} className={`ws-chat-msg ws-chat-${message.role}${message.error ? ' ws-chat-error' : ''}`}>
         <span className="workspace-message-role">{message.role === 'user' ? 'You' : 'Nawa'}{message.modelLabel && <small className="nawa-message-model">{message.modelLabel}</small>}<time dateTime={new Date(message.createdAt).toISOString()}>{new Date(message.createdAt).toLocaleTimeString()}</time></span>
         {message.streaming && !message.text ? 'Thinking…' : message.role === 'assistant' ? <Markdown text={message.text} /> : message.text}</div>)}

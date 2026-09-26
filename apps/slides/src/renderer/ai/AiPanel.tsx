@@ -1,3 +1,4 @@
+import { registerDirectoryEditor } from '@genoffice/agent-core'
 import { ChatModelPicker } from '@genoffice/ui'
 import { setRendererChatModel, getRendererChatModel } from '@genoffice/ai-provider/browser'
 import '@genoffice/ui/chat-model-picker.css'
@@ -765,6 +766,11 @@ export function AiPanel({
   }
 
   const loopRef = useRef<AgentLoop | null>(null)
+  const directoryEditorPath = useRef(currentFilePath)
+  directoryEditorPath.current = currentFilePath
+  useEffect(() => registerDirectoryEditor(() => ({
+    kind: 'slides', path: directoryEditorPath.current, loop: loopRef.current,
+  })), [])
   if (!loopRef.current) {
     // The three slides generation steps (style/planning/per-page HTML) force the high-quality model (only with the anthropic provider;
     // other providers keep the user setting, avoiding passing nonexistent model names). Chat/fine-tuning still uses the user's configured model.
