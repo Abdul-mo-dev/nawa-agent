@@ -1,3 +1,7 @@
+import { loadChatModelSettings } from './transport'
+import { ChatModelPicker } from '@genoffice/ui'
+import { setRendererChatModel, getRendererChatModel } from '@genoffice/ai-provider/browser'
+import '@genoffice/ui/chat-model-picker.css'
 import { aiPanelWidthAtPointer, AiPanelSideButton } from '@genoffice/ui'
 import React, { useEffect, useRef, useState } from 'react'
 import { AiComposer, AiScopeQuote, AiTypingIndicator, type AiScopeQuoteData } from '@genoffice/ui'
@@ -699,6 +703,7 @@ export function AiChatPanel({
 
       <div className="ai-composer">
         {attachNotice && <div className="ai-attach-notice">{attachNotice}</div>}
+        <ChatModelPicker loadSettings={loadChatModelSettings} onChange={setRendererChatModel} initialId={getRendererChatModel()} disabled={aiBusy} />
         <AiComposer
           header={
             <>

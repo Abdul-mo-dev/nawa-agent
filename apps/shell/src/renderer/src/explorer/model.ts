@@ -73,7 +73,7 @@ export function parentPath(path: string): string {
 }
 export function basename(path: string): string { return path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || path }
 export function rootFor(path: string, roots: readonly { path: string }[]): string | undefined {
-  return roots.filter(r => isWithin(path, r.path)).sort((a, b) => b.path.length - a.path.length)[0]?.path
+  return roots.filter(r => isWithin(path, r.path)).sort((a, b) => a.path.length - b.path.length)[0]?.path
 }
 export function breadcrumbs(path: string, root: string): { name: string; path: string }[] {
   if (!isWithin(path, root)) return [{ name: basename(path), path }]

@@ -1,3 +1,4 @@
+export { ChatModelPicker, type ChatModelPickerProps } from './ChatModelPicker'
 export { AiPanelSideButton } from './AiPanelSideButton'
 export { AiComposer } from './AiComposer'
 export { AiScopeQuote, type AiScopeQuoteData } from './AiScopeQuote'

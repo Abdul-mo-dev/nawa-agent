@@ -1,3 +1,5 @@
+import { ChatModelsEditor } from './ChatModelsEditor'
+import { validateChatModels } from '@genoffice/ai-provider/browser'
 import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
@@ -343,11 +345,14 @@ function AiModelPane({ t }: { t: TFunc }) {
     touch()
   }
   const save = () => {
+    const profileError = validateChatModels(settings)
+    if (profileError) { window.alert(profileError); return }
     window.aiOffice
       .setAiSettings?.(settings)
       .then(() => {
         setDirty(false)
         setSaved(true)
+        window.dispatchEvent(new Event('nawa:models-changed'))
       })
       .catch((error) => {
         window.alert(error instanceof Error ? error.message : String(error))
@@ -373,6 +378,7 @@ function AiModelPane({ t }: { t: TFunc }) {
   return (
     <>
       <h3 className="set-pane-title">{t('setSecAiModel')}</h3>
+      <ChatModelsEditor settings={settings} catalog={catalog} onChange={next => { setSettings(next); touch() }} />
       <div className="set-field">
         <div className="set-field-text">
           <label className="set-field-label">{t('setAiProvider')}</label>
@@ -626,11 +632,14 @@ function AiMediaPane({ t }: { t: TFunc }) {
     })
 
   const save = () => {
+    const profileError = validateChatModels(settings)
+    if (profileError) { window.alert(profileError); return }
     window.aiOffice
       .setAiSettings?.(settings)
       .then(() => {
         setDirty(false)
         setSaved(true)
+        window.dispatchEvent(new Event('nawa:models-changed'))
       })
       .catch((error) => {
         window.alert(error instanceof Error ? error.message : String(error))

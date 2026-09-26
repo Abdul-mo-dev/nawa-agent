@@ -4,6 +4,8 @@ export interface WorkspaceMessage {
   text: string
   error?: boolean
   streaming?: boolean
+  contextKey?: string
+  modelLabel?: string
 }
 export interface WorkspaceStorage {
   getItem(key: string): string | null

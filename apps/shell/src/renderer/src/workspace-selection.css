@@ -1,0 +1,23 @@
+.nawa-selection-items { max-height: 145px; overflow: auto; margin-top: 7px; }
+.nawa-selection-item { display: flex; align-items: center; gap: 7px; padding: 4px 0; font-size: 12px; min-width: 0; }
+.nawa-selection-item > span, .nawa-selection-item > button { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nawa-selection-item > button { background: transparent; border: 0; text-align: start; color: inherit; font: inherit; cursor: pointer; padding: 0; }
+.nawa-selection-item small { opacity: .7; flex-shrink: 0; }
+.nawa-opened-folder { font-size: 11px; overflow-wrap: anywhere; padding-top: 8px; }
+.nawa-opened-folder span { opacity: .7; }
+.nawa-message-model { display: block; font-weight: normal; opacity: .65; font-size: 10px; margin-top: 2px; }
+.ws-chat-msg.ws-chat-assistant { white-space: normal; }
+.ws-chat-msg .ai-md { min-width: 0; overflow-wrap: anywhere; }
+.ws-chat-msg .ai-md-pre { white-space: pre; overflow-x: auto; }
+.ws-chat-msg .ai-md-table-wrap { max-width: 100%; overflow-x: auto; }
+.ex-brand-symbol:has(.nawa-icon) { background: transparent; padding: 0; box-shadow: none; }
+.nawa-icon { display: inline-block; flex-shrink: 0; object-fit: contain; }
+
+.ex-inspector .ws-chat.workspace-chat-main .ws-chat-head { align-items: center; flex-wrap: nowrap; padding: 12px 16px; }
+.ex-inspector .ws-chat.workspace-chat-main .workspace-chat-heading { flex: 1 1 auto; min-width: 0; }
+.ex-inspector .ws-chat.workspace-chat-main .ws-chat-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ex-inspector .ws-chat.workspace-chat-main .ws-chat-head > .ws-chat-close { flex-shrink: 0; }
+.ex-brand-mark:has(.nawa-icon) { background: transparent; padding: 0; box-shadow: none; border: 0; }
+.ws-chat-msg .ai-md-pre { background: var(--ex-hover, var(--color-bg-subtle, #f1f3f6)); border: 1px solid var(--ex-line, var(--border, #ddd)); }
+
+.ws-chat-msg .ai-md-h { font-size: 1.14em; font-weight: 650; margin: 0 0 12px; line-height: 1.35; }

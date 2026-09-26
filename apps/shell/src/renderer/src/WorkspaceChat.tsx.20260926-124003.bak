@@ -1,0 +1,729 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { AgentLoop, composeSkills, type AgentMessage } from '@genoffice/agent-core'
+import { applyChatModel, chatModelLabel } from '@genoffice/ai-provider/browser'
+import { Markdown, ChatModelPicker } from '@genoffice/ui'
+import '@genoffice/ui/markdown.css'
+import '@genoffice/ui/chat-model-picker.css'
+import {
+  clearMessages,
+  draftKey,
+  loadMessages,
+  saveMessages,
+  type WorkspaceMessage,
+} from './workspace-chat-state'
+import { createDirectorySkill } from './ai/directory-skill'
+import {
+  displayPath,
+  selectionKey,
+  selectionSnapshot,
+} from './ai/directory-selection'
+import { createShellTransport } from './ai/transport'
+import { DocumentIcon, FolderGlyph, NawaIcon } from './explorer/Icons'
+import './workspace-selection.css'
+
+interface WorkspaceChatProps {
+  folder: string | null
+  folderName: string
+  scopePaths: string[]
+  scopeDirs?: string[]
+  onOpenFile: (path: string) => void
+  onClose: () => void
+}
+
+export function WorkspaceChat(props: WorkspaceChatProps) {
+  return (
+    <DirectoryChat
+      key={props.folder ?? 'nawa-main-selection'}
+      {...props}
+    />
+  )
+}
+
+function DirectoryChat({
+  folder,
+  folderName,
+  scopePaths,
+  scopeDirs = [],
+  onOpenFile,
+  onClose,
+}: WorkspaceChatProps) {
+  const conversation = folder ?? 'nawa-main-selection'
+
+  const [messages, setMessages] = useState<WorkspaceMessage[]>(() => {
+    try {
+      return loadMessages(localStorage, conversation)
+    } catch {
+      return []
+    }
+  })
+
+  const [input, setInput] = useState(() => {
+    try {
+      return localStorage.getItem(draftKey(conversation)) ?? ''
+    } catch {
+      return ''
+    }
+  })
+
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [activity, setActivity] = useState<string[]>([])
+
+  const [modelId, setModelId] = useState(() => {
+    try {
+      return localStorage.getItem(`nawa.chat-model:${conversation}`) || ''
+    } catch {
+      return ''
+    }
+  })
+
+  const selection = useMemo(
+    () => selectionSnapshot(folder, scopePaths, scopeDirs),
+    [folder, scopePaths, scopeDirs],
+  )
+
+  const scopeKey = selectionKey(selection)
+
+  const logRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+  const loopRef = useRef<AgentLoop | null>(null)
+
+  const epoch = useRef(0)
+  const active = useRef<number | null>(null)
+
+  const alive = useRef(true)
+  const scopeRef = useRef(scopeKey)
+  const modelRef = useRef(modelId)
+
+  scopeRef.current = scopeKey
+  modelRef.current = modelId
+
+  const stop = (reason = 'Stopped. The partial response is kept.') => {
+    epoch.current++
+    active.current = null
+
+    const loop = loopRef.current
+    loopRef.current = null
+
+    try {
+      loop?.reset()
+    } catch {
+      // Reset errors must never leave the chat UI locked.
+    }
+
+    if (alive.current) {
+      setBusy(false)
+      setActivity([])
+      setNotice(reason)
+
+      setMessages((previous) =>
+        previous.map((message) =>
+          message.streaming
+            ? {
+                ...message,
+                streaming: false,
+                error: true,
+                text: message.text || 'Stopped.',
+              }
+            : message,
+        ),
+      )
+    }
+  }
+
+  useEffect(() => {
+    alive.current = true
+
+    return () => {
+      alive.current = false
+      epoch.current++
+      active.current = null
+
+      const loop = loopRef.current
+      loopRef.current = null
+
+      try {
+        loop?.reset()
+      } catch {
+        // Component teardown must remain safe.
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    // Revoke an in-flight request immediately when its selection or model
+    // changes. A request must never continue with an obsolete allowlist.
+    if (active.current !== null) {
+      stop(
+        'Selection or model changed. Send again to use the current selection.',
+      )
+    }
+  }, [scopeKey, modelId])
+
+  useEffect(() => {
+    try {
+      saveMessages(localStorage, conversation, messages)
+    } catch {
+      // Optional storage.
+    }
+
+    logRef.current?.scrollTo({
+      top: logRef.current.scrollHeight,
+    })
+  }, [conversation, messages])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(draftKey(conversation), input)
+    } catch {
+      // Optional storage.
+    }
+  }, [conversation, input])
+
+  const send = async () => {
+    const question = input.trim()
+
+    if (!question || active.current !== null) {
+      return
+    }
+
+    const runId = ++epoch.current
+    const capturedScope = scopeKey
+    const capturedModel = modelId
+
+    const snapshot = selectionSnapshot(
+      selection.opened,
+      selection.files,
+      selection.directories,
+    )
+
+    active.current = runId
+    setBusy(true)
+    setNotice(null)
+    setActivity([])
+
+    const current = () =>
+      alive.current &&
+      active.current === runId &&
+      epoch.current === runId &&
+      scopeRef.current === capturedScope &&
+      modelRef.current === capturedModel
+
+    try {
+      const settings = applyChatModel(
+        await window.aiOffice.getAiSettings(),
+        capturedModel,
+      )
+
+      if (!current()) {
+        return
+      }
+
+      const label = chatModelLabel(settings, capturedModel)
+
+      // Preserve follow-up history only when it belongs to exactly the same
+      // selection. Previous file selections must never leak into a new scope.
+      const contextKey = capturedScope
+
+      const restored: AgentMessage[] = messages
+        .filter(
+          (message) =>
+            message.contextKey === contextKey &&
+            !message.streaming &&
+            !message.error &&
+            !!message.text,
+        )
+        .map((message) => ({
+          role: message.role,
+          text: message.text,
+        }))
+
+      const blank = (): WorkspaceMessage => ({
+        role: 'assistant',
+        text: '',
+        streaming: true,
+        contextKey,
+        modelLabel: label,
+      })
+
+      const finish = (text: string, error = false) => {
+        if (!current()) {
+          return
+        }
+
+        setMessages((previous) =>
+          previous.map((message, index) =>
+            index === previous.length - 1 && message.streaming
+              ? {
+                  ...message,
+                  text: text || message.text || 'Done.',
+                  streaming: false,
+                  error,
+                }
+              : message,
+          ),
+        )
+
+        active.current = null
+        setBusy(false)
+        setActivity([])
+      }
+
+      // Dispose any completed/obsolete loop before creating the next one.
+      const previousLoop = loopRef.current
+      loopRef.current = null
+
+      try {
+        previousLoop?.reset()
+      } catch {
+        // The new conversation turn can still proceed with a fresh loop.
+      }
+
+      const loop = new AgentLoop({
+        transport: createShellTransport(() => settings),
+
+        skill: composeSkills(
+          'directory',
+          '',
+          [
+            createDirectorySkill({
+              selection: snapshot,
+            }),
+          ],
+        ),
+
+        maxTurns: 24,
+        maxHistory: 40,
+
+        events: {
+          onText: (text) => {
+            if (!current()) {
+              return
+            }
+
+            setMessages((previous) =>
+              previous.map((message, index) =>
+                index === previous.length - 1 && message.streaming
+                  ? {
+                      ...message,
+                      text,
+                    }
+                  : message,
+              ),
+            )
+          },
+
+          onToolStart: (call) => {
+            if (!current()) {
+              return
+            }
+
+            setActivity((previous) => [
+              ...previous.slice(-4),
+              `Running ${call.name}…`,
+            ])
+          },
+
+          onToolExecuted: ({ execution }) => {
+            if (!current()) {
+              return
+            }
+
+            setActivity((previous) => [
+              ...previous.slice(-4),
+              execution.summary,
+            ])
+          },
+
+          onTurnEnd: () => {
+            if (!current()) {
+              return
+            }
+
+            setMessages((previous) => [
+              ...previous.map((message) =>
+                message.streaming
+                  ? {
+                      ...message,
+                      streaming: false,
+                    }
+                  : message,
+              ),
+              blank(),
+            ])
+          },
+
+          onDone: ({ text, cancelled, turnLimit }) => {
+            if (!current()) {
+              return
+            }
+
+            finish(text || (cancelled ? 'Stopped.' : ''))
+
+            if (turnLimit) {
+              setNotice('The agent reached its tool-turn limit.')
+            }
+          },
+
+          onError: (error) => {
+            finish(error, true)
+          },
+        },
+      })
+
+      loop.restore(restored)
+      loopRef.current = loop
+
+      setInput('')
+
+      setMessages((previous) => [
+        ...previous,
+        {
+          role: 'user',
+          text: question,
+          contextKey,
+          modelLabel: label,
+        },
+        blank(),
+      ])
+
+      loop.run(question)
+    } catch (error) {
+      if (!current()) {
+        return
+      }
+
+      active.current = null
+      setBusy(false)
+      setActivity([])
+
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : String(error),
+      )
+    }
+  }
+
+  const newChat = () => {
+    if (busy) {
+      return
+    }
+
+    if (
+      (messages.length > 0 || input.trim()) &&
+      !window.confirm(
+        'Start a new chat? The current conversation will be cleared.',
+      )
+    ) {
+      return
+    }
+
+    // Invalidate all callbacks belonging to the previous conversation before
+    // touching either the AgentLoop or React state.
+    epoch.current++
+    active.current = null
+
+    const loop = loopRef.current
+    loopRef.current = null
+
+    try {
+      loop?.reset()
+    } catch {
+      // Reset failure must never freeze the chat.
+    }
+
+    // Clear persistent conversation state before updating React. The effects
+    // that run after this render will simply persist the same empty values.
+    try {
+      clearMessages(localStorage, conversation)
+      localStorage.setItem(draftKey(conversation), '')
+    } catch {
+      // Optional storage.
+    }
+
+    // Reset conversation-only state.
+    //
+    // Deliberately DO NOT reset:
+    // - Explorer selection
+    // - opened directory
+    // - selected model
+    //
+    // A new conversation should retain the user's current workspace context.
+    setBusy(false)
+    setMessages([])
+    setInput('')
+    setActivity([])
+    setNotice(null)
+
+    // Restore keyboard focus after React commits the cleared conversation.
+    requestAnimationFrame(() => {
+      inputRef.current?.focus()
+    })
+  }
+
+  return (
+    <section
+      className="ws-chat workspace-chat-main"
+      aria-label={`Chat with ${folderName}`}
+    >
+      <header className="ws-chat-head">
+        <NawaIcon size={27} />
+
+        <div className="workspace-chat-heading">
+          <span className="workspace-eyebrow">
+            Nawa assistant
+          </span>
+
+          <h1 className="ws-chat-title">
+            {folderName}
+          </h1>
+        </div>
+
+        <button
+          type="button"
+          className="ws-chat-close"
+          onClick={newChat}
+          disabled={busy || (!messages.length && !input.trim())}
+        >
+          New chat
+        </button>
+
+        <button
+          type="button"
+          className="ws-chat-close"
+          onClick={onClose}
+        >
+          Hide chat
+        </button>
+      </header>
+
+      <div
+        className="ws-chat-scope"
+        aria-label="Main-panel selection"
+      >
+        <div className="workspace-scope-toolbar">
+          <strong>
+            Selected in main panel
+          </strong>
+
+          <span className="ws-chat-meta">
+            {selection.files.length}{' '}
+            {selection.files.length === 1 ? 'file' : 'files'}
+            {' · '}
+            {selection.directories.length}{' '}
+            {selection.directories.length === 1
+              ? 'folder'
+              : 'folders'}
+          </span>
+        </div>
+
+        {!selection.files.length &&
+          !selection.directories.length && (
+            <p className="workspace-scope-help">
+              Nothing selected. Select files in the main panel
+              to allow reading their contents.
+            </p>
+          )}
+
+        <div className="nawa-selection-items">
+          {selection.directories.map((path) => (
+            <div
+              key={path}
+              className="nawa-selection-item"
+              title={path}
+            >
+              <FolderGlyph size={18} />
+
+              <span>
+                {displayPath(selection, path)}
+              </span>
+
+              <small>
+                Names only
+              </small>
+            </div>
+          ))}
+
+          {selection.files.map((path) => (
+            <div
+              key={path}
+              className="nawa-selection-item"
+              title={path}
+            >
+              <DocumentIcon
+                ext={path.split('.').pop() || ''}
+                size={18}
+              />
+
+              <button
+                type="button"
+                onClick={() => onOpenFile(path)}
+              >
+                {displayPath(selection, path)}
+              </button>
+
+              <small>
+                Can read
+              </small>
+            </div>
+          ))}
+        </div>
+
+        {folder && (
+          <div
+            className="nawa-opened-folder"
+            title={folder}
+          >
+            Opened: {folder}{' '}
+            <span>
+              · names only
+            </span>
+          </div>
+        )}
+
+        <p className="workspace-scope-help">
+          Folder selection permits listing names, not reading
+          files. Selection changes stop the current response.
+        </p>
+      </div>
+
+      {!!activity.length && (
+        <div
+          className="ws-chat-notice"
+          role="status"
+        >
+          {activity.slice(-2).join(' · ')}
+        </div>
+      )}
+
+      <div
+        ref={logRef}
+        className="ws-chat-log"
+        role="log"
+        aria-live="polite"
+      >
+        {!messages.length && (
+          <div className="ws-chat-empty">
+            <h2>
+              Ask Nawa
+            </h2>
+
+            <p>
+              List the opened or selected folders. Select
+              individual files to summarize, compare, or ask
+              about their contents.
+            </p>
+          </div>
+        )}
+
+        {messages.map((message, index) =>
+          !message.text && !message.streaming ? null : (
+            <div
+              key={index}
+              className={`ws-chat-msg ws-chat-${message.role}${
+                message.error ? ' ws-chat-error' : ''
+              }`}
+            >
+              <span className="workspace-message-role">
+                {message.role === 'user'
+                  ? 'You'
+                  : 'Nawa'}
+
+                {message.role === 'assistant' &&
+                  message.modelLabel && (
+                    <small className="nawa-message-model">
+                      {message.modelLabel}
+                    </small>
+                  )}
+              </span>
+
+              {message.streaming && !message.text
+                ? 'Thinking…'
+                : message.role === 'assistant'
+                  ? <Markdown text={message.text} />
+                  : message.text}
+            </div>
+          ),
+        )}
+      </div>
+
+      {notice && (
+        <div
+          className="ws-chat-notice"
+          role="status"
+        >
+          {notice}
+        </div>
+      )}
+
+      <ChatModelPicker
+        loadSettings={() =>
+          window.aiOffice.getAiSettings()
+        }
+        onChange={setModelId}
+        storageKey={`nawa.chat-model:${conversation}`}
+        disabled={busy}
+      />
+
+      <form
+        className="ws-chat-input-row"
+        onSubmit={(event) => {
+          event.preventDefault()
+          void send()
+        }}
+      >
+        <textarea
+          ref={inputRef}
+          aria-label="Message Nawa"
+          className="ws-chat-input"
+          value={input}
+          rows={3}
+          placeholder="Ask about this selection…"
+          onChange={(event) =>
+            setInput(event.target.value)
+          }
+          onKeyDown={(event) => {
+            if (
+              event.key === 'Enter' &&
+              !event.shiftKey &&
+              !event.nativeEvent.isComposing
+            ) {
+              event.preventDefault()
+              void send()
+            } else if (
+              event.key === 'Escape' &&
+              busy
+            ) {
+              stop()
+            }
+          }}
+        />
+
+        {busy ? (
+          <button
+            type="button"
+            className="ws-chat-send"
+            onClick={() => stop()}
+          >
+            Stop
+          </button>
+        ) : (
+          <button
+            type="submit"
+            className="ws-chat-send"
+            disabled={!input.trim()}
+          >
+            Send
+          </button>
+        )}
+      </form>
+
+      <div className="workspace-privacy-note">
+        The configured model can see folder names and metadata.
+        Only explicitly selected files may be read. Previous
+        messages from a different selection are not sent again.
+      </div>
+    </section>
+  )
+}

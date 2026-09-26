@@ -1,0 +1,13 @@
+.nawa-models-settings { margin: 0 0 24px; padding: 14px; border: 1px solid var(--border, #ccc); border-radius: 8px; }
+.nawa-models-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.nawa-models-title h4 { margin: 0; }
+.nawa-models-settings p { font-size: 12px; line-height: 1.5; opacity: .8; }
+.nawa-model-default, .nawa-model-fields label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; min-width: 0; }
+.nawa-models-settings input, .nawa-models-settings select { width: 100%; min-width: 0; box-sizing: border-box; background: var(--bg, Canvas); color: var(--text, CanvasText); border: 1px solid var(--border, #aaa); border-radius: 5px; padding: 6px 8px; font: inherit; }
+.nawa-model-card { margin-top: 12px; padding: 10px; border: 1px solid var(--border, #ddd); border-radius: 6px; }
+.nawa-model-card summary { cursor: pointer; font-weight: 600; overflow-wrap: anywhere; }
+.nawa-model-card summary small { font-size: 11px; font-weight: normal; opacity: .7; }
+.nawa-model-fields { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 12px; }
+.nawa-model-fields small { grid-column: 1 / -1; font-size: 11px; opacity: .7; }
+.nawa-model-actions { display: flex; gap: 8px; margin-top: 12px; }
+@media (max-width: 650px) { .nawa-model-fields { grid-template-columns: minmax(0, 1fr); } }

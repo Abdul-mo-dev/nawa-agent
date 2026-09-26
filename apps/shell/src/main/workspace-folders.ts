@@ -78,7 +78,9 @@ export class WorkspaceFolderStore {
         if (!roots.some((root) => samePath(root, normalized))) roots.push(normalized)
       }
       if (roots.length > MAX_ROOTS) throw new Error('The workspace folder limit was exceeded.')
-      this.roots = roots
+      const consolidated = roots.filter((candidate, index) => !roots.some((parent, other) => other !== index && containsPath(parent, candidate)))
+      if (consolidated.length !== roots.length) await this.persist(consolidated)
+      this.roots = consolidated
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       const oldRoot = this.options.initialRoot?.()
@@ -146,10 +148,14 @@ export class WorkspaceFolderStore {
   async add(pickerPath: string): Promise<FolderRoot> {
     return this.mutate(async () => {
       const canonical = await this.canonicalDirectory(pickerPath)
-      const existing = this.roots.find((root) => samePath(root, canonical))
-      if (existing) return this.describe(existing)
-      if (this.roots.length >= MAX_ROOTS) throw new Error(`You can add up to ${MAX_ROOTS} folders.`)
-      const next = [...this.roots, canonical]
+      const existing = this.roots.find((root) => containsPath(root, canonical))
+      // Return the picked child for navigation, but keep its already-mounted parent as the tree root.
+      if (existing) return this.describe(canonical)
+      const remaining = this.roots.filter(root => !containsPath(canonical, root))
+      if (remaining.length >= MAX_ROOTS) throw new Error(`You can add up to ${MAX_ROOTS} folders.`)
+      const firstChild = this.roots.findIndex(root => containsPath(canonical, root))
+      const insertAt = firstChild < 0 ? remaining.length : Math.min(firstChild, remaining.length)
+      const next = [...remaining.slice(0, insertAt), canonical, ...remaining.slice(insertAt)]
       await this.persist(next)
       this.roots = next
       return this.describe(canonical)

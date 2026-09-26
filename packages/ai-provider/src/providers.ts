@@ -1,3 +1,4 @@
+import { normalizeChatModels } from './chat-models'
 import { defaultAiMediaSettings, resolveAiMediaSettings } from './media'
 import { defaultAiSearchSettings, resolveAiSearchSettings } from './search-settings'
 import type { AiProviderId, AiProviderMeta, AiSettings, LegacyAiSettings } from './types'
@@ -461,6 +462,8 @@ export function resolveAiSettings(
     return defaults
   }
   return {
+    chatModels: normalizeChatModels(stored.chatModels ?? defaults.chatModels, Object.keys(defaults.providers)),
+    defaultChatModelId: typeof stored.defaultChatModelId === 'string' ? stored.defaultChatModelId : defaults.defaultChatModelId,
     provider: stored.provider ?? defaults.provider,
     // Trim before migrating: a pasted " deepseek-reasoner " must still hit
     // the retired-id remap instead of being sent to the API verbatim.

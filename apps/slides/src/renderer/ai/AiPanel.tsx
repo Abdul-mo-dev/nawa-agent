@@ -1,3 +1,6 @@
+import { ChatModelPicker } from '@genoffice/ui'
+import { setRendererChatModel, getRendererChatModel } from '@genoffice/ai-provider/browser'
+import '@genoffice/ui/chat-model-picker.css'
 import { aiPanelWidthAtPointer, AiPanelSideButton } from '@genoffice/ui'
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import {
@@ -28,7 +31,7 @@ import {
   type ResolveFailure,
 } from './edit-queue'
 import { createFilesSkill } from './files-skill'
-import { createElectronTransport } from './transport'
+import { createElectronTransport, loadChatModelSettings } from './transport'
 import { renderSlidesToPngBase64 } from '../export-render'
 import {
   isQcEnabled,
@@ -2314,6 +2317,7 @@ export function AiPanel({
             />
           )}
           {attachNotice && <div className="ai-attach-notice">{attachNotice}</div>}
+          <ChatModelPicker loadSettings={loadChatModelSettings} onChange={setRendererChatModel} initialId={getRendererChatModel()} disabled={busy} />
           <div className="ai-input-box">
             {attachments.length > 0 && (
               <div className="ai-attachments" onScroll={onAttachmentsScroll}>

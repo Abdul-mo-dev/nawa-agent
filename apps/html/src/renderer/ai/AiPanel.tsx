@@ -1,3 +1,6 @@
+import { ChatModelPicker } from '@genoffice/ui'
+import { setRendererChatModel, getRendererChatModel } from '@genoffice/ai-provider/browser'
+import '@genoffice/ui/chat-model-picker.css'
 import { aiPanelWidthAtPointer, AiPanelSideButton } from '@genoffice/ui'
 import { useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent, ReactElement, ReactNode } from 'react'
@@ -47,7 +50,7 @@ import { ClarifyCard } from '../components/ClarifyCard'
 import { BriefCard } from '../components/BriefCard'
 import { createSearchSkill } from './search-skill'
 import { pastedBase64Image } from './base64-paste'
-import { createElectronTransport } from './transport'
+import { createElectronTransport, loadChatModelSettings } from './transport'
 import { DOC_NAV_SCHEME, parseDocNavHref } from './doc-nav'
 import { EditQueueCard } from './EditQueueCard'
 import {
@@ -1495,6 +1498,7 @@ export function AiPanel({
           </div>
         )}
         {attachNotice && <div className="ai-attach-notice">{attachNotice}</div>}
+        <ChatModelPicker loadSettings={loadChatModelSettings} onChange={setRendererChatModel} initialId={getRendererChatModel()} disabled={busy} />
         <AiComposer
           value={prompt}
           busy={busy}

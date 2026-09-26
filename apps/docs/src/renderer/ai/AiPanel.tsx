@@ -1,3 +1,6 @@
+import { ChatModelPicker } from '@genoffice/ui'
+import { setRendererChatModel, getRendererChatModel } from '@genoffice/ai-provider/browser'
+import '@genoffice/ui/chat-model-picker.css'
 import { aiPanelWidthAtPointer, AiPanelSideButton } from '@genoffice/ui'
 import { useEffect, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/core'
@@ -41,7 +44,7 @@ import { DOCS_CONTINUE_INSTRUCTION } from './continuation'
 import { waitForFullContent } from '../phased-content'
 import { currentDocGeneration } from '../file-actions'
 import { createFilesSkill } from './files-skill'
-import { createElectronTransport } from './transport'
+import { createElectronTransport, loadChatModelSettings } from './transport'
 import { useI18n, t as tModule, aiLangDirective, type StringKey } from '../i18n/locale'
 import { Markdown } from '@genoffice/ui'
 import { AiComposer, AiScopeQuote, AiTypingIndicator, type AiScopeQuoteData } from '@genoffice/ui'
@@ -1527,6 +1530,7 @@ export function AiPanel({
           onSend={sendQueue}
           onFocus={(qid) => onQueueFocus?.(qid)}
         />
+        <ChatModelPicker loadSettings={loadChatModelSettings} onChange={setRendererChatModel} initialId={getRendererChatModel()} disabled={busy} />
         <AiComposer
           header={
             (hasScopeSelection || attachments.length > 0) && (

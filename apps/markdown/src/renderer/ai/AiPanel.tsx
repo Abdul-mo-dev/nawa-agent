@@ -1,3 +1,6 @@
+import { ChatModelPicker } from '@genoffice/ui'
+import { setRendererChatModel, getRendererChatModel } from '@genoffice/ai-provider/browser'
+import '@genoffice/ui/chat-model-picker.css'
 import { aiPanelWidthAtPointer, AiPanelSideButton } from '@genoffice/ui'
 import { useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent, ReactElement, ReactNode } from 'react'
@@ -27,7 +30,7 @@ import {
   type DocWriteSpec,
 } from './doc-writer'
 import { createSearchSkill } from './search-skill'
-import { createElectronTransport } from './transport'
+import { createElectronTransport, loadChatModelSettings } from './transport'
 import { EditQueueCard } from './EditQueueCard'
 import {
   buildQueueInstruction,
@@ -990,6 +993,7 @@ export function AiPanel({
             onFocus={(qid) => onQueueFocus?.(qid)}
           />
         )}
+        <ChatModelPicker loadSettings={loadChatModelSettings} onChange={setRendererChatModel} initialId={getRendererChatModel()} disabled={busy} />
         <AiComposer
           value={prompt}
           busy={busy}

@@ -15,6 +15,7 @@
     "./find-panel.css": "./src/find-panel.css",
     "./ribbon-collapse.css": "./src/ribbon-collapse.css",
     "./markdown.css": "./src/markdown.css",
+    "./chat-model-picker.css": "./src/chat-model-picker.css",
     "./ai-panel-prefs.css": "./src/ai-panel-prefs.css",
     "./ai-scope-quote.css": "./src/ai-scope-quote.css",
     "./image-dialogs.css": "./src/image-dialogs.css",

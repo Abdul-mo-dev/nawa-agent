@@ -1,3 +1,6 @@
+import { ChatModelPicker } from '@genoffice/ui'
+import { setRendererChatModel, getRendererChatModel } from '@genoffice/ai-provider/browser'
+import '@genoffice/ui/chat-model-picker.css'
 import { aiPanelWidthAtPointer, AiPanelSideButton } from '@genoffice/ui'
 import { useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent, ReactElement } from 'react'
@@ -10,7 +13,7 @@ import sendEnterOn from '../assets/send-enter-on.png'
 import sendEnterOff from '../assets/send-enter-off.png'
 import sendStop from '../assets/send-stop.png'
 import { createPdfSkill } from './pdf-skill'
-import { createElectronTransport } from './transport'
+import { createElectronTransport, loadChatModelSettings } from './transport'
 import { PDF_NAV_SCHEME, parsePdfNavHref } from './pdf-nav'
 import type { FileOpConfirm, PdfAiDeps, PdfAppDeps } from './tools'
 
@@ -751,6 +754,7 @@ export function AiPanel({
       </div>
 
       <div className="ai-composer">
+        <ChatModelPicker loadSettings={loadChatModelSettings} onChange={setRendererChatModel} initialId={getRendererChatModel()} disabled={busy} />
         <AiComposer
           value={prompt}
           busy={busy}

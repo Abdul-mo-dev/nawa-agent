@@ -6,11 +6,11 @@ const en = {
   open: 'Open', openFile: 'Open file', rename: 'Rename', cut: 'Cut', paste: 'Move here', copyPath: 'Copy path', duplicate: 'Duplicate', trash: 'Move to Recycle Bin',
   sort: 'Sort', view: 'View', name: 'Name', modified: 'Date modified', type: 'Type', size: 'Size', ascending: 'Ascending', descending: 'Descending',
   details: 'Details', tiles: 'Large icons', compact: 'Compact spacing', navigation: 'Navigation pane', assistant: 'Nawa assistant', ask: 'Ask about selection',
-  folderContext: 'Use whole folder', settings: 'Settings', reveal: 'Show in Explorer', close: 'Close', cancel: 'Cancel', save: 'Save', retry: 'Try again',
+  folderContext: 'List opened folder', settings: 'Settings', reveal: 'Show in Explorer', close: 'Close', cancel: 'Cancel', save: 'Save', retry: 'Try again',
   loading: 'Loading…', noResults: 'No matching files', noResultsHelp: 'Try a different name or file extension. Search filters the current folder, not its subfolders.',
   empty: 'This folder is empty', emptyHelp: 'No supported documents or visible folders were found here.',
   welcome: 'Your files, with a little intelligence.', welcomeHelp: 'Add a workspace folder to browse documents and ask Nawa about their contents.',
-  chooseFolder: 'Choose a folder to start', chooseFolderHelp: 'The assistant uses the selected folder and its subfolders. Opening a file keeps its own editor and chat.',
+  chooseFolder: 'Choose a folder to start', chooseFolderHelp: 'Open or select a folder to list its items. Select individual files in the main panel to allow reading their contents.',
   selectDetails: 'Select an item to see its details', file: 'File', folder: 'Folder', items: 'items', selected: 'selected', local: 'Local workspace',
   allLoaded: 'All loaded', loadMore: 'Load more', selectedContext: 'Selection context', removeTitle: 'Remove this workspace folder?',
   removeHelp: 'This removes the folder from Nawa only. It does not delete, move, or change any files. Saved folder chats are kept.',
@@ -21,7 +21,7 @@ const en = {
   moveHelp: 'Items marked for moving. Navigate to a destination folder and choose Move here.', moved: 'Move completed.',
   readOnly: 'Directory AI is read-only', editor: 'Editor', files: 'Files', backFiles: 'Back to files', selection: 'Selection', path: 'Location',
   totalSize: 'Total file size', unavailable: 'Unavailable', rootsEmpty: 'Add a folder using +', rootTabs: 'Folder workspaces',
-  folderScope: 'Folder and subfolders', clearSearch: 'Clear search', checked: 'Select item', resetLayout: 'Reset layout',
+  folderScope: 'Chat about selection', clearSearch: 'Clear search', checked: 'Select item', resetLayout: 'Reset layout',
 } as const
 export type ExplorerString = keyof typeof en
 const ja: Record<ExplorerString, string> = {
@@ -31,11 +31,11 @@ const ja: Record<ExplorerString, string> = {
   open:'開く',openFile:'ファイルを開く',rename:'名前の変更',cut:'切り取り',paste:'ここに移動',copyPath:'パスをコピー',duplicate:'複製',trash:'ごみ箱に移動',
   sort:'並べ替え',view:'表示',name:'名前',modified:'更新日時',type:'種類',size:'サイズ',ascending:'昇順',descending:'降順',
   details:'詳細',tiles:'大きいアイコン',compact:'コンパクト表示',navigation:'ナビゲーション',assistant:'Nawaアシスタント',ask:'選択項目について質問',
-  folderContext:'フォルダー全体を使用',settings:'設定',reveal:'エクスプローラーで表示',close:'閉じる',cancel:'キャンセル',save:'保存',retry:'再試行',
+  folderContext:'開いたフォルダーの一覧',settings:'設定',reveal:'エクスプローラーで表示',close:'閉じる',cancel:'キャンセル',save:'保存',retry:'再試行',
   loading:'読み込み中…',noResults:'一致するファイルはありません',noResultsHelp:'名前や拡張子を変更してください。検索対象は現在のフォルダー内です。',
   empty:'このフォルダーは空です',emptyHelp:'対応する文書や表示可能なフォルダーが見つかりませんでした。',
   welcome:'ファイル管理を、もっとスマートに。',welcomeHelp:'ワークスペースを追加すると、文書の閲覧や内容についての質問ができます。',
-  chooseFolder:'フォルダーを選択してください',chooseFolderHelp:'選択したフォルダーとサブフォルダーがAIの対象になります。ファイルは専用エディターとチャットで開きます。',
+  chooseFolder:'フォルダーを選択してください',chooseFolderHelp:'開いたフォルダーや選択したフォルダーの項目を一覧できます。内容を読むファイルは、メインパネルで個別に選択してください。',
   selectDetails:'項目を選択すると詳細が表示されます',file:'ファイル',folder:'フォルダー',items:'項目',selected:'選択中',local:'ローカルワークスペース',
   allLoaded:'すべて読み込み済み',loadMore:'さらに読み込む',selectedContext:'選択項目のコンテキスト',removeTitle:'このワークスペースを外しますか？',
   removeHelp:'Nawaの登録のみを解除します。フォルダーやファイルは削除・移動されません。チャット履歴も保持されます。',
@@ -45,7 +45,7 @@ const ja: Record<ExplorerString, string> = {
   copied:'パスをコピーしました。',clipboardError:'コピーできませんでした。アドレスバーからパスをコピーしてください。',
   moveHelp:'移動先のフォルダーで「ここに移動」を選択してください。',moved:'移動が完了しました。',readOnly:'フォルダーAIは読み取り専用',editor:'エディター',files:'ファイル',backFiles:'ファイル一覧に戻る',
   selection:'選択項目',path:'場所',totalSize:'ファイルの合計サイズ',unavailable:'利用できません',rootsEmpty:'＋でフォルダーを追加',rootTabs:'フォルダーワークスペース',
-  folderScope:'フォルダーとサブフォルダー',clearSearch:'検索をクリア',checked:'項目を選択',resetLayout:'レイアウトをリセット',
+  folderScope:'選択項目についてチャット',clearSearch:'検索をクリア',checked:'項目を選択',resetLayout:'レイアウトをリセット',
 }
 const ar: Record<ExplorerString, string> = {
   home:'الرئيسية',recent:'الأخيرة',starred:'المفضلة',folders:'مجلدات مساحة العمل',add:'إضافة مجلد',remove:'إزالة مجلد من مساحة العمل',
@@ -54,11 +54,11 @@ const ar: Record<ExplorerString, string> = {
   open:'فتح',openFile:'فتح ملف',rename:'إعادة تسمية',cut:'قص',paste:'نقل إلى هنا',copyPath:'نسخ المسار',duplicate:'إنشاء نسخة',trash:'نقل إلى سلة المحذوفات',
   sort:'فرز',view:'عرض',name:'الاسم',modified:'تاريخ التعديل',type:'النوع',size:'الحجم',ascending:'تصاعدي',descending:'تنازلي',
   details:'التفاصيل',tiles:'أيقونات كبيرة',compact:'عرض مضغوط',navigation:'لوحة التنقل',assistant:'مساعد نوى',ask:'اسأل عن التحديد',
-  folderContext:'استخدام المجلد بالكامل',settings:'الإعدادات',reveal:'عرض في المستكشف',close:'إغلاق',cancel:'إلغاء',save:'حفظ',retry:'إعادة المحاولة',
+  folderContext:'عرض عناصر المجلد المفتوح',settings:'الإعدادات',reveal:'عرض في المستكشف',close:'إغلاق',cancel:'إلغاء',save:'حفظ',retry:'إعادة المحاولة',
   loading:'جارٍ التحميل…',noResults:'لا توجد ملفات مطابقة',noResultsHelp:'جرّب اسماً أو امتداداً آخر. يشمل البحث المجلد الحالي فقط ولا يشمل مجلداته الفرعية.',
   empty:'هذا المجلد فارغ',emptyHelp:'لم يتم العثور على مستندات مدعومة أو مجلدات ظاهرة.',
   welcome:'ملفاتك، بلمسة من الذكاء.',welcomeHelp:'أضف مجلد عمل لتصفح المستندات وسؤال نوى عن محتوياتها.',
-  chooseFolder:'اختر مجلداً للبدء',chooseFolderHelp:'يستخدم المساعد المجلد المحدد ومجلداته الفرعية. يحتفظ كل ملف بمحرره ومحادثته الخاصة.',
+  chooseFolder:'اختر مجلداً للبدء',chooseFolderHelp:'افتح مجلداً أو حدده لعرض عناصره. لقراءة محتوى الملفات، حدد كل ملف في اللوحة الرئيسية.',
   selectDetails:'حدد عنصراً لعرض تفاصيله',file:'ملف',folder:'مجلد',items:'عناصر',selected:'محدد',local:'مساحة عمل محلية',
   allLoaded:'تم تحميل الكل',loadMore:'تحميل المزيد',selectedContext:'سياق التحديد',removeTitle:'إزالة مجلد مساحة العمل؟',
   removeHelp:'يُزال تسجيل المجلد من نوى فقط. لن تُحذف الملفات أو تُنقل أو تُعدل، وتُحفظ المحادثات.',
@@ -68,7 +68,7 @@ const ar: Record<ExplorerString, string> = {
   copied:'تم نسخ المسار.',clipboardError:'تعذر الوصول إلى الحافظة. يمكنك نسخ المسار من شريط العنوان.',
   moveHelp:'انتقل إلى مجلد الوجهة ثم اختر نقل إلى هنا.',moved:'اكتمل النقل.',readOnly:'مساعد المجلد للقراءة فقط',editor:'المحرر',files:'الملفات',backFiles:'العودة إلى الملفات',
   selection:'التحديد',path:'الموقع',totalSize:'إجمالي حجم الملفات',unavailable:'غير متاح',rootsEmpty:'أضف مجلداً باستخدام +',rootTabs:'مساحات عمل المجلدات',
-  folderScope:'المجلد والمجلدات الفرعية',clearSearch:'مسح البحث',checked:'تحديد عنصر',resetLayout:'إعادة ضبط التخطيط',
+  folderScope:'محادثة حول التحديد',clearSearch:'مسح البحث',checked:'تحديد عنصر',resetLayout:'إعادة ضبط التخطيط',
 }
 export function explorerText(lang: string): (key: ExplorerString) => string {
   const dictionary = lang === 'ja' ? ja : lang === 'ar' ? ar : en

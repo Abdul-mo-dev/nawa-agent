@@ -1,0 +1,217 @@
+{
+  "version": 1,
+  "baseCommit": "beb999b9ddbf42910c358d28adee03a093020d70",
+  "installedAt": "2026-09-26T02:05:47.930Z",
+  "files": [
+    {
+      "path": "apps/shell/src/renderer/src/ChatModelsEditor.tsx",
+      "existed": false,
+      "before": null,
+      "after": "f7d08d5ffad907300cacf65bcced9e9b2675f5f353bfa1a907f016f6a4e9ed31"
+    },
+    {
+      "path": "apps/shell/src/renderer/src/WorkspaceChat.tsx",
+      "existed": true,
+      "before": "6f42a97a8f3954f9735a149d1744079cdc5687416a62e80ce0d1313b728c519e",
+      "after": "7cf891177ef29f84fa64047deaafe85399f75b8067df1252b195b7c764bb8b1a"
+    },
+    {
+      "path": "apps/shell/src/renderer/src/ai/directory-selection.ts",
+      "existed": false,
+      "before": null,
+      "after": "c58d2d9e03f2c90c21bfc2b003ca342a9efcc42090be8a62cd483beb2f99abff"
+    },
+    {
+      "path": "apps/shell/src/renderer/src/ai/directory-skill.ts",
+      "existed": true,
+      "before": "6e7a0a49dc995a3bc213ae4e3b4bcfef09642556c6c76123c18f82e735ff75e4",
+      "after": "82b1f837c095ef21900da6a3e24330a6e1191800de0959676c7418e84b4213ed"
+    },
+    {
+      "path": "apps/shell/src/renderer/src/chat-models-settings.css",
+      "existed": false,
+      "before": null,
+      "after": "37eaabeeb3a3c71d6166d79b38e7e7de39ff09facef3ad775a1d21d409d00adf"
+    },
+    {
+      "path": "apps/shell/src/renderer/src/explorer/ExplorerHome.tsx",
+      "existed": true,
+      "before": "60cd41467252cdd5a1d48d4629f9f956e978bc8285f56ce9ebc5a31d0a6e283a",
+      "after": "a9afee93c9c43966bdcc85cfeb9fa6ddd17dad7c80c72e0ec22d10c44ebc67a3"
+    },
+    {
+      "path": "apps/shell/src/renderer/src/explorer/Icons.tsx",
+      "existed": true,
+      "before": "ea54c97d65af2816ce2969ce328f24dfde11146026ef164fb2351a885d992c71",
+      "after": "e00add70b3b4883a3720c534b87c001ac17770c96f64a93182aa9c33bed9d841"
+    },
+    {
+      "path": "apps/shell/src/renderer/src/workspace-selection.css",
+      "existed": false,
+      "before": null,
+      "after": "207557e0eb759c4e4cadcbc61f9a5cfafbd0b4b37380bf50b75fb18407f2762d"
+    },
+    {
+      "path": "packages/ai-provider/src/chat-models.ts",
+      "existed": false,
+      "before": null,
+      "after": "08d7704bc19b06604f269d742aa8ace0f6b517bff418585122e7cd0e56c6625d"
+    },
+    {
+      "path": "packages/ui/src/ChatModelPicker.tsx",
+      "existed": false,
+      "before": null,
+      "after": "1aff1ee74bfe5d2e2ef2a1784b2536dcdaab4b57b18f63299b0c3063f99e21f3"
+    },
+    {
+      "path": "packages/ui/src/chat-model-picker.css",
+      "existed": false,
+      "before": null,
+      "after": "d1800809b111d3de4842b2bbde9e059deb7244fa5bacefa8953df431b2f6cd34"
+    },
+    {
+      "path": "packages/ai-provider/src/types.ts",
+      "existed": true,
+      "before": "b73013713b9ca6913cbc8e21cd5c39b839ee4b3c16b3a100e23fcb04737ab89d",
+      "after": "efd778f974a639c150fce02d8662d2e8eb8654afb7eccb12fe2ec26df77b058f"
+    },
+    {
+      "path": "packages/ai-provider/src/providers.ts",
+      "existed": true,
+      "before": "111dbe93382adfd1dfa49ba0219999c5b602db35dfed46222d23c8d7235cfb62",
+      "after": "c7220d41fddbd3fd777087bb001676cbd38de3b401ae25e18ce5e709fdf46759"
+    },
+    {
+      "path": "packages/ai-provider/src/browser.ts",
+      "existed": true,
+      "before": "0eea8ced2b2fb1c1545a47197fedc992b06c9752d46a5271c80a7a7989d7a143",
+      "after": "63dd0426c7c3760fc75421a5226f30243574317610f46038e42aac6f66742f70"
+    },
+    {
+      "path": "packages/ai-provider/src/index.ts",
+      "existed": true,
+      "before": "bddb4945d8d31115bd1698bed3aadc244382b2ec9166d50d836238a8c7df9ebd",
+      "after": "c4bab687406a200b0a001d2750d4931491b3e4df747c9838a5548c3e18430fb9"
+    },
+    {
+      "path": "packages/ui/src/index.ts",
+      "existed": true,
+      "before": "5a9a69d2e9639130ff711722607371d1c0558bc0a7ba3755c17a39cc4d01ebfd",
+      "after": "c5d10998e1ad055cf81fcc795ec9dcd65772c5b28dc102f98b5feca640979748"
+    },
+    {
+      "path": "packages/ui/package.json",
+      "existed": true,
+      "before": "13a5a7181e00cd515ac88e570ca0994ece9b86d1c5a54264ccf2bc66c4bafb5b",
+      "after": "ea13fcde0a290acf7a219f565f6a6e6f7b98e33a7c81e7dda1415a03feec765a"
+    },
+    {
+      "path": "apps/shell/src/renderer/src/workspace-chat-state.ts",
+      "existed": true,
+      "before": "d8560bd5996d5b3ef9546c0e6adf9587d88d291e134a57a460fc4f624322d21e",
+      "after": "c91ccbd5cb09cd9af20098012a50aacff08067d9ed51513199704e71a06a4c79"
+    },
+    {
+      "path": "apps/shell/src/renderer/src/SettingsModal.tsx",
+      "existed": true,
+      "before": "cc05a7dd09a949f2fbb012741dd526984c8ae4a62669e20b4a9e581ee7021533",
+      "after": "6dee699ea13fd59dbaf388f452fa87e449d8a6ef5bcfee5138774a38c94cdc8a"
+    },
+    {
+      "path": "apps/shell/src/main/workspace-folders.ts",
+      "existed": true,
+      "before": "56b23f4a3653e03216e0bc9eaf5acc0b58d2a43b34bbc9ee21488711727cc50e",
+      "after": "b65e73e0d94c7a577e49c9f189c8ba2d4e7f32ea133d07ea5966ecaf4256dc40"
+    },
+    {
+      "path": "apps/shell/src/renderer/src/explorer/model.ts",
+      "existed": true,
+      "before": "7fb44e1deca4adfb61402dbdec41321ff793b502def1a0023bf8890a9146a348",
+      "after": "fe1ccd11ae1e52b0bae83ca96b6448a85c78a5248c557d3863a2379221d84b03"
+    },
+    {
+      "path": "packages/agent-core/src/electron-transport.ts",
+      "existed": true,
+      "before": "91922aefd3383f19ff9825adbf0ebf079296c66622319252fafb354872748b29",
+      "after": "37927fdb62f2f807a590d7e2ec9b37ee033694576e0699cd947d011981feb4c0"
+    },
+    {
+      "path": "apps/docs/src/renderer/ai/transport.ts",
+      "existed": true,
+      "before": "eedc0af3d6a15736db937649bc819b4cd8a7beedb7b53ccc24337e4dcf788fcd",
+      "after": "6fb95a6ddbcfe754b8e73627257e182292031a4554f1e79408daaa3d215b52d9"
+    },
+    {
+      "path": "apps/docs/src/renderer/ai/AiPanel.tsx",
+      "existed": true,
+      "before": "364ff8b0420d29e2456b71c247e1224f89e15c445c1be9f1c83487ee606471cb",
+      "after": "deb334d4747395cbea19804df870e9d0d509553fe8a88b28ffdbb76b893f2f53"
+    },
+    {
+      "path": "apps/sheets/src/renderer/ai/transport.ts",
+      "existed": true,
+      "before": "5da139f7ce3b8c4ecf5963896c3c2e42ea1d7fd785d4e69f019032777765714b",
+      "after": "5a7b6f3627f71f6c4f13b0a01ef63eaec86e48f52942300cad9435a6a39d2f6f"
+    },
+    {
+      "path": "apps/sheets/src/renderer/ai/AiChatPanel.tsx",
+      "existed": true,
+      "before": "85dbfabb46c2a2f05fcceb868587ecf5d7345daf7e44a7605df351c57e079256",
+      "after": "78f5d1c0d58c286c4d95427929dd8811d07d9bb90c8e6af9ec5d2df0962d94aa"
+    },
+    {
+      "path": "apps/slides/src/renderer/ai/transport.ts",
+      "existed": true,
+      "before": "1c667a21ffff5d4792d55c23a06e83af62b454540394d9d1aea14814314dee6f",
+      "after": "8d2087a4c56da0fe23b9585f34a434e763919694e7be9a9cb891bdf618a74e9c"
+    },
+    {
+      "path": "apps/slides/src/renderer/ai/AiPanel.tsx",
+      "existed": true,
+      "before": "0b8fd02a99c0393e9ea1b8b06d132e3ec6c4ae7048196d4294e29e486b53b64d",
+      "after": "3c9e4872b1a512a69e8336afa614a61fa95f3ee87daa61a43e61d35f5824052d"
+    },
+    {
+      "path": "apps/pdf/src/renderer/ai/transport.ts",
+      "existed": true,
+      "before": "a303c1625fd7796bb3fba395120917e30d5614d3a92be6c7b37cd51ecd23d185",
+      "after": "e4612263ec9c81de618f3147e556a38f56a40960918df4a84c0a48e3ec1a08a7"
+    },
+    {
+      "path": "apps/pdf/src/renderer/ai/AiPanel.tsx",
+      "existed": true,
+      "before": "98ec76e8e18e37e9e090d904d90464c90ee37532d644c4cbf071fa57b4198717",
+      "after": "0d33a6a9f0d2e4621b3c9bc309edc9460af1b2e8332827b4d8893a66b53e8276"
+    },
+    {
+      "path": "apps/markdown/src/renderer/ai/transport.ts",
+      "existed": true,
+      "before": "02e3ba5026558bc8588f0e81b62c0de52f1537e723063b669c4641449c1f3416",
+      "after": "d00cdffdc65ad83a413a1df5451a827a5b3c7da2f3b77de8aab8d04ddd76ac9d"
+    },
+    {
+      "path": "apps/markdown/src/renderer/ai/AiPanel.tsx",
+      "existed": true,
+      "before": "5a19907ecd8f349df2c2a3baae86cfe7bc3c6f6f59defee792a76bd8d30ad8a1",
+      "after": "49b7f4e499ecfb5f19e7d6a98aa1b557ce4f3cafe0188252a7173aebb67e224c"
+    },
+    {
+      "path": "apps/html/src/renderer/ai/transport.ts",
+      "existed": true,
+      "before": "8e71eda0a90944ebbd0c60ef2e9d4dbaa0479ccd5499b71f8d489356de9099e9",
+      "after": "62dfb824402275043e7301e9fb332c88e1762fb919adf101f5bace73fb8f6dfa"
+    },
+    {
+      "path": "apps/html/src/renderer/ai/AiPanel.tsx",
+      "existed": true,
+      "before": "facb443ae1a414d49b1b4f2a3f12a31970d22d9d2240513cbd887b4747b911ed",
+      "after": "cfa95f3e9c06c3052baa3eafc3b1ef9e2628edc79d0f05ea865615f9d24e69b4"
+    },
+    {
+      "path": "apps/shell/src/renderer/src/explorer/strings.ts",
+      "existed": true,
+      "before": "61ebd16f324697405dcaa70cc626e4eed1dff3bee864611bad240cd77d06a280",
+      "after": "3495f0a59eafa43dda18f9818459757178e14306e175a509102b6770336fff51"
+    }
+  ]
+}

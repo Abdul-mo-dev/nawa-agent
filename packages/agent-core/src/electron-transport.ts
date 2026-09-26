@@ -53,6 +53,8 @@ export interface IpcTransportOptions<S> {
   /** abort the in-flight turn in the main process */
   cancel(requestId: string): void
   getSettings(): S
+  /** Rotate native sessions when the selected model/provider configuration changes. */
+  sessionKey?(settings: S): string
   /** localized fallback when an error chunk carries no message */
   unknownErrorText(): string
   /** localized message for timeouts (errorCode 'timeout' and the silence watchdog) */
@@ -72,7 +74,8 @@ export interface IpcTransportOptions<S> {
  */
 export function createIpcTransport<S>(options: IpcTransportOptions<S>): AgentTransport {
   const timeoutText = () => options.timeoutErrorText?.() ?? options.unknownErrorText()
-  const sessionId = crypto.randomUUID()
+  let sessionId = crypto.randomUUID()
+  let previousSessionKey: string | undefined
   return {
     stream(request: AgentStreamRequest, cb) {
       const requestId = crypto.randomUUID()
@@ -129,12 +132,15 @@ export function createIpcTransport<S>(options: IpcTransportOptions<S>): AgentTra
       })
       armSilence()
       try {
+        const settings = options.getSettings()
+        const sessionKey = options.sessionKey?.(settings)
+        if (sessionKey !== previousSessionKey) { previousSessionKey = sessionKey; sessionId = crypto.randomUUID() }
         // a rejected/thrown start would otherwise leave the run pending until the watchdog
         Promise.resolve(
           options.start({
             requestId,
             sessionId,
-            settings: options.getSettings(),
+            settings,
             system: request.system,
             messages: request.messages,
             tools: request.tools,

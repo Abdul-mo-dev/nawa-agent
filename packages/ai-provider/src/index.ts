@@ -1,3 +1,5 @@
+export { applyChatModel, chatModelLabel, normalizeChatModels, validateChatModels, setRendererChatModel, getRendererChatModel, rememberChatModels, resolveRendererChatSettings, chatModelSessionKey } from './chat-models'
+export type { AiChatModel } from './chat-models'
 export type {
   AiChatRequest,
   AiChatResponse,

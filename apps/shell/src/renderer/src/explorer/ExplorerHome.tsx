@@ -8,7 +8,7 @@ import { WorkspaceChat } from '../WorkspaceChat'
 import '../workspace.css'
 import { DirectoryTree } from './Tree'
 import { FileList } from './FileList'
-import { DocumentIcon, FolderGlyph, Icon } from './Icons'
+import { DocumentIcon, FolderGlyph, Icon, NawaIcon } from './Icons'
 import { Dialog, Menu, Splitter, ToolButton, useEditorSlot } from './Controls'
 import type { MenuAction } from './Controls'
 import { ExplorerSettings } from './Settings'
@@ -31,8 +31,6 @@ type DialogState =
   | { kind: 'delete'; items: Item[] }
   | { kind: 'remove'; root: FolderRoot }
   | { kind: 'conflicts'; paths: string[]; destination: string }
-interface ContextScope { files: string[]; folders: string[] }
-const EMPTY_SCOPE: ContextScope = { files: [], folders: [] }
 const PAGE_SIZE = 200
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error)
 
@@ -60,7 +58,6 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
   const [dialogError, setDialogError] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [cutItems, setCutItems] = useState<Item[]>([])
-  const [scope, setScope] = useState<ContextScope>(EMPTY_SCOPE)
   const [page, setPage] = useState<RecentPage>({ entries: [], total: 0, totalAll: 0 })
   const [pageLoading, setPageLoading] = useState(false)
   const [pageError, setPageError] = useState<string | null>(null)
@@ -155,19 +152,19 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
     setActiveRoot(root)
     setHistory(old => visit(old, { kind: 'folder', path: parent }))
     setSelected(new Set([editorTab.filePath])); anchor.current = editorTab.filePath
-    setSearch(''); setScope(EMPTY_SCOPE)
+    setSearch('')
   }, [editorTab?.id, editorTab?.filePath, editorActive, roots])
 
   const navigate = useCallback((next: Location) => {
     setHistory(old => visit(old, next)); setSelected(new Set()); anchor.current = null
-    setScope(EMPTY_SCOPE); setSearch(''); setEditingAddress(false); setNotice(null)
+    setSearch(''); setEditingAddress(false); setNotice(null)
     void window.aiOfficeTabs.activate('home').catch(failure)
   }, [failure])
   const moveHistory = (delta: number) => {
     const next = history.index + delta
     if (next < 0 || next >= history.entries.length) return
     setHistory(old => ({ ...old, index: next })); setSelected(new Set()); anchor.current = null
-    setScope(EMPTY_SCOPE); setSearch(''); setEditingAddress(false); setNotice(null)
+    setSearch(''); setEditingAddress(false); setNotice(null)
     void window.aiOfficeTabs.activate('home').catch(failure)
   }
   const refresh = () => { invalidate(); setRevision(n => n + 1); void loadRoots() }
@@ -176,7 +173,7 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
   const addRoot = async () => {
     if (busy) return
     setBusy(true)
-    try { const picked = await window.aiOffice.pickWorkspaceFolder(); if (picked) { await loadRoots(); setActiveRoot(picked.path); navigate({ kind: 'folder', path: picked.path }) } }
+    try { const picked = await window.aiOffice.pickWorkspaceFolder(); if (picked) { const mounted = await loadRoots(); setActiveRoot(rootFor(picked.path, mounted) ?? null); navigate({ kind: 'folder', path: picked.path }) } }
     catch (error) { failure(error) }
     finally { setBusy(false) }
   }
@@ -226,12 +223,13 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
     try { await moveFiles(cutItems.map(item => item.path), folder) } catch (error) { failure(error) } finally { setBusy(false) }
   }
   const ask = (list: Item[]) => {
-    const parent = folder ?? (list.length === 1 && list[0].kind === 'folder' ? list[0].path : list[0] ? parentPath(list[0].path) : null)
-    if (!parent || !rootFor(parent, roots)) { notify(t('chooseFolderHelp')); return }
-    const inside = list.filter(item => isWithin(item.path, parent))
-    if (inside.length !== list.length) { notify('Choose files from the same mounted directory before asking about a selection.', true); return }
-    if (location.kind !== 'folder' || !samePath(parent, folder || '') || editorActive) navigate({ kind: 'folder', path: parent })
-    setScope({ files: inside.filter(item => item.kind === 'file').map(item => item.path), folders: inside.filter(item => item.kind === 'folder').map(item => item.path) })
+    if (!list.length) { changePrefs({ pane: 'ai' }); return }
+    if (list.length === 1 && !allItems.some(item => samePath(item.path, list[0].path))) {
+      const parent = parentPath(list[0].path)
+      if (rootFor(parent, roots)) navigate({ kind: 'folder', path: parent })
+      else navigate({ kind: 'home' })
+    }
+    setSelected(new Set(list.map(item => item.path)))
     changePrefs({ pane: 'ai' })
   }
   const fileActions = (list: Item[], isRoot = false): MenuAction[] => {
@@ -353,7 +351,7 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
   const itemCount = allItems.length
   const loading = folder ? !!state?.loading || (!state && !!currentRootPath) : pageLoading || rootsLoading
   const listError = folder ? (!currentRootPath && !rootsLoading ? t('notMounted') : state?.error) : pageError
-  const headerIcon = folder ? <FolderGlyph size={34} open /> : <Icon name={location.kind === 'starred' ? 'star' : location.kind === 'recent' ? 'recent' : 'home'} size={28} />
+  const headerIcon = folder ? <FolderGlyph size={34} open /> : location.kind === 'home' ? <NawaIcon size={34} /> : <Icon name={location.kind === 'starred' ? 'star' : location.kind === 'recent' ? 'recent' : 'home'} size={28} />
 
   function detailsPane(): ReactNode {
     const item = currentContext
@@ -388,23 +386,23 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
     </div>
     <div className="ex-body">
       {navigationVisible && <><aside className="ex-navigation" aria-label={t('navigation')}>
-        <div className="ex-brand"><span className="ex-brand-mark"><Icon name="sparkles" size={20} /></span><span>Nawa<span className="ex-brand-caption">Workspace</span></span></div>
+        <div className="ex-brand"><span className="ex-brand-mark"><NawaIcon size={32} /></span><span>Nawa<span className="ex-brand-caption">Workspace</span></span></div>
         <nav className="ex-quick-nav" aria-label="Quick access">{(['home', 'recent', 'starred'] as const).map(kind => <button className={`ex-nav-item${location.kind === kind && !editorActive ? ' is-current' : ''}`} key={kind} aria-current={location.kind === kind && !editorActive ? 'page' : undefined} onClick={() => navigate({ kind })}><Icon name={kind === 'starred' ? 'star' : kind} size={18} /><span>{t(kind)}</span></button>)}</nav>
         <div className="ex-nav-section"><h2>{t('folders')}</h2><ToolButton icon="plus" label={t('add')} disabled={busy || rootsLoading} onClick={() => { void addRoot() }} /><ToolButton icon="minus" label={t('remove')} disabled={!currentRoot || busy} onClick={() => { if (currentRoot) beginDialog({ kind: 'remove', root: currentRoot }) }} /></div>
         {roots.length > 1 && <div className="ex-root-tabs" role="tablist" aria-label={t('rootTabs')}>{roots.map(root => <button role="tab" aria-selected={currentRoot?.path === root.path} key={root.path} title={root.path} onClick={() => { setActiveRoot(root.path); navigate({ kind: 'folder', path: root.path }) }}><FolderGlyph size={15} /><span>{root.name}</span></button>)}</div>}
-        <div className="ex-tree-scroll">{rootsLoading && !roots.length ? <p className="ex-nav-help" role="status">{t('loading')}</p> : currentRoot ? <DirectoryTree root={currentRoot} revision={revision} selectedPath={editorActive && editorTab?.filePath ? editorTab.filePath : folder ?? undefined} get={directory} load={loadDirectory} navigate={path => navigate({ kind: 'folder', path })} openFile={openFile} onContext={(event, item, isRoot) => showItemMenu(event, item, isRoot, true)} /> : <button className="ex-add-empty" onClick={() => { void addRoot() }}><Icon name="plus" /><span>{t('rootsEmpty')}</span></button>}</div>
+        <div className="ex-tree-scroll">{rootsLoading && !roots.length ? <p className="ex-nav-help" role="status">{t('loading')}</p> : currentRoot ? <DirectoryTree root={currentRoot} revision={revision} selectedPath={editorActive && editorTab?.filePath ? editorTab.filePath : currentContext?.path ?? folder ?? undefined} get={directory} load={loadDirectory} navigate={path => navigate({ kind: 'folder', path })} openFile={openFile} onContext={(event, item, isRoot) => showItemMenu(event, item, isRoot, true)} /> : <button className="ex-add-empty" onClick={() => { void addRoot() }}><Icon name="plus" /><span>{t('rootsEmpty')}</span></button>}</div>
         <div className="ex-nav-footer"><button className="ex-nav-item" onClick={() => setSettingsOpen(true)}><Icon name="settings" /><span>{t('settings')}</span></button><div className="ex-local-badge"><span />{t('local')}</div></div>
       </aside><Splitter label={t('navigation')} value={effectiveNavWidth} min={180} max={380} onChange={navigationWidth => changePrefs({ navigationWidth })} /></>}
       <main ref={center} className="ex-center" aria-label={editorActive ? t('editor') : t('files')}>
         {editorActive ? <div className="ex-editor-placeholder" aria-hidden="true"><Icon name="open" size={28} /><span>{editorTab?.title}</span></div> : <>
-          <div className="ex-content-heading"><span className="ex-heading-icon">{headerIcon}</span><div><h1 dir="auto">{title}</h1><p>{loading ? t('loading') : `${itemCount.toLocaleString(dateLocale)} ${t('items')}`}{selectedItems.length > 0 && ` · ${selectedItems.length} ${t('selected')}`}</p></div><span className="ex-toolbar-spacer" />{folder && <button className="ex-text-button" title={t('ask')} onClick={() => { setScope(EMPTY_SCOPE); changePrefs({ pane: 'ai' }) }}><Icon name="sparkles" size={15} /><span>{t('folderScope')}</span></button>}</div>
+          <div className="ex-content-heading"><span className="ex-heading-icon">{headerIcon}</span><div><h1 dir="auto">{title}</h1><p>{loading ? t('loading') : `${itemCount.toLocaleString(dateLocale)} ${t('items')}`}{selectedItems.length > 0 && ` · ${selectedItems.length} ${t('selected')}`}</p></div><span className="ex-toolbar-spacer" />{folder && <button className="ex-text-button" title={t('ask')} onClick={() => { changePrefs({ pane: 'ai' }) }}><Icon name="sparkles" size={15} /><span>{t('folderScope')}</span></button>}</div>
           {notice && <div className={`ex-notice${notice.error ? ' is-error' : ''}`} role={notice.error ? 'alert' : 'status'}><span>{notice.text}</span><button aria-label={t('close')} onClick={() => setNotice(null)}><Icon name="close" size={14} /></button></div>}
           {listError ? <div className="ex-empty"><Icon name="info" size={40} /><h2>{t('unavailable')}</h2><p>{listError}</p><button className="ex-primary" onClick={refresh}>{t('retry')}</button></div> : loading && !items.length ? <div className="ex-empty" role="status"><span className="ex-spinner" /><p>{t('loading')}</p></div> : !items.length ? <div className="ex-empty"><FolderGlyph size={86} /><h2>{search ? t('noResults') : !roots.length && location.kind === 'home' ? t('welcome') : t('empty')}</h2><p>{search ? t('noResultsHelp') : !roots.length && location.kind === 'home' ? t('welcomeHelp') : t('emptyHelp')}</p>{search ? <button className="ex-secondary" onClick={() => setSearch('')}>{t('clearSearch')}</button> : <div className="ex-empty-actions"><button className="ex-primary" onClick={() => { void addRoot() }}><Icon name="plus" size={16} />{t('add')}</button><button className="ex-secondary" onClick={() => { void act(() => window.aiOffice.browse()) }}>{t('openFile')}</button></div>}</div> : <FileList key={folder ?? location.kind} items={items} selected={selected} cutPaths={cutPaths} preferences={prefs} locale={dateLocale} text={t} onSelect={choose} onSelectAll={selectAll} onOpen={openItem} onContext={(event, item) => showItemMenu(event, item)} onRename={() => requestRename()} onDelete={() => requestDelete()} onSort={sort} />}
           {!folder && page.entries.length < page.total && <div className="ex-pagination"><span>{page.entries.length.toLocaleString(dateLocale)} / {page.total.toLocaleString(dateLocale)}</span><button disabled={pageLoading} onClick={() => { void loadMore() }}>{pageLoading ? t('loading') : t('loadMore')}</button></div>}
         </>}
       </main>
       {inspectorVisible && <><Splitter label={prefs.pane === 'ai' ? t('assistant') : t('details')} value={effectiveInspectorWidth} min={300} max={Math.min(560, Math.max(300, windowWidth - (navigationVisible ? prefs.navigationWidth : 0) - 380))} reverse onChange={inspectorWidth => changePrefs({ inspectorWidth })} /><aside className="ex-inspector" aria-label={prefs.pane === 'ai' ? t('assistant') : t('details')}><div className="ex-inspector-tabs" role="tablist" aria-label="Inspector"><button role="tab" aria-selected={prefs.pane === 'ai'} onClick={() => changePrefs({ pane: 'ai' })}><Icon name="sparkles" size={17} />{t('assistant')}</button><button role="tab" aria-selected={prefs.pane === 'details'} onClick={() => changePrefs({ pane: 'details' })}><Icon name="info" size={16} />{t('details')}</button><ToolButton icon="close" label={t('close')} onClick={() => changePrefs({ pane: 'none' })} /></div>
-        {prefs.pane === 'details' ? detailsPane() : folder && currentRootPath ? <>{(scope.files.length > 0 || scope.folders.length > 0) && <div className="ex-scope-banner"><span>{t('selectedContext')}</span><button onClick={() => setScope(EMPTY_SCOPE)}>{t('folderContext')}</button></div>}{selectedItems.length > 0 && !scope.files.length && !scope.folders.length && <button className="ex-use-selection" onClick={() => ask(selectedItems)}><Icon name="sparkles" size={14} />{t('ask')} ({selectedItems.length})</button>}<WorkspaceChat folder={folder} folderName={basename(folder)} scopePaths={scope.files} scopeDirs={scope.folders} onOpenFile={openFile} onClose={() => changePrefs({ pane: 'none' })} /></> : <div className="ex-pane-empty"><span className="ex-ai-orb"><Icon name="sparkles" size={32} /></span><h2>{t('chooseFolder')}</h2><p>{t('chooseFolderHelp')}</p><button className="ex-secondary" onClick={() => { void addRoot() }}><Icon name="plus" size={15} />{t('add')}</button><div className="ex-readonly"><Icon name="check" size={13} />{t('readOnly')}</div></div>}
+        {prefs.pane === 'details' ? detailsPane() : (folder && currentRootPath) || selectedItems.length > 0 ? <WorkspaceChat folder={folder} folderName={folder ? basename(folder) : 'Selected items'} scopePaths={selectedItems.filter(item => item.kind === 'file').map(item => item.path)} scopeDirs={selectedItems.filter(item => item.kind === 'folder').map(item => item.path)} onOpenFile={openFile} onClose={() => changePrefs({ pane: 'none' })} /> : <div className="ex-pane-empty"><span className="ex-ai-orb"><Icon name="sparkles" size={32} /></span><h2>{t('chooseFolder')}</h2><p>{t('chooseFolderHelp')}</p><button className="ex-secondary" onClick={() => { void addRoot() }}><Icon name="plus" size={15} />{t('add')}</button><div className="ex-readonly"><Icon name="check" size={13} />{t('readOnly')}</div></div>}
       </aside></>}
     </div>
     <footer className="ex-status"><span>{editorActive ? editorTab?.title : `${items.length.toLocaleString(dateLocale)} ${t('items')}`}</span>{!editorActive && selectedItems.length > 0 && <><span className="ex-status-divider" /><span>{selectedItems.length} {t('selected')}</span><span>{sizeLabel(selectedItems.filter(item => item.kind === 'file').reduce((sum, item) => sum + item.sizeBytes, 0), dateLocale)}</span></>}<span className="ex-toolbar-spacer" /><span className="ex-status-scope">{editorActive ? t('editor') : t('local')}</span><ToolButton icon="list" label={t('details')} disabled={editorActive} pressed={prefs.view === 'details'} onClick={() => changePrefs({ view: 'details' })} /><ToolButton icon="grid" label={t('tiles')} disabled={editorActive} pressed={prefs.view === 'tiles'} onClick={() => changePrefs({ view: 'tiles' })} /></footer>

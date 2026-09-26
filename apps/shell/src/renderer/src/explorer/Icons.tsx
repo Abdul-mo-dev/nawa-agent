@@ -1,3 +1,4 @@
+import nawaLogo from '../assets/nawa-logo.svg'
 import type { CSSProperties } from 'react'
 
 const paths = {
@@ -49,4 +50,9 @@ export function DocumentIcon({ ext = '', size = 26 }: { ext?: string; size?: num
     <rect x="1" y="13" width="21" height="18" rx="2.5" fill="var(--ex-file-color)" />
     <text x="11.5" y="25.5" textAnchor="middle" fill="var(--ex-mark)" fontFamily="Segoe UI, Arial, sans-serif" fontWeight="650" fontSize={mark.length > 2 ? '7.5' : '12'}>{mark}</text>
   </svg>
+}
+
+/** Reuse the icon portion of the existing Nawa wordmark, without duplicating brand art. */
+export function NawaIcon({ size = 24 }: { size?: number }) {
+  return <svg className="nawa-icon" width={size} height={size} viewBox="0 0 240 240" aria-hidden="true" focusable="false" style={{ overflow: 'hidden' }}><image href={nawaLogo} width="760" height="240" /></svg>
 }

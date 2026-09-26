@@ -121,6 +121,9 @@ export interface AiSearchSettings {
 }
 
 export interface AiSettings {
+  /** Named profiles persisted with existing settings, not in browser storage. */
+  chatModels?: import('./chat-models').AiChatModel[] | undefined
+  defaultChatModelId?: string | undefined
   provider: AiProviderId
   providers: Record<AiProviderId, AiProviderConfig>
   /**
