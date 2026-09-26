@@ -11,44 +11,7 @@ import { extension, readInput, resolveInput, resolveOutput, writeOutput } from '
 import type { CommandContext, CommandDef } from '../registry'
 import { CliError, EXIT } from '../result'
 
-/** Conversions that run in this process. */
-const NODE_ROUTES: Record<string, readonly string[]> = {
-  pdf: ['docx', 'pptx', 'xlsx'],
-  csv: ['xlsx'],
-  xls: ['xlsx'],
-  xlsb: ['xlsx'],
-  ods: ['xlsx'],
-  md: ['docx', 'html'],
-  markdown: ['docx', 'html'],
-  docx: ['md'],
-  xlsx: ['csv'],
-  xlsm: ['csv'],
-}
-
-/**
- * Conversions the Nawa binary runs for us in its hidden headless-export
- * mode: anything that needs an app renderer (page layout for pdf, the Word
- * editor's HTML export, html2docx). Mirrors HEADLESS_TARGETS in the shell.
- */
-const APP_ROUTES: Record<string, readonly AppExportTarget[]> = {
-  csv: ['pdf'],
-  xls: ['pdf'],
-  md: ['pdf'],
-  markdown: ['pdf'],
-  docx: ['pdf', 'html'],
-  xlsx: ['pdf'],
-  xlsm: ['pdf'],
-  pptx: ['pdf'],
-  html: ['pdf', 'docx'],
-  htm: ['pdf', 'docx'],
-}
-
-const ROUTES: Record<string, readonly string[]> = Object.fromEntries(
-  [...new Set([...Object.keys(NODE_ROUTES), ...Object.keys(APP_ROUTES)])].map((from) => [
-    from,
-    [...(NODE_ROUTES[from] ?? []), ...(APP_ROUTES[from] ?? [])],
-  ]),
-)
+import { APP_ROUTES, ROUTES } from '../conversion-routes'
 
 function appTarget(from: string, to: string): AppExportTarget | null {
   const target = APP_ROUTES[from]?.find((t) => t === to)

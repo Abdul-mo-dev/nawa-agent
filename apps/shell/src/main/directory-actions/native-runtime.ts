@@ -1,11 +1,12 @@
-import { ipcMain, type WebContents } from 'electron'
+import { registerDirectoryStage, configureDirectoryStage, revokeDirectoryStage, assertDirectoryStageToolInput, directoryStageNetworkAllowed } from '../../../../../packages/electron-utils/src/directory-stage'
+import { ipcMain, webContents, type WebContents, type Session } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { extname } from 'node:path'
 import { buildBlankDocx } from '@genoffice/docx-engine'
 import { createBlankPptx } from '@genoffice/pptx-engine'
 import { blankXlsxBuffer } from '@genoffice/xlsx-gateway/gateway/csv-import'
 import { blankPdfBuffer } from '../../../../pdf/src/main/blank-pdf'
-import type { AgentToolCall, ToolExecution, DirectoryEditorDescription } from '@genoffice/agent-core'
+import type { AgentToolCall, ToolExecution, DirectoryEditorDescription, DirectoryWorkflowOptions, DirectoryWorkflowStatus, DirectoryInteractionReply } from '@genoffice/agent-core'
 import type { TabManager } from '../tab-manager'
 import type { DocumentTabKind } from '../../shared/tabs-api'
 import type { NativeStage } from './manager'
@@ -18,6 +19,17 @@ interface Options {
 }
 let options: Options | null = null
 let installed = false
+const guardedSessions = new WeakSet<Session>()
+/** The baseline has no other onBeforeRequest handler. Register once, pass ordinary views through. */
+function guardStageRendererNetwork(contents: WebContents): void {
+  const session = contents.session
+  if (!session || guardedSessions.has(session)) return
+  guardedSessions.add(session)
+  session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, (details, callback) => {
+    const sender = details.webContents ?? (details.webContentsId ? webContents.fromId(details.webContentsId) : undefined)
+    callback({ cancel: !!sender && !directoryStageNetworkAllowed(sender, details.url, sender.getURL()) })
+  })
+}
 const requests = new Map<string, { wc: number; resolve(value: unknown): void; reject(cause: Error): void; timer: ReturnType<typeof setTimeout> }>()
 export function configureDirectoryNative(value: Options): void {
   options = value
@@ -55,13 +67,13 @@ export async function assertOriginalClosed(path: string): Promise<void> {
     throw new Error('This file is open in an editor. Save and close its tab before applying a directory action, to avoid overwriting unsaved edits.')
   }
 }
-function rpc(contents: WebContents, path: string, command: 'describe' | 'execute', call?: AgentToolCall): Promise<unknown> {
+function rpc(contents: WebContents, path: string, command: 'describe' | 'execute' | 'verify' | 'poll' | 'respond', call?: AgentToolCall, mode?: 'read' | 'edit', text?: string, workflow?: DirectoryWorkflowOptions, response?: DirectoryInteractionReply): Promise<unknown> {
   if (contents.isDestroyed()) return Promise.reject(new Error('Staged editor was closed.'))
   const id = randomUUID()
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { requests.delete(id); reject(new Error('Staged editor did not respond. Rebuild all editors and retry.')) }, command === 'describe' ? 1500 : 60000)
+    const timer = setTimeout(() => { requests.delete(id); reject(new Error('Staged editor did not respond. Rebuild all editors and retry.')) }, command === 'describe' ? 1500 : command === 'execute' ? 1200000 : 60000)
     requests.set(id, { wc: contents.id, resolve, reject, timer })
-    try { contents.send('nawa:editor-command', { id, path, command, call }) }
+    try { contents.send('nawa:editor-command', { id, path, command, call, mode, text, workflow, response }) }
     catch (cause) { clearTimeout(timer); requests.delete(id); reject(cause) }
   })
 }
@@ -73,20 +85,36 @@ export async function openNativeStage(path: string): Promise<NativeStage> {
   const tabId = tabs.openDirectoryStage(kind, path)
   const contents = tabs.webContentsForTab(tabId)
   if (!contents) { tabs.closeTabWithoutPrompt(tabId); throw new Error('Could not open staged editor.') }
+  registerDirectoryStage(contents, path)
+  guardStageRendererNetwork(contents)
   contents.setBackgroundThrottling(false)
   let closed = false
   return {
-    async describe() {
+    async describe(mode: 'read' | 'edit' = 'edit', workflow?: DirectoryWorkflowOptions) {
+      configureDirectoryStage(contents, mode, workflow)
       const deadline = Date.now() + 40000
       let last: unknown
       while (!closed && !contents.isDestroyed() && Date.now() < deadline) {
-        try { return await rpc(contents, path, 'describe') as DirectoryEditorDescription }
+        try { return await rpc(contents, path, 'describe', undefined, mode, undefined, workflow) as DirectoryEditorDescription }
         catch (cause) { last = cause; await new Promise(resolve => setTimeout(resolve, 250)) }
       }
       throw new Error(`The ${kind} editor was not ready. Rebuild all editor bundles. ${last instanceof Error ? last.message : ''}`)
     },
+    async pollWorkflow() {
+      if (closed) throw new Error('Staged editor was closed.')
+      return await rpc(contents, path, 'poll') as DirectoryWorkflowStatus
+    },
+    async respondWorkflow(response) {
+      if (closed) throw new Error('Staged editor was closed.')
+      await rpc(contents, path, 'respond', undefined, undefined, undefined, undefined, response)
+    },
+    async verify(text) {
+      if (closed) throw new Error('Staged editor was closed.')
+      return await rpc(contents, path, 'verify', undefined, undefined, text) as string | null
+    },
     async execute(call) {
       if (closed) throw new Error('Staged editor was closed.')
+      assertDirectoryStageToolInput(contents, call)
       return await rpc(contents, path, 'execute', call) as ToolExecution
     },
     async save() {
@@ -99,6 +127,7 @@ export async function openNativeStage(path: string): Promise<NativeStage> {
     async close() {
       if (closed) return
       closed = true
+      revokeDirectoryStage(contents)
       if (!contents.isDestroyed()) contents.send('nawa:editor-command', { id: randomUUID(), path, command: 'cancel' })
       for (const [id, pending] of requests) if (pending.wc === contents.id) {
         clearTimeout(pending.timer); requests.delete(id); pending.reject(new Error('Staged editor was cancelled.'))

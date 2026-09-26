@@ -1,4 +1,4 @@
-import { registerDirectoryEditor } from '@genoffice/agent-core'
+import { registerDirectoryEditor, directoryWorkflowActive, directoryWorkflowSources, directoryModelSettings } from '@genoffice/agent-core'
 import { focusWorksheet } from './sheet-focus'
 import {
   activateFormulaClosure,
@@ -869,7 +869,7 @@ export function App(): React.JSX.Element {
   // when no provider is configured — see isAgentConfigured/handleSend) ----
   const [aiSettings, setAiSettingsState] = useState<AiSettings | null>(null)
   const aiSettingsRef = useRef<AiSettings | null>(null)
-  aiSettingsRef.current = aiSettings
+  aiSettingsRef.current = directoryModelSettings(aiSettings)
 
   /** gsk login state for the cloud-tools gate (refreshed on mount and window focus) */
   const gskLoggedInRef = useRef(false)
@@ -907,6 +907,7 @@ export function App(): React.JSX.Element {
   const sentAttachmentsRef = useRef<readonly AttachmentMeta[]>([])
   /** composer attachments plus everything already sent this session (deduped by path) */
   const availableAttachments = (): AttachmentMeta[] => {
+    if (directoryWorkflowActive()) return directoryWorkflowSources()
     const seen = new Set<string>()
     return [...sentAttachmentsRef.current, ...attachmentsRef.current].filter((a) =>
       seen.has(a.path) ? false : (seen.add(a.path), true),
@@ -1165,6 +1166,7 @@ export function App(): React.JSX.Element {
   const agentLoopRef = useRef<AgentLoop | null>(null)
   useEffect(() => registerDirectoryEditor(() => ({
     kind: 'sheets', path: lazyWorkbookRef.current?.file.path, loop: agentLoopRef.current,
+    configure: options => { aiSettingsRef.current = options.settings as AiSettings; },
     settle: async () => { await Promise.all(aiApplyPromisesRef.current) },
   })), [])
   if (!agentLoopRef.current) {

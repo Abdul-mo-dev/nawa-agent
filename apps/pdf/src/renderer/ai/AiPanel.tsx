@@ -1,4 +1,4 @@
-import { registerDirectoryEditor } from '@genoffice/agent-core'
+import { registerDirectoryEditor, directoryModelSettings } from '@genoffice/agent-core'
 import { ChatModelPicker } from '@genoffice/ui'
 import { setRendererChatModel, getRendererChatModel } from '@genoffice/ai-provider/browser'
 import '@genoffice/ui/chat-model-picker.css'
@@ -323,6 +323,7 @@ export function AiPanel({
   directoryEditorPath.current = filePath
   useEffect(() => registerDirectoryEditor(() => ({
     kind: 'pdf', path: directoryEditorPath.current, loop: loopRef.current,
+    configure: options => { settingsRef.current = options.settings as AiSettings; },
   })), [])
   if (!loopRef.current) {
     const deps: PdfAiDeps = {
@@ -510,7 +511,7 @@ export function AiPanel({
     runMutatedRef.current = false
     void (async () => {
       try {
-        settingsRef.current = await window.pdfApi.getAiSettings()
+        settingsRef.current = directoryModelSettings(await window.pdfApi.getAiSettings())
         await loop.run(instruction)
       } catch (err) {
         patchLast({

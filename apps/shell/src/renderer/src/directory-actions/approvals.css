@@ -8,3 +8,20 @@
 .nawa-history-dropdown { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; margin: 8px 12px; font-size: 12px; }
 .nawa-history-dropdown select { width: 100%; min-width: 0; color: inherit; background: var(--surface, transparent); border: 1px solid var(--border, #8b9098); border-radius: 5px; padding: 7px; font: inherit; }
 .nawa-history-dropdown select option { color: CanvasText; background: Canvas; }
+
+.nawa-structured-review details { margin: 6px 0; padding: 5px; border: 1px solid var(--border, currentColor); }
+.nawa-structured-review summary { cursor: pointer; overflow-wrap: anywhere; }
+.nawa-structured-review h5 { margin: 6px 0; }
+
+.nawa-workflow-detail { max-height: 300px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.nawa-workflow-question textarea { width: 100%; box-sizing: border-box; }
+.nawa-workflow-progress { max-height: 100px; overflow: auto; overflow-wrap: anywhere; }
+.nawa-workflow-permissions { border: 1px solid currentColor; padding: 8px; margin: 8px 0; }
+
+.nawa-file-search { margin: 8px; padding: 10px; border: 1px solid var(--border-color, #8885); border-radius: 8px; }
+.nawa-file-search summary { cursor: pointer; }
+.nawa-file-search label { display: block; margin: 8px 0; }
+.nawa-file-search input:not([type="checkbox"]), .nawa-file-search select { box-sizing: border-box; max-width: 100%; width: 100%; padding: 7px; margin: 5px 0; }
+.nawa-search-results { max-height: 380px; overflow: auto; }
+.nawa-search-results article { padding: 8px 0; border-bottom: 1px solid var(--border-color, #8885); }
+.nawa-search-results small { display: block; overflow-wrap: anywhere; }

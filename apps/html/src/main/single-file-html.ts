@@ -97,6 +97,11 @@ function rewriteCssUrls(
   return cursor === 0 ? { html: text, rewritten } : { html: output + text.slice(cursor), rewritten }
 }
 
+/** Shared discovery for approval-gated directory copies; uses the same HTML/CSS scanners. */
+export function singleFileImageSources(text: string): string[] {
+  return [...new Set([...extractDocumentImageSources(text), ...scanCssUrls(text).map(m => m.source)])]
+}
+
 export async function inlineImagesForSingleFile(
   text: string,
   documentPath: string | null,

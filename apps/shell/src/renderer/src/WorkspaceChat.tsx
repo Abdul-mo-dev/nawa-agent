@@ -1,5 +1,9 @@
+import { WorkflowController } from './directory-actions/workflow-controller'
+import { FileSearchPanel } from './directory-actions/FileSearchPanel'
+import { WorkflowCard } from './directory-actions/WorkflowCard'
+import { directoryInspectionSkill } from './directory-actions/inspection-skill'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
-import { AgentLoop, composeSkills, type AgentMessage } from '@genoffice/agent-core'
+import { AgentLoop, DEFAULT_MAX_TURNS, composeSkills, type AgentMessage } from '@genoffice/agent-core'
 import { applyChatModel, chatModelLabel } from '@genoffice/ai-provider/browser'
 import { Markdown, ChatModelPicker } from '@genoffice/ui'
 import '@genoffice/ui/markdown.css'
@@ -165,6 +169,7 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
   const logRef = useRef<HTMLDivElement>(null), inputRef = useRef<HTMLTextAreaElement>(null)
   const loopRef = useRef<AgentLoop | null>(null)
   const approvals = useMemo(() => new ApprovalController(), [])
+  const workflow = useMemo(() => new WorkflowController(), [])
   const actionClient = useRef<DirectoryActionClient | null>(null)
   const active = useRef<number | null>(null), epoch = useRef(0), alive = useRef(true)
   const activeScan = useRef<string | null>(null), comparisonScan = useRef<string | null>(null)
@@ -274,7 +279,8 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
         active.current = null; loopRef.current = null; setBusy(false); setActivity([]); persistFinished()
       }
       const files = new DirectoryActionClient({
-        api: window.nawaDirectory, selection: selected, approvals, current,
+        api: window.nawaDirectory, selection: selected, approvals, current, workflow, settings: () => settings,
+        context: () => JSON.stringify({ question, priorMessages: restored.slice(-8).map(m => ({ role: m.role, text: 'text' in m ? m.text.slice(0, 2000) : '' })) }),
         transport: () => createShellTransport(() => settings),
         activity: text => { if (current()) setActivity(previous => [...previous.slice(-3), text]) },
         committed: result => {
@@ -289,10 +295,17 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
         },
       })
       actionClient.current = files
+      const reader = createDirectorySkill({ selection: selected })
+      const readerWithEvidence = { ...reader, executeTool: async (call: Parameters<typeof reader.executeTool>[0], signal?: AbortSignal) => {
+        const result = await reader.executeTool(call, signal)
+        if (current()) files.rememberEvidence(call, result)
+        return result
+      } }
       const loop = new AgentLoop({
         transport: createShellTransport(() => settings),
-        skill: composeSkills('directory', '', [createDirectorySkill({ selection: selected }), directoryMutationSkill(files, selected)]),
-        maxTurns: 24, maxHistory: 40,
+        skill: composeSkills('directory', '', [readerWithEvidence, directoryInspectionSkill(files, selected), directoryMutationSkill(files, selected)]),
+        maxTurns: DEFAULT_MAX_TURNS, maxHistory: 40,
+        verifyResponse: text => files.verifyInspections(text),
         systemSuffix: () => '\nConversation history refers only to messages with matching selected paths and verified file fingerprints. Do not imply that historical file contents are current. Read selected files again when necessary.',
         events: {
           onText: text => { if (current()) updateMessages(previous => previous.map((message, index) => index === previous.length - 1 && message.streaming ? { ...message, text } : message)) },
@@ -334,6 +347,8 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
     {historyDropdown}
     {historyPanel}
     <ApprovalCard controller={approvals} />
+    <WorkflowCard controller={workflow} />
+    <FileSearchPanel folder={folder} openFile={onOpenFile} />
     {!historyOpen && <>
       <ChangeNotice report={comparison} checking={checking} error={checkError} recheck={() => void checkChanges()} />
       <div className="ws-chat-scope" aria-label="Main-panel selection"><div className="workspace-scope-toolbar">

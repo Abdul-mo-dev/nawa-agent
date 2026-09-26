@@ -1,3 +1,4 @@
+import { directoryStageFor, assertDirectoryStageCapability } from '../../../../packages/electron-utils/src/directory-stage'
 /**
  * Nawa Slides main process — pptx parsing/render-tree building/edit application/saving all live
  * here (Node side). The renderer only gets plain-data RenderSlide; edit intents are sent back
@@ -906,6 +907,16 @@ async function saveDraftAfterGenerate(
   mode: 'replace' | 'append',
   deckName?: string,
 ): Promise<void> {
+  const stage = directoryStageFor(wc)
+  if (stage) {
+    assertDirectoryStageCapability(wc, 'edit')
+    // Native generation normally creates a public draft. A directory workflow must
+    // instead retain its private identity, even for replace mode's new Session object.
+    await writeFile(stage.path, Buffer.from(bytes))
+    assertDirectoryStageCapability(wc, 'edit')
+    session.path = stage.path
+    return
+  }
   try {
     const draftsDir = getDraftsDir()
     // Ensure the directory exists
@@ -1746,6 +1757,7 @@ export function registerSlidesIpc(): void {
         height?: number
       },
     ): Promise<{ ok: boolean; marker?: string; error?: string }> => {
+      assertDirectoryStageCapability(_e.sender, 'media')
       if (!cloudSlideEnabled()) return { ok: false, error: 'cloud slide generation is disabled' }
       try {
         // Ultra resolves to the opus-class slide model server-side; standard is the
@@ -1766,7 +1778,9 @@ export function registerSlidesIpc(): void {
         console.log(
           `[cloud-slide] page generated: tier=${tier} model=${model} bytes=${bytes.length} ms=${Date.now() - started}`,
         )
-        const dir = join(app.getPath('temp'), 'genoffice-cloud-pages')
+        assertDirectoryStageCapability(_e.sender, 'edit')
+        const stage = directoryStageFor(_e.sender)
+        const dir = stage ? join(dirname(stage.path), 'generated-pages') : join(app.getPath('temp'), 'genoffice-cloud-pages')
         mkdirSync(dir, { recursive: true })
         const path = join(dir, `${randomUUID()}.pptx`)
         await writeFile(path, bytes)
@@ -1795,6 +1809,7 @@ export function registerSlidesIpc(): void {
         const { bytes, imageFailures } = await buildPagePptx(parsed.spec, {
           fontMetrics: getFontMetrics(),
           fetchImage: async (url) => {
+            assertDirectoryStageCapability(_e.sender, 'network')
             const resp = await fetchRemoteImage(url)
             if (!resp || !resp.ok) return null
             const buf = new Uint8Array(await resp.arrayBuffer())
@@ -1822,7 +1837,9 @@ export function registerSlidesIpc(): void {
         console.log(
           `[local-slide] page generated: bytes=${bytes.length} imageFails=${imageFailures.length} ms=${Date.now() - started}`,
         )
-        const dir = join(app.getPath('temp'), 'genoffice-local-pages')
+        assertDirectoryStageCapability(_e.sender, 'edit')
+        const stage = directoryStageFor(_e.sender)
+        const dir = stage ? join(dirname(stage.path), 'generated-pages') : join(app.getPath('temp'), 'genoffice-local-pages')
         mkdirSync(dir, { recursive: true })
         const path = join(dir, `${randomUUID()}.pptx`)
         await writeFile(path, bytes)

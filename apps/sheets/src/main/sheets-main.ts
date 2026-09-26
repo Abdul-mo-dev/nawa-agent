@@ -1,3 +1,4 @@
+import { assertDirectoryStageCapability } from '../../../../packages/electron-utils/src/directory-stage'
 import { createHash, randomUUID } from 'node:crypto'
 import {
   createReadStream,
@@ -2321,10 +2322,10 @@ export function registerSheetsIpc(): void {
   ipcMain.handle(
     IPC_CHANNELS.aiGenerateImage,
     (_event, op: { prompt?: unknown; aspectRatio?: unknown }) =>
-      generateImageTool(SETTINGS_PATH(), {
+      { assertDirectoryStageCapability(_event.sender, 'media'); return generateImageTool(SETTINGS_PATH(), {
         prompt: String(op?.prompt ?? ''),
         ...(op?.aspectRatio ? { aspectRatio: String(op.aspectRatio) } : {}),
-      }),
+      }) },
   )
 
   ipcMain.on(IPC_CHANNELS.recoveryPromptReply, (event, restore: unknown) => {
@@ -3410,6 +3411,8 @@ export function registerSheetsAiIpc(): void {
   // Shared search tools (content + images): Serper with DuckDuckGo fallback
   // (same source as slides/docs)
   ipcMain.handle('ai:web-search', async (_event, query: unknown, maxResults?: unknown) => {
+      assertDirectoryStageCapability(_event.sender, 'network');
+
     try {
       return await webSearchTool(
         SETTINGS_PATH(),
@@ -3421,6 +3424,8 @@ export function registerSheetsAiIpc(): void {
     }
   })
   ipcMain.handle('ai:image-search', async (_event, query: unknown, maxResults?: unknown) => {
+      assertDirectoryStageCapability(_event.sender, 'network');
+
     try {
       return await imageSearchTool(
         SETTINGS_PATH(),
@@ -3439,6 +3444,8 @@ export function registerSheetsAiIpc(): void {
   ipcMain.handle(
     'ai:fetch-image',
     async (_event, url: unknown): Promise<{ base64: string; mime: string } | null> => {
+      assertDirectoryStageCapability(_event.sender, 'network');
+
       try {
         const resp = await fetchRemoteImage(z.string().parse(url))
         if (!resp || !resp.ok || !resp.body) return null

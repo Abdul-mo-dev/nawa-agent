@@ -1,4 +1,4 @@
-import { registerDirectoryEditor } from '@genoffice/agent-core'
+import { registerDirectoryEditor, directoryWorkflowActive, directoryWorkflowSources, directoryModelSettings, directoryProgress, directoryQuestions, directoryConfirm, directoryWorkflowNetwork, directoryWorkflowMedia } from '@genoffice/agent-core'
 import { ChatModelPicker } from '@genoffice/ui'
 import { setRendererChatModel, getRendererChatModel } from '@genoffice/ai-provider/browser'
 import '@genoffice/ui/chat-model-picker.css'
@@ -500,7 +500,7 @@ export function AiPanel({
   const onDeckProgressRef = useRef(onDeckProgress)
   onDeckProgressRef.current = onDeckProgress
   const settingsRef = useRef(settings)
-  settingsRef.current = settings
+  settingsRef.current = directoryModelSettings(settings)
 
   /** gsk login state for the cloud-tools gate (refreshed on mount and window focus) */
   const gskLoggedInRef = useRef(false)
@@ -531,6 +531,7 @@ export function AiPanel({
   const lastScopeRef = useRef<AiScopeQuoteData | undefined>(undefined)
   /** composer attachments plus everything already sent this session (deduped by path) */
   const availableAttachments = (): AttachmentMeta[] => {
+    if (directoryWorkflowActive()) return directoryWorkflowSources()
     const seen = new Set<string>()
     return [...sentAttachmentsRef.current, ...attachmentsRef.current].filter((a) =>
       seen.has(a.path) ? false : (seen.add(a.path), true),
@@ -770,6 +771,7 @@ export function AiPanel({
   directoryEditorPath.current = currentFilePath
   useEffect(() => registerDirectoryEditor(() => ({
     kind: 'slides', path: directoryEditorPath.current, loop: loopRef.current,
+    configure: options => { settingsRef.current = options.settings as AiSettings; },
   })), [])
   if (!loopRef.current) {
     // The three slides generation steps (style/planning/per-page HTML) force the high-quality model (only with the anthropic provider;
@@ -778,6 +780,7 @@ export function AiPanel({
     // Return on demand a settings copy with the generation model overridden (deep copy, doesn't pollute settingsRef).
     const settingsForGen = (): AiSettings => {
       const cur = settingsRef.current
+      if (directoryWorkflowActive()) return directoryModelSettings(cur)
       if (cur.provider !== 'anthropic') return cur
       const ap = cur.providers.anthropic
       return {
@@ -1008,12 +1011,14 @@ export function AiPanel({
         }
       },
       askClarification: (questions: ClarifyQuestion[]) => {
+        if (directoryWorkflowActive()) return directoryQuestions(questions)
         return new Promise<{ answers: string; cancelled?: boolean }>((resolve) => {
           clarifyResolverRef.current = resolve
           setActiveClarify(questions)
         })
       },
       isCloudPageGenEnabled: async () => {
+        if (!directoryWorkflowMedia()) return false
         try {
           return !!(await window.slidesApi.cloudGenStatus())?.enabled
         } catch {
@@ -1216,6 +1221,7 @@ export function AiPanel({
       },
       fitWidthPx,
       onProgress: (event: DeckProgressEvent) => {
+        directoryProgress(event)
         // Notify the App layer to update the canvas top progress bar
         onDeckProgressRef.current?.(event)
         // Update the progress card in the chat stream (replaced in place, no new message)
@@ -1276,6 +1282,7 @@ export function AiPanel({
         })
       },
       searchImages: async (query: string, maxResults: number) => {
+        if (!directoryWorkflowNetwork()) return []
         try {
           const r = await window.slidesApi.imageSearch(query, maxResults)
           return r.images.map((im) => im.imageUrl).filter(Boolean)
@@ -1291,6 +1298,7 @@ export function AiPanel({
         }
       },
       saveStyleTemplate: async (name, data) => {
+        if (directoryWorkflowActive() && !await directoryConfirm('Save reusable presentation style?', { name, note: 'This saves a template in the existing GenOffice style-template store, separately from the staged presentation.' })) return { ok: false, error: 'User declined template save.' }
         try {
           return await window.slidesApi.saveStyleTemplate(name, data)
         } catch {

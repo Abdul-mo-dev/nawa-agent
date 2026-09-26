@@ -1,4 +1,5 @@
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { StringDecoder } from 'node:string_decoder'
 
 /**
  * Shell-main half of the MCP → `Nawa` CLI delegation.
@@ -47,6 +48,9 @@ export interface CliRunOptions {
   input?: string
   /** abort the child after this long; default 120s (the CLI lazily loads jsdom) */
   timeoutMs?: number
+  signal?: AbortSignal
+  cwd?: string
+  maxOutputBytes?: number
 }
 
 export interface CliRunner {
@@ -81,30 +85,70 @@ export function createCliRunner(paths: CliRunnerPaths): CliRunner {
   return {
     run(args, options = {}) {
       const timeoutMs = options.timeoutMs ?? 120_000
+      if (options.signal?.aborted) return Promise.resolve({ ok: false, code: -1, stdout: '', stderr: 'Cancelled' })
       return new Promise<CliRunOutcome>((resolve) => {
-        const child = spawn(paths.executable, [paths.entry, ...args, '--json'], {
-          env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', ...paths.env },
-          windowsHide: true,
-        })
+        let child: ChildProcessWithoutNullStreams
+        try {
+          child = spawn(paths.executable, [paths.entry, ...args, '--json'], {
+            env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', ...paths.env },
+            windowsHide: true,
+            cwd: options.cwd,
+            shell: false,
+            detached: process.platform !== 'win32',
+          })
+        } catch (cause) {
+          resolve({ ok: false, code: -1, stdout: '', stderr: String(cause) })
+          return
+        }
         let stdout = ''
         let stderr = ''
         let settled = false
+        let outputBytes = 0
+        const outputDecoder = new StringDecoder('utf8')
+        const errorDecoder = new StringDecoder('utf8')
         const finish = (outcome: CliRunOutcome): void => {
           if (settled) return
           settled = true
           clearTimeout(timer)
+          options.signal?.removeEventListener('abort', abort)
           resolve(outcome)
         }
+        const terminate = (): void => {
+          if (!child.pid) return
+          if (process.platform === 'win32') {
+            const killer = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, shell: false })
+            killer.on('error', () => { child.kill() })
+            killer.on('close', code => { if (code !== 0) child.kill() })
+          } else {
+            try { process.kill(-child.pid, 'SIGKILL') } catch { child.kill('SIGKILL') }
+          }
+        }
+        const abort = () => { terminate(); finish({ ok: false, code: -1, stdout, stderr: `${stderr}\nNawa cancelled` }) }
         const timer = setTimeout(() => {
-          child.kill()
+          terminate()
           finish({ ok: false, code: -1, stdout, stderr: `${stderr}\nNawa timed out` })
         }, timeoutMs)
-        child.stdout?.on('data', (chunk: Buffer) => (stdout += chunk.toString()))
-        child.stderr?.on('data', (chunk: Buffer) => (stderr += chunk.toString()))
+        const max = options.maxOutputBytes ?? 4 * 1024 * 1024
+        const append = (chunk: Buffer, err: boolean) => {
+          if (settled) return
+          outputBytes += chunk.length
+          if (outputBytes > max) {
+            terminate(); finish({ ok: false, code: -1, stdout, stderr: 'CLI output exceeded its safety limit.' }); return
+          }
+          if (err) stderr += errorDecoder.write(chunk)
+          else stdout += outputDecoder.write(chunk)
+        }
+        child.stdout?.on('data', (chunk: Buffer) => append(chunk, false))
+        child.stderr?.on('data', (chunk: Buffer) => append(chunk, true))
+        options.signal?.addEventListener('abort', abort, { once: true })
+        if (options.signal?.aborted) abort()
         child.on('error', (err) => {
           finish({ ok: false, code: -1, stdout, stderr: `${stderr}\n${String(err)}` })
         })
         child.on('close', (code) => {
+          if (settled) return
+          stdout += outputDecoder.end()
+          stderr += errorDecoder.end()
           const json = parseJson(stdout)
           finish({
             ok: code === 0 && json?.status === 'ok',
@@ -113,6 +157,12 @@ export function createCliRunner(paths: CliRunnerPaths): CliRunner {
             stdout,
             stderr,
           })
+        })
+        child.stdin?.on('error', error => {
+          if (!settled && (error as NodeJS.ErrnoException).code !== 'EPIPE') {
+            terminate()
+            finish({ ok: false, code: -1, stdout, stderr: `${stderr}\n${String(error)}` })
+          }
         })
         if (options.input !== undefined) child.stdin?.end(options.input)
         else child.stdin?.end()

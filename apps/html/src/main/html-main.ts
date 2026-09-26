@@ -1,3 +1,4 @@
+import { assertDirectoryStageCapability } from '../../../../packages/electron-utils/src/directory-stage'
 import {
   existsSync,
   mkdirSync,
@@ -1523,10 +1524,10 @@ function registerHtmlIpc(): void {
   ipcMain.handle(
     HTML_CHANNELS.aiGenerateImage,
     (_e, op: { prompt?: unknown; aspectRatio?: unknown }) =>
-      generateImageTool(join(app.getPath('userData'), 'ai-settings.json'), {
+      { assertDirectoryStageCapability(_e.sender, 'media'); return generateImageTool(join(app.getPath('userData'), 'ai-settings.json'), {
         prompt: String(op?.prompt ?? ''),
         aspectRatio: op?.aspectRatio ? String(op.aspectRatio) : undefined,
-      }),
+      }) },
   )
 
   const MIME_BY_EXT: Record<string, ImageData['mime']> = {
@@ -1555,6 +1556,8 @@ function registerHtmlIpc(): void {
   // remote pictures (AI-generated or hot-linked) are downloaded here: the frame's fetch is
   // CORS-bound, and fetchRemoteImage refuses private/link-local targets
   ipcMain.handle(HTML_CHANNELS.fetchImage, async (_e, url: unknown): Promise<ImageData | null> => {
+      assertDirectoryStageCapability(_e.sender, 'network');
+
     if (typeof url !== 'string' || !/^https?:/i.test(url)) return null
     try {
       const resp = await fetchRemoteImage(url)

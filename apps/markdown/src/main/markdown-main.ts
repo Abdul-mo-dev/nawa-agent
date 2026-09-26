@@ -1,3 +1,4 @@
+import { assertDirectoryStageCapability } from '../../../../packages/electron-utils/src/directory-stage'
 import { existsSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join, relative, resolve } from 'node:path'
@@ -857,10 +858,10 @@ function registerMarkdownIpc(): void {
   ipcMain.handle(
     MARKDOWN_CHANNELS.aiGenerateImage,
     (_e, op: { prompt?: unknown; aspectRatio?: unknown }) =>
-      generateImageTool(join(app.getPath('userData'), 'ai-settings.json'), {
+      { assertDirectoryStageCapability(_e.sender, 'media'); return generateImageTool(join(app.getPath('userData'), 'ai-settings.json'), {
         prompt: String(op?.prompt ?? ''),
         aspectRatio: op?.aspectRatio ? String(op.aspectRatio) : undefined,
-      }),
+      }) },
   )
 
   const MIME_BY_EXT: Record<string, ImageData['mime']> = {

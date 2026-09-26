@@ -30,7 +30,8 @@ export function repoRoot(): string | null {
     const pkg = join(dir, 'package.json')
     if (existsSync(pkg)) {
       try {
-        if (JSON.parse(readFileSync(pkg, 'utf-8')).name === 'genoffice') {
+        if (JSON.parse(readFileSync(pkg, 'utf-8')).name === 'genoffice' ||
+          (existsSync(join(dir, 'apps', 'shell', 'package.json')) && existsSync(join(dir, 'packages', 'cli', 'package.json')))) {
           cachedRepo = dir
           return dir
         }

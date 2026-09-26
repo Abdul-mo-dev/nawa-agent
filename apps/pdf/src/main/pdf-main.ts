@@ -1,3 +1,4 @@
+import { assertDirectoryStageCapability } from '../../../../packages/electron-utils/src/directory-stage'
 import {
   constants,
   copyFileSync,
@@ -1478,10 +1479,10 @@ function registerPdfIpc(): void {
   ipcMain.handle(
     PDF_CHANNELS.generateImage,
     (_e, op: { prompt?: unknown; aspectRatio?: unknown }) =>
-      generateImageTool(join(app.getPath('userData'), 'ai-settings.json'), {
+      { assertDirectoryStageCapability(_e.sender, 'media'); return generateImageTool(join(app.getPath('userData'), 'ai-settings.json'), {
         prompt: String(op?.prompt ?? ''),
         aspectRatio: op?.aspectRatio ? String(op.aspectRatio) : undefined,
-      }),
+      }) },
   )
 
   ipcMain.handle(PDF_CHANNELS.listSignatures, () => withSignatures(async (list) => list))

@@ -63,6 +63,9 @@ export interface AgentLoopOptions<TSnapshot = unknown> {
   compaction?: CompactionOptions | false
   /** capture rollback state; invoked right before tools run (see snapshotBefore) */
   captureSnapshot?(): TSnapshot
+  /** Optional remote verifier for delegated native skills. Failures abort the run. */
+  verifyResponse?(text: string, executed: readonly ExecutedToolCall[]):
+    string | null | Promise<string | null>
   /** wrap instruction + skill context into the user message text */
   formatUserMessage?(instruction: string, context: string): string
   /** appended to the system prompt each turn (e.g. reply-language directive following the UI language) */
@@ -235,8 +238,31 @@ export class AgentLoop<TSnapshot = unknown> {
   /** Trusted directory staging bridge reuses the exact editor skill. */
   get directorySkill(): AgentSkill { return this.options.skill }
 
+  /** Only tool lifecycle hooks run here: never normal-chat onDone/autosave hooks. */
+  private directoryExecuting = false
+  private directoryMutated = false
+  get directorySystemSuffix(): string { return this.options.systemSuffix?.() ?? '' }
+  resetDirectorySession(): void { this.directoryMutated = false }
+  async executeDirectoryTool(call: AgentToolCall, signal?: AbortSignal): Promise<ToolExecution> {
+    if (this.busy || signal?.aborted) throw new Error('Native editor is busy or cancelled.')
+    this.directoryExecuting = true
+    try {
+      const { skill, events, captureSnapshot } = this.options
+      events?.onToolStart?.(call)
+      const snapshot = !this.directoryMutated ? captureSnapshot?.() : undefined
+      let execution: ToolExecution
+      try { execution = await skill.executeTool(call, signal) }
+      catch (cause) { execution = { output: cause instanceof Error ? cause.message : String(cause), summary: call.name, isError: true } }
+      if (signal?.aborted) throw new Error('Native editor task was cancelled.')
+      const firstMutation = !!execution.mutated && !this.directoryMutated
+      if (execution.mutated) this.directoryMutated = true
+      events?.onToolExecuted?.({ call, execution, snapshotBefore: firstMutation ? snapshot : undefined })
+      return execution
+    } finally { this.directoryExecuting = false }
+  }
+
   get busy(): boolean {
-    return this.running
+    return this.running || this.directoryExecuting
   }
 
   get messages(): readonly AgentMessage[] {
@@ -287,7 +313,7 @@ export class AgentLoop<TSnapshot = unknown> {
 
   /** images: inline attachments for this user turn (vision input; see AgentImage) */
   run(instruction: string, images?: AgentImage[]): void {
-    if (this.running || !instruction) return
+    if (this.busy || !instruction) return
     this.running = true
     this.cancelled = false
     this.turns = 0
@@ -615,11 +641,26 @@ export class AgentLoop<TSnapshot = unknown> {
     if (toolCalls.length === 0 && !this.cancelled && !this.finalizing) {
       // snapshot copy: the live array keeps growing if the corrective turn
       // runs more tools, and the hook must see the state at check time
-      const correction =
-        !this.verifyRetryUsed && this.turnText && skill.verifyResponse
-          ? skill.verifyResponse(this.turnText, [...this.executedCalls])
-          : null
-      if (correction) {
+      const generation = this.generation
+      let correction: string | null = null
+      try {
+        if (!this.verifyRetryUsed && this.turnText) {
+          correction = skill.verifyResponse?.(this.turnText, [...this.executedCalls]) ?? null
+          if (!correction && this.options.verifyResponse) {
+            correction = await this.options.verifyResponse(this.turnText, [...this.executedCalls])
+          }
+        }
+      } catch (cause) {
+        if (generation !== this.generation) return
+        if (!this.cancelled) {
+          this.running = false
+          this.rollbackFailedRun()
+          events?.onError?.(`Response verification failed: ${cause instanceof Error ? cause.message : String(cause)}`)
+          return
+        }
+      }
+      if (generation !== this.generation) return
+      if (correction && !this.cancelled) {
         this.verifyRetryUsed = true
         this.history.push({ role: 'assistant', text: this.turnText })
         this.history.push({ role: 'user', text: correction })

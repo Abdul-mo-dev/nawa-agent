@@ -1,3 +1,4 @@
+import { assertDirectoryStageCapability, assertDirectoryStageLocalRead } from '../../../../packages/electron-utils/src/directory-stage'
 import { createHash, randomUUID } from 'node:crypto'
 import { handOffBytes } from './byte-handoff'
 import {
@@ -3041,6 +3042,8 @@ export function registerAiIpc(): void {
 
   // shared search tools (content + images): Serper with DuckDuckGo fallback (same source as slides/sheets)
   ipcMain.handle('ai:web-search', async (_event, query: string, maxResults?: number) => {
+      assertDirectoryStageCapability(_event.sender, 'network');
+
     try {
       return await webSearchTool(
         SETTINGS_PATH(),
@@ -3052,6 +3055,8 @@ export function registerAiIpc(): void {
     }
   })
   ipcMain.handle('ai:image-search', async (_event, query: string, maxResults?: number) => {
+      assertDirectoryStageCapability(_event.sender, 'network');
+
     try {
       return await imageSearchTool(
         SETTINGS_PATH(),
@@ -3069,6 +3074,8 @@ export function registerAiIpc(): void {
   ipcMain.handle(
     'docs:analyze-media',
     async (_event, op: { mediaUrls: string[]; requirements: string }) => {
+      assertDirectoryStageCapability(_event.sender, 'media');
+
       const mediaUrls = (op.mediaUrls ?? []).map(String).filter(Boolean)
       // a picture opened lazily from a large docx is only addressable by its main-process
       // store; hand its bytes over as a data URL so the loader can read them like any other
@@ -3088,6 +3095,8 @@ export function registerAiIpc(): void {
   ipcMain.handle(
     'ai:fetch-image',
     async (_event, url: string): Promise<{ base64: string; mime: string } | null> => {
+      assertDirectoryStageCapability(_event.sender, 'network');
+
       try {
         // the URL originates from AI tool calls (prompt-injectable via web search
         // results), so refuse non-http schemes and private/link-local targets;
@@ -3114,10 +3123,10 @@ export function registerAiIpc(): void {
   ipcMain.handle(
     'docs:ai-generate-image',
     (_event, op: { prompt?: unknown; aspectRatio?: unknown }) =>
-      generateImageTool(SETTINGS_PATH(), {
+      { assertDirectoryStageCapability(_event.sender, 'media'); return generateImageTool(SETTINGS_PATH(), {
         prompt: String(op?.prompt ?? ''),
         aspectRatio: op?.aspectRatio ? String(op.aspectRatio) : undefined,
-      }),
+      }) },
   )
 
   ipcMain.handle('ai:search-test', (_event, input: unknown) => {
@@ -3877,6 +3886,8 @@ export function registerDocsIpc(): void {
       offset: number,
       maxChars: number,
     ): Promise<AttachmentReadResult> => {
+      assertDirectoryStageLocalRead(_event.sender, filePath);
+
       const name = basename(filePath)
       const ext = name.split('.').pop()?.toLowerCase() ?? ''
       if (!ATTACHMENT_EXTS.has(ext)) return { ok: false, error: tm('errUnsupportedExt', { ext }) }
@@ -3902,6 +3913,8 @@ export function registerDocsIpc(): void {
 
   // image attachments read raw bytes → base64; AiPanel puts them into the user message's images for multimodal
   ipcMain.handle('files:read-image', (_event, filePath: string): AttachmentImageResult => {
+      assertDirectoryStageLocalRead(_event.sender, filePath);
+
     const name = basename(filePath)
     const ext = name.split('.').pop()?.toLowerCase() ?? ''
     const mime = ATTACHMENT_IMAGE_MIME[ext]

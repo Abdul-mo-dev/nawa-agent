@@ -1,3 +1,5 @@
+export { directoryTools, directoryToolAllowed, DIRECTORY_PROTOCOL_VERSION } from './directory-capabilities'
+export type { DirectorySessionMode } from './directory-capabilities'
 export { registerDirectoryEditor } from './directory-editor-host'
 export type { DirectoryEditorDescription } from './directory-editor-host'
 
@@ -34,3 +36,5 @@ export { createIpcTransport, IPC_STREAM_SILENCE_TIMEOUT_MS } from './electron-tr
 export { streamText } from './stream-text'
 export type { StreamTextOptions, StreamTextOutcome } from './stream-text'
 export type { IpcStreamChunk, IpcStreamStart, IpcTransportOptions } from './electron-transport'
+
+export * from './directory-workflow'

@@ -1,3 +1,4 @@
+import { directoryWorkflowActive, directoryModelSettings } from '@genoffice/agent-core'
 import { resolveRendererChatSettings, rememberChatModels, chatModelSessionKey } from '@genoffice/ai-provider/browser'
 import { createIpcTransport, type AgentTransport } from '@genoffice/agent-core'
 import type { AiSettings } from '../../shared/ipc'
@@ -13,7 +14,7 @@ export function createElectronTransport(getSettings: () => AiSettings): AgentTra
     onStream: (listener) => window.desktop.onAiStream(listener),
     start: (request) => window.desktop.aiStream(request),
     cancel: (requestId) => void window.desktop.aiStreamCancel(requestId),
-    getSettings: () => resolveRendererChatSettings(getSettings()),
+    getSettings: () => directoryWorkflowActive() ? directoryModelSettings(getSettings()) : resolveRendererChatSettings(getSettings()),
     sessionKey: chatModelSessionKey,
     unknownErrorText: () => t('aiUnknownError'),
     timeoutErrorText: () => t('aiTimeoutError'),

@@ -1,4 +1,4 @@
-import { registerDirectoryEditor } from '@genoffice/agent-core'
+import { registerDirectoryEditor, directoryWorkflowActive, directoryModelSettings, directoryProgress, directoryPartial } from '@genoffice/agent-core'
 import { ChatModelPicker } from '@genoffice/ui'
 import { setRendererChatModel, getRendererChatModel } from '@genoffice/ai-provider/browser'
 import '@genoffice/ui/chat-model-picker.css'
@@ -315,6 +315,7 @@ export function AiPanel({
         onProgress: (markdown) => {
           if (closed) return
           latest = markdown
+          directoryProgress(`Writing document: ${countMarkdownBlocks(markdown)} blocks`)
           onProgress(markdown)
           if (chipTimer === null) chipTimer = setTimeout(updateChip, CHIP_UPDATE_MS)
         },
@@ -327,7 +328,9 @@ export function AiPanel({
     if (outcome.status === 'empty') return { ok: false, error: outcome.error }
     if (epoch !== writerEpochRef.current) return { ok: false, error: 'the chat was reset' }
     // the draft stays in the document while the user decides
-    const keep = await new Promise<boolean>((resolve) => {
+    const keep = directoryWorkflowActive()
+      ? await directoryPartial('The writer stopped before finishing. Keep the partial draft or discard it?', signal)
+      : await new Promise<boolean>((resolve) => {
       partialResolverRef.current = resolve
       setActivePartial({ blocks: countMarkdownBlocks(outcome.text) })
     })
@@ -364,6 +367,7 @@ export function AiPanel({
   directoryEditorPath.current = filePath
   useEffect(() => registerDirectoryEditor(() => ({
     kind: 'markdown', path: directoryEditorPath.current, loop: loopRef.current,
+    configure: options => { settingsRef.current = options.settings as AiSettings; },
   })), [])
   if (!loopRef.current) {
     loopRef.current = new AgentLoop<DocSnapshot>({
@@ -588,7 +592,7 @@ export function AiPanel({
     persistMessage('user', displayText ?? instruction, undefined, scope)
     void (async () => {
       try {
-        settingsRef.current = await window.markdownApi.getAiSettings()
+        settingsRef.current = directoryModelSettings(await window.markdownApi.getAiSettings())
         if (!mountedRef.current) return
         await loop.run(instruction)
       } catch (err) {

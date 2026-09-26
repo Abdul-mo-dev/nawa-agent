@@ -1,4 +1,4 @@
-import { registerDirectoryEditor } from '@genoffice/agent-core'
+import { registerDirectoryEditor, directoryWorkflowActive, directoryWorkflowSources, directoryModelSettings, directoryWorkflowTask, directoryWorkflowMessages, directoryProgress, directoryQuestions, directoryBrief, directoryPartial } from '@genoffice/agent-core'
 import { ChatModelPicker } from '@genoffice/ui'
 import { setRendererChatModel, getRendererChatModel } from '@genoffice/ai-provider/browser'
 import '@genoffice/ui/chat-model-picker.css'
@@ -359,6 +359,7 @@ export function AiPanel({
     }
   }, [attachments, chat])
   const availableAttachments = (): AttachmentMeta[] => {
+    if (directoryWorkflowActive()) return directoryWorkflowSources()
     const seen = new Set<string>()
     return [...sentAttachmentsRef.current, ...attachmentsRef.current].filter((a) => {
       if (seen.has(a.path)) return false
@@ -570,6 +571,7 @@ export function AiPanel({
       if (closed) return
       depsRef.current.previewDraft(draft)
       const lines = draft.split('\n').length
+      directoryProgress(`Writing HTML: ${lines} lines`)
       patchLast((last) => ({
         tools: last.tools?.map((tl) =>
           tl.running ? { ...tl, summary: tGlobal('aiWritingPage', { lines }) } : tl,
@@ -605,7 +607,9 @@ export function AiPanel({
     }
     // the draft stays visible while the user decides what to do with it
     depsRef.current.previewDraft(outcome.html)
-    const keep = await new Promise<boolean>((resolve) => {
+    const keep = directoryWorkflowActive()
+      ? await directoryPartial('The writer stopped before finishing. Keep the partial draft or discard it?', signal)
+      : await new Promise<boolean>((resolve) => {
       partialResolverRef.current = resolve
       setActivePartial({ lines: outcome.html.split('\n').length })
     })
@@ -627,7 +631,7 @@ export function AiPanel({
   ): Promise<BriefPlanResult> => {
     const { system, user } = buildBriefWriterRequest(
       spec,
-      loopRef.current?.messages ?? [],
+      directoryWorkflowMessages(loopRef.current?.messages ?? []),
       aiLangDirective(langRef.current),
     )
     patchLast((last) => ({
@@ -648,6 +652,7 @@ export function AiPanel({
   directoryEditorPath.current = filePath
   useEffect(() => registerDirectoryEditor(() => ({
     kind: 'html', path: directoryEditorPath.current, loop: loopRef.current,
+    configure: options => { settingsRef.current = options.settings as AiSettings; },
   })), [])
   if (!loopRef.current) {
     loopRef.current = new AgentLoop<DocSnapshot>({
@@ -663,19 +668,19 @@ export function AiPanel({
             queueRunRef.current ? null : depsRef.current.access.getSelectedSid(),
           applyOps: (ops, label) => depsRef.current.access.applyOps(ops, label),
           replaceAll: (html, label) => depsRef.current.access.replaceAll(html, label),
-          askClarification: (questions) =>
+          askClarification: (questions) => directoryWorkflowActive() ? directoryQuestions(questions) :
             new Promise((resolve) => {
               clarifyResolverRef.current = resolve
               setActiveClarify(questions)
             }),
-          confirmBrief: (brief) =>
+          confirmBrief: (brief) => directoryWorkflowActive() ? directoryBrief(brief) :
             new Promise((resolve) => {
               briefResolverRef.current = resolve
               setActiveBrief(brief)
             }),
           writePage: (spec, signal) => runPageWriterRef.current(spec, signal),
           planBrief: (spec, signal) => runBriefWriterRef.current(spec, signal),
-          getInstruction: () => runInstructionRef.current,
+          getInstruction: () => directoryWorkflowTask(runInstructionRef.current),
           resolveAttachmentSrc: (ref) => resolveAttachmentSrc(ref),
           listAttachmentNames: () => availableAttachments().map((a) => a.name),
         }),
@@ -933,7 +938,7 @@ export function AiPanel({
     const seq = ++sendSeqRef.current
     void (async () => {
       try {
-        settingsRef.current = await window.htmlApi.getAiSettings()
+        settingsRef.current = directoryModelSettings(await window.htmlApi.getAiSettings())
         const images = sentAtts.length > 0 ? await collectImages(sentAtts) : []
         if (!mountedRef.current || seq !== sendSeqRef.current) return
         await loop.run(instruction, images.length > 0 ? images : undefined)

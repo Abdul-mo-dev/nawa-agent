@@ -1,4 +1,4 @@
-import { registerDirectoryEditor } from '@genoffice/agent-core'
+import { registerDirectoryEditor, directoryWorkflowActive, directoryWorkflowSources, directoryModelSettings, directoryProgress, directoryPartial } from '@genoffice/agent-core'
 import { ChatModelPicker } from '@genoffice/ui'
 import { setRendererChatModel, getRendererChatModel } from '@genoffice/ai-provider/browser'
 import '@genoffice/ui/chat-model-picker.css'
@@ -476,7 +476,7 @@ export function AiPanel({
   const editorRef = useRef(editor)
   editorRef.current = editor
   const settingsRef = useRef(settings)
-  settingsRef.current = settings
+  settingsRef.current = directoryModelSettings(settings)
   /** gsk login state for the generate_image gate (refreshed on mount and window focus) */
   const gskLoggedInRef = useRef(false)
   useEffect(() => {
@@ -509,6 +509,7 @@ export function AiPanel({
   const lastScopeRef = useRef<AiScopeQuoteData | undefined>(undefined)
   /** composer attachments plus everything already sent this session (deduped by path) */
   const availableAttachments = (): AttachmentMeta[] => {
+    if (directoryWorkflowActive()) return directoryWorkflowSources()
     const seen = new Set<string>()
     return [...sentAttachmentsRef.current, ...attachmentsRef.current].filter((a) =>
       seen.has(a.path) ? false : (seen.add(a.path), true),
@@ -709,6 +710,7 @@ export function AiPanel({
         onProgress: (html) => {
           if (closed) return
           latest = html
+          directoryProgress(`Writing document: ${countFragmentBlocks(html)} blocks`)
           onProgress(html)
           if (chipTimer === null) chipTimer = setTimeout(updateChip, CHIP_UPDATE_MS)
         },
@@ -721,7 +723,9 @@ export function AiPanel({
     if (outcome.status === 'empty') return { ok: false, error: outcome.error }
     if (epoch !== writerEpochRef.current) return { ok: false, error: 'the chat was reset' }
     // the draft stays in the document while the user decides
-    const keep = await new Promise<boolean>((resolve) => {
+    const keep = directoryWorkflowActive()
+      ? await directoryPartial('The writer stopped before finishing. Keep the partial draft or discard it?', signal)
+      : await new Promise<boolean>((resolve) => {
       partialResolverRef.current = resolve
       setActivePartial({ blocks: countFragmentBlocks(outcome.text) })
     })
@@ -751,6 +755,7 @@ export function AiPanel({
   directoryEditorPath.current = filePath
   useEffect(() => registerDirectoryEditor(() => ({
     kind: 'docs', path: directoryEditorPath.current, loop: loopRef.current,
+    configure: async options => { settingsRef.current = options.settings as AiSettings; await waitForFullContent(); },
   })), [])
   if (!loopRef.current) {
     const numIds = (): NumIds => ({
