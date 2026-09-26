@@ -561,3 +561,8 @@ contextBridge.exposeInMainWorld('aiOfficeTabs', tabsApi)
 
 // open documents dragged from the OS anywhere over Home or the tab strip
 installDropOpenBridge()
+
+// Narrow shell-only layout bridge; main validates sender, frame, and dimensions.
+contextBridge.exposeInMainWorld('nawaExplorer', {
+  setLayout: (layout: unknown) => ipcRenderer.send('nawa:explorer-layout', layout),
+})

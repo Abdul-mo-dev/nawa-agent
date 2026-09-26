@@ -1,4 +1,6 @@
 import { basename } from 'node:path'
+import { DEFAULT_EXPLORER_LAYOUT, explorerBounds, type ExplorerLayout } from '../shared/explorer-layout'
+import { registerExplorerLayout } from './explorer-layout-ipc'
 import { realpathSync } from 'node:fs'
 import { BrowserWindow } from 'electron'
 import type { Rectangle, WebContents, WebContentsView } from 'electron'
@@ -59,7 +61,7 @@ interface TabRecord {
 }
 
 /** must match the tab strip's rendered height (apps/shell/src/renderer/src/TabBar.tsx) */
-const TAB_STRIP_HEIGHT = 40
+// Native content bounds follow the Explorer slot; fullscreen still covers the window.
 const HOME_ID = 'home'
 
 /**
@@ -72,6 +74,7 @@ export class TabManager {
   private readonly tabs: TabRecord[] = [
     { id: HOME_ID, kind: 'home', view: null, title: 'Nawa' },
   ]
+  private explorerLayout: ExplorerLayout = { ...DEFAULT_EXPLORER_LAYOUT }
   private activeId: string = HOME_ID
   private nextId = 1
   /** tab whose page entered HTML fullscreen (e.g. slides slideshow) — its view covers the tab strip */
@@ -105,6 +108,10 @@ export class TabManager {
       setImmediate(() => this.layout())
     })
     shellWindow.webContents.once('did-finish-load', () => this.scheduleSpareSheetsView(1500))
+    registerExplorerLayout(shellWindow, (layout) => {
+      this.explorerLayout = layout
+      this.layout()
+    })
   }
 
   private scheduleSpareSheetsView(delayMs: number): void {
@@ -149,7 +156,7 @@ export class TabManager {
     if (active?.view && this.bleedWcIds.has(active.view.webContents.id)) {
       return { x: 0, y: 0, width, height }
     }
-    return { x: 0, y: TAB_STRIP_HEIGHT, width, height: Math.max(0, height - TAB_STRIP_HEIGHT) }
+    return explorerBounds(width, height, this.explorerLayout)
   }
 
   /** Grow/restore a tab view over the tab strip on request (slides show fullscreen) */
@@ -180,7 +187,10 @@ export class TabManager {
     // Deferred resize layouts can land after the shell window was closed.
     if (this.shellWindow.isDestroyed()) return
     const active = this.tabs.find((t) => t.id === this.activeId)
-    if (active?.view) active.view.setBounds(this.contentBounds())
+    if (active?.view) {
+      active.view.setBounds(this.contentBounds())
+      active.view.setVisible(!this.explorerLayout.suspended)
+    }
   }
 
   /** files open in any tab, for the open-documents registry */
@@ -391,7 +401,7 @@ export class TabManager {
   activateTab(id: string): void {
     const target = this.tabs.find((t) => t.id === id)
     if (!target) return
-    for (const t of this.tabs) t.view?.setVisible(t.id === id)
+    for (const t of this.tabs) t.view?.setVisible(t.id === id && !this.explorerLayout.suspended)
     if (target.view) target.view.setBounds(this.contentBounds())
     this.activeId = id
     this.refreshActiveTargets()
