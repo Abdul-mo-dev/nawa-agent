@@ -870,7 +870,7 @@ export function handleRibbonCommand(ctx: RibbonCommandContext, command: string):
         )
         return
       }
-      const result = collectDependents(workbook.getSnapshot(), worksheet.getSheetName(), {
+      const result = collectDependents(workbook.save(), worksheet.getSheetName(), {
         row,
         column,
       })
@@ -913,7 +913,7 @@ export function handleRibbonCommand(ctx: RibbonCommandContext, command: string):
     case 'workbook-statistics': {
       const workbook = runtime.univerAPI.getActiveWorkbook()
       if (!workbook) return
-      const snapshot = workbook.getSnapshot()
+      const snapshot = workbook.save()
       let cells = 0
       let formulas = 0
       for (const sheet of Object.values(snapshot.sheets)) {

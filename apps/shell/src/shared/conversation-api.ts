@@ -1,6 +1,11 @@
 /** Narrow, typed IPC surface. No renderer SQL, database paths, or filesystem handles. */
 export const CONVERSATION_CHANNEL = 'nawa:conversation-history:v1'
 
+/** Internal scan reply; the preload converts it to a local rejection without an IPC failure. */
+export function isHistoryScanCancelled(value: unknown): value is { cancelled: true } {
+  return !!value && typeof value === 'object' && 'cancelled' in value && value.cancelled === true
+}
+
 export interface HistoryScope {
   opened: string | null
   files: readonly string[]

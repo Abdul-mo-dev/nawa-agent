@@ -38,6 +38,7 @@ function folderValue(value) { return value == null ? null : absolute(value) }
 function workspaceKey(folder) { return folder ? key(folder) : 'nawa-main-selection' }
 function sha(value) { return createHash('sha256').update(value).digest('hex') }
 function errorText(error) { return error instanceof Error ? error.message : String(error) }
+function scanCancelled() { return Object.assign(new Error('Fingerprint check cancelled.'), { code: 'HISTORY_SCAN_CANCELLED' }) }
 function normalizeScope(input) {
   if (!input || typeof input !== 'object') throw new Error('Invalid snapshot scope.')
   const unique = values => {
@@ -270,7 +271,7 @@ async function fingerprint(input, roots, options = {}) {
   const signal = options.signal
   const problem = text => { incomplete = true; if (issues.length < 100) issues.push(text) }
   const guard = () => {
-    if (signal?.aborted) throw new Error('Fingerprint check cancelled.')
+    if (signal?.aborted) throw scanCancelled()
     if (Date.now() - startedAt > limits.durationMs) throw new Error('Fingerprint time limit reached.')
   }
   const authorizedRoots = []
@@ -438,7 +439,7 @@ async function startWorker() {
   let activeScans = 0
   const handleScan = async (operation, payload, roots, owner) => {
     const scanId = string(payload.scanId, 'scan ID', 100), token = `${owner}:${scanId}`
-    if (cancelledEarly.delete(token)) throw new Error('Fingerprint check cancelled.')
+    if (cancelledEarly.delete(token)) throw scanCancelled()
     if (scans.size >= 16) throw new Error('Too many fingerprint requests. Try again after the current check finishes.')
     const controller = new AbortController()
     if (scans.has(token)) throw new Error('Duplicate fingerprint request.')
@@ -446,9 +447,10 @@ async function startWorker() {
     let acquired = false
     try {
       while (activeScans >= 2) {
-        if (controller.signal.aborted) throw new Error('Fingerprint check cancelled.')
+        if (controller.signal.aborted) throw scanCancelled()
         await new Promise(resolve => setTimeout(resolve, 25))
       }
+      if (controller.signal.aborted) throw scanCancelled()
       acquired = true; activeScans++
       store.row(payload.id)
       const before = operation === 'compare' ? store.baseline(payload.id) : null
@@ -457,7 +459,7 @@ async function startWorker() {
       const scan = await fingerprint(before ? before.scope : payload.scope, roots, {
         signal: controller.signal, excludeDirectory: directory,
       })
-      if (controller.signal.aborted) throw new Error('Fingerprint check cancelled.')
+      if (controller.signal.aborted) throw scanCancelled()
       return before ? compareSnapshots(before, scan) : store.saveSnapshot(payload.id, scan)
     } finally { scans.delete(token); if (acquired) activeScans-- }
   }
@@ -485,7 +487,11 @@ async function startWorker() {
         default: throw new Error('Unsupported conversation operation.')
       }
       parentPort.postMessage({ requestId, result: result ?? null })
-    } catch (error) { parentPort.postMessage({ requestId, error: errorText(error) }) }
+    } catch (error) {
+      // Cancellation is expected when a chat closes or a newer scan replaces this one.
+      if (error.code === 'HISTORY_SCAN_CANCELLED') parentPort.postMessage({ requestId, result: { cancelled: true } })
+      else parentPort.postMessage({ requestId, error: errorText(error) })
+    }
   })
   parentPort.postMessage({ ready: true })
 }

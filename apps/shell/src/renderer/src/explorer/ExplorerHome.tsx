@@ -1,6 +1,8 @@
+import { useSidebarText } from './sidebar-i18n'
+import type { PanelActivity } from './panel-state'
 import { WorkspaceControlPanel } from './WorkspaceControlPanel'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties, MouseEvent, ReactNode } from 'react'
+import type { CSSProperties, MouseEvent } from 'react'
 import type { FolderRoot, HomeApi, RecentPage } from '../../../shared/home-api'
 import type { TabSummary } from '../../../shared/tabs-api'
 import type { ExplorerLayout } from '../../../shared/explorer-layout'
@@ -9,9 +11,7 @@ import { WorkspaceChat } from '../WorkspaceChat'
 import '../workspace.css'
 import { DirectoryTree } from './Tree'
 import { FileList } from './FileList'
-import { RagToolbar } from '../rag/RagToolbar'
-import { AnalyticsToolbar } from '../analytics/AnalyticsToolbar'
-import { DocumentIcon, FolderGlyph, Icon, NawaIcon } from './Icons'
+import { FolderGlyph, Icon, NawaIcon } from './Icons'
 import { Dialog, Menu, Splitter, ToolButton, useEditorSlot } from './Controls'
 import type { MenuAction } from './Controls'
 import { ExplorerSettings } from './Settings'
@@ -39,6 +39,9 @@ const errorText = (error: unknown) => error instanceof Error ? error.message : S
 
 export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
   const { lang, dateLocale } = useI18n()
+  const { s } = useSidebarText()
+  const [panelActivity, setPanelActivity] = useState<PanelActivity | undefined>()
+  const lastPanel = useRef<'ai' | 'ragAnalytics' | 'provider'>('ai')
   const t = explorerText(lang)
   const [prefs, setPrefs] = useState<Preferences>(() => { try { return parsePreferences(localStorage.getItem(PREFERENCES_KEY)) } catch { return { ...DEFAULT_PREFERENCES } } })
   const [roots, setRoots] = useState<FolderRoot[]>([])
@@ -77,7 +80,9 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
   const currentRootPath = folder ? rootFor(folder, roots) : undefined
   const currentRoot = roots.find(root => samePath(root.path, currentRootPath || activeRoot || '')) ?? roots[0]
   const state = folder ? directory(folder) : undefined
-  const inspectorVisible = !editorActive && prefs.pane !== 'none' && windowWidth >= 900
+  const inspectorVisible = !editorActive && prefs.pane !== 'none'
+  if (prefs.pane !== 'none') lastPanel.current = prefs.pane
+  const drawer = windowWidth < 1100
   const navigationVisible = prefs.navigationVisible && windowWidth >= 540
   const effectiveNavWidth = Math.min(prefs.navigationWidth, Math.max(180, windowWidth - 400))
   const effectiveInspectorWidth = Math.min(prefs.inspectorWidth, Math.max(300, windowWidth - (navigationVisible ? effectiveNavWidth : 0) - 385))
@@ -173,7 +178,7 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
   }
   const refresh = () => { invalidate(); setRevision(n => n + 1); void loadRoots() }
   const openFile = useCallback((path: string) => { void window.aiOffice.openPath(path).catch(failure) }, [failure])
-  const openItem = (item: Item) => { item.kind === 'folder' ? navigate({ kind: 'folder', path: item.path }) : openFile(item.path) }
+  const openItem = (item: Item) => { if (item.kind === 'folder') navigate({ kind: 'folder', path: item.path }); else openFile(item.path) }
   const addRoot = async () => {
     if (busy) return
     setBusy(true)
@@ -200,7 +205,7 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
   const cutPaths = new Set(clipboardMode === 'cut' ? cutItems.map(item => item.path) : [])
   const choose = (path: string, options: { toggle?: boolean; range?: boolean; additive?: boolean }) => {
     if (options.range) setSelected(previous => selectRange(items.map(item => item.path), anchor.current, path, previous, !!options.additive))
-    else if (options.toggle) { setSelected(previous => { const next = new Set(previous); next.has(path) ? next.delete(path) : next.add(path); return next }); anchor.current = path }
+    else if (options.toggle) { setSelected(previous => { const next = new Set(previous); if (next.has(path)) next.delete(path); else next.add(path); return next }); anchor.current = path }
     else { setSelected(new Set([path])); anchor.current = path }
   }
   const selectAll = () => setSelected(old => items.length > 0 && items.every(item => old.has(item.path)) ? new Set() : new Set(items.map(item => item.path)))
@@ -287,8 +292,8 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
     { label: t('compact'), checked: prefs.compact, divider: true, action: () => changePrefs({ compact: !prefs.compact }) },
     { label: t('navigation'), icon: 'pane', checked: prefs.navigationVisible, action: () => changePrefs({ navigationVisible: !prefs.navigationVisible }) },
     { label: t('assistant'), icon: 'sparkles', checked: prefs.pane === 'ai', disabled: editorActive, action: () => changePrefs({ pane: prefs.pane === 'ai' ? 'none' : 'ai' }) },
-    { label: 'RAG & Analytics', icon: 'search', checked: prefs.pane === 'ragAnalytics', disabled: editorActive || windowWidth < 900, action: () => changePrefs({ pane: 'ragAnalytics' }) },
-    { label: 'AI Provider', icon: 'settings', checked: prefs.pane === 'provider', disabled: editorActive || windowWidth < 900, action: () => changePrefs({ pane: 'provider' }) },
+    { label: s('Knowledge'), icon: 'search', checked: prefs.pane === 'ragAnalytics', disabled: editorActive, action: () => changePrefs({ pane: 'ragAnalytics' }) },
+    { label: s('Models'), icon: 'settings', checked: prefs.pane === 'provider', disabled: editorActive, action: () => changePrefs({ pane: 'provider' }) },
     { label: t('resetLayout'), divider: true, action: () => setPrefs({ ...DEFAULT_PREFERENCES }) },
     { label: 'Original home', icon: 'home', divider: true, action: onOpenLegacy },
   ]
@@ -347,7 +352,7 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
     const keyboard = (e: globalThis.KeyboardEvent) => {
       if (e.defaultPrevented || e.isComposing || document.querySelector('.ex-dialog-backdrop, .settings-overlay')) return
       // File commands must not hijack text copying, typing, history controls or approvals.
-      if (e.target instanceof Element && e.target.closest('.ex-inspector, .workspace-chat-main, .ex-menu')) return
+      if (e.target instanceof Element && e.target.closest('.ex-inspector, .workspace-chat-main, .ex-menu, .nawa-panel-dialog')) return
       const input = e.target instanceof HTMLElement && (e.target.matches('input,textarea,select') || e.target.isContentEditable)
       const ctrl = e.ctrlKey || e.metaKey, commands = keyboardRef.current
       if (ctrl && (e.key.toLowerCase() === 'l' || e.key.toLowerCase() === 'd')) { e.preventDefault(); commands.startAddress() }
@@ -377,18 +382,6 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
   const listError = folder ? (!currentRootPath && !rootsLoading ? t('notMounted') : state?.error) : pageError
   const headerIcon = folder ? <FolderGlyph size={34} open /> : location.kind === 'home' ? <NawaIcon size={34} /> : <Icon name={location.kind === 'starred' ? 'star' : location.kind === 'recent' ? 'recent' : 'home'} size={28} />
 
-  function detailsPane(): ReactNode {
-    const item = currentContext
-    if (!item && selectedItems.length > 1) return <div className="ex-details-body"><Icon name="list" size={52} /><h2>{selectedItems.length} {t('selected')}</h2><dl><dt>{t('totalSize')}</dt><dd>{sizeLabel(selectedItems.filter(entry => entry.kind === 'file').reduce((sum, entry) => sum + entry.sizeBytes, 0), dateLocale)}</dd></dl><button className="ex-primary" onClick={() => ask(selectedItems)}><Icon name="sparkles" />{t('ask')}</button></div>
-    if (!item) return <div className="ex-pane-empty"><Icon name="info" size={42} /><h2>{t('selectDetails')}</h2><p>{folder || t('local')}</p></div>
-    return <div className="ex-details-body"><div className="ex-detail-art">{item.kind === 'folder' ? <FolderGlyph size={90} /> : <DocumentIcon ext={item.ext} size={90} />}</div><h2 dir="auto">{item.name}</h2><span className="ex-detail-kind">{item.kind === 'folder' ? t('folder') : `${item.ext.toUpperCase()} ${t('file')}`}</span><div className="ex-detail-buttons"><button className="ex-primary" onClick={() => openItem(item)}><Icon name="open" size={16} />{t('open')}</button><button className="ex-secondary" onClick={() => ask([item])}><Icon name="sparkles" size={16} />{t('ask')}</button></div><dl>
-      <dt>{t('type')}</dt><dd>{item.kind === 'folder' ? t('folder') : item.ext.toUpperCase()}</dd>
-      {item.kind === 'file' && <><dt>{t('size')}</dt><dd>{sizeLabel(item.sizeBytes, dateLocale)}</dd></>}
-      <dt>{t('modified')}</dt><dd>{item.mtimeMs ? new Intl.DateTimeFormat(dateLocale, { dateStyle: 'medium', timeStyle: 'short' }).format(item.mtimeMs) : '—'}</dd>
-      <dt>{t('path')}</dt><dd className="ex-detail-path" dir="auto">{item.path}</dd>
-    </dl><button className="ex-link" onClick={() => copyPaths([item.path])}><Icon name="copy" size={14} />{t('copyPath')}</button><button className="ex-link" onClick={() => { void act(() => window.aiOffice.revealPath(item.path)) }}><Icon name="open" size={14} />{t('reveal')}</button></div>
-  }
-
   return <div ref={explorer} className={`explorer${prefs.compact ? ' ex-compact' : ''}${editorActive ? ' ex-editor-active' : ''}`} data-testid="nawa-explorer" style={{ '--ex-nav-width': `${effectiveNavWidth}px`, '--ex-inspector-width': `${effectiveInspectorWidth}px` } as CSSProperties}>
     <header className="ex-address-row">
       <div className="ex-history"><ToolButton icon="left" label={`${t('back')} (Alt+←)`} disabled={history.index === 0} onClick={() => moveHistory(-1)} /><ToolButton icon="right" label={`${t('forward')} (Alt+→)`} disabled={history.index >= history.entries.length - 1} onClick={() => moveHistory(1)} /><ToolButton icon="up" label={t('up')} disabled={!upPath || !rootFor(upPath, roots)} onClick={() => { if (upPath) navigate({ kind: 'folder', path: upPath }) }} /><ToolButton icon="refresh" label={`${t('refresh')} (F5)`} onClick={refresh} /></div>
@@ -406,7 +399,7 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
       <span className="ex-command-divider" /><button className="ex-tool with-label" disabled={editorActive} onClick={e => toolbarMenu(e, [...(['name', 'modified', 'type', 'size'] as const).map(key => ({ label: t(key), checked: prefs.sort === key, action: () => changePrefs({ sort: key }) })), { label: t('ascending'), divider: true, checked: !prefs.descending, action: () => changePrefs({ descending: false }) }, { label: t('descending'), checked: prefs.descending, action: () => changePrefs({ descending: true }) }])}><Icon name="sort" /><span>{t('sort')}</span><Icon name="down" size={11} /></button>
       <button className="ex-tool with-label" onClick={e => toolbarMenu(e, viewActions())}><Icon name="list" /><span>{t('view')}</span><Icon name="down" size={11} /></button>
       <button className="ex-tool" aria-label="More actions" title="More actions" onClick={e => toolbarMenu(e, [{ label: t('add'), icon: 'plus', action: () => { void addRoot() } }, { label: t('openFile'), icon: 'open', action: () => { void act(() => window.aiOffice.browse()) } }, { label: t('settings'), icon: 'settings', divider: true, action: () => setSettingsOpen(true) }, { label: 'Original home', icon: 'home', action: onOpenLegacy }])}><Icon name="more" /></button>
-      <span className="ex-toolbar-spacer" /><ToolButton icon="pane" label={t('navigation')} pressed={navigationVisible} onClick={() => changePrefs({ navigationVisible: !prefs.navigationVisible })} /><button className="ex-tool with-label ex-assistant-toggle" disabled={editorActive || windowWidth < 900} aria-pressed={inspectorVisible && prefs.pane === 'ai'} onClick={() => changePrefs({ pane: prefs.pane === 'ai' ? 'none' : 'ai' })}><Icon name="sparkles" /><span>{t('assistant')}</span></button>
+      <span className="ex-toolbar-spacer" /><ToolButton icon="pane" label={t('navigation')} pressed={navigationVisible} onClick={() => changePrefs({ navigationVisible: !prefs.navigationVisible })} /><button className="ex-tool with-label ex-assistant-toggle" disabled={editorActive} aria-pressed={inspectorVisible && prefs.pane === 'ai'} onClick={() => changePrefs({ pane: prefs.pane === 'ai' ? 'none' : 'ai' })}><Icon name="sparkles" /><span>{t('assistant')}</span>{panelActivity && <span className="nawa-toolbar-activity" title={panelActivity.text} aria-label={panelActivity.text}>●</span>}</button>
     </div>
     <div className="ex-body">
       {navigationVisible && <><aside className="ex-navigation" aria-label={t('navigation')}>
@@ -436,15 +429,14 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
           {!folder && page.entries.length < page.total && <div className="ex-pagination"><span>{page.entries.length.toLocaleString(dateLocale)} / {page.total.toLocaleString(dateLocale)}</span><button disabled={pageLoading} onClick={() => { void loadMore() }}>{pageLoading ? t('loading') : t('loadMore')}</button></div>}
         </>}
       </main>
-      {inspectorVisible && <><Splitter label={prefs.pane === 'ragAnalytics' ? 'RAG & Analytics' : prefs.pane === 'provider' ? 'AI Provider' : t('assistant')} value={effectiveInspectorWidth} min={300} max={Math.min(560, Math.max(300, windowWidth - (navigationVisible ? prefs.navigationWidth : 0) - 380))} reverse onChange={inspectorWidth => changePrefs({ inspectorWidth })} />
-        <WorkspaceControlPanel active={prefs.pane === 'none' ? 'ai' : prefs.pane}
+      {inspectorVisible && !drawer && <Splitter label={prefs.pane === 'ragAnalytics' ? s('Knowledge') : prefs.pane === 'provider' ? s('Models') : t('assistant')} value={effectiveInspectorWidth} min={300} max={Math.min(560, Math.max(300, windowWidth - (navigationVisible ? prefs.navigationWidth : 0) - 380))} reverse onChange={inspectorWidth => changePrefs({ inspectorWidth })} />}
+        <WorkspaceControlPanel visible={inspectorVisible} drawer={drawer} onActivity={setPanelActivity} active={lastPanel.current}
           assistantLabel={t('assistant')} closeLabel={t('close')}
           folder={folder && currentRootPath ? folder : null}
           onChange={pane => changePrefs({ pane })} onClose={() => changePrefs({ pane: 'none' })}
           onAddFolder={() => { void addRoot() }}
           assistant={(folder && currentRootPath) || selectedItems.length > 0 ? <WorkspaceChat folder={folder} folderName={folder ? basename(folder) : 'Selected items'} scopePaths={selectedItems.filter(item => item.kind === 'file').map(item => item.path)} scopeDirs={selectedItems.filter(item => item.kind === 'folder').map(item => item.path)} onOpenFile={openFile} onClose={() => changePrefs({ pane: 'none' })} /> : <div className="ex-pane-empty"><span className="ex-ai-orb"><Icon name="sparkles" size={32} /></span><h2>{t('chooseFolder')}</h2><p>{t('chooseFolderHelp')}</p><button className="ex-secondary" onClick={() => { void addRoot() }}><Icon name="plus" size={15} />{t('add')}</button><div className="ex-readonly"><Icon name="check" size={13} />{t('readOnly')}</div></div>}
         />
-      </>}
     </div>
     <footer className="ex-status"><span>{editorActive ? editorTab?.title : `${items.length.toLocaleString(dateLocale)} ${t('items')}`}</span>{!editorActive && selectedItems.length > 0 && <><span className="ex-status-divider" /><span>{selectedItems.length} {t('selected')}</span><span>{sizeLabel(selectedItems.filter(item => item.kind === 'file').reduce((sum, item) => sum + item.sizeBytes, 0), dateLocale)}</span></>}<span className="ex-toolbar-spacer" /><span className="ex-status-scope">{editorActive ? t('editor') : t('local')}</span><ToolButton icon="list" label={t('details')} disabled={editorActive} pressed={prefs.view === 'details'} onClick={() => changePrefs({ view: 'details' })} /><ToolButton icon="grid" label={t('tiles')} disabled={editorActive} pressed={prefs.view === 'tiles'} onClick={() => changePrefs({ view: 'tiles' })} /></footer>
     {menu && <Menu {...menu} onClose={closeMenu} />}

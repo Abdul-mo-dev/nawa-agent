@@ -156,7 +156,7 @@ function fakeRuntime(service: FakeService, stylesPool: Record<string, unknown> =
     univerAPI: {
       getActiveWorkbook: () => ({
         getId: () => OLD_UNIT,
-        getSnapshot: () => ({ styles: stylesPool }),
+        save: () => ({ styles: stylesPool }),
       }),
     },
   } as unknown as UniverRuntime

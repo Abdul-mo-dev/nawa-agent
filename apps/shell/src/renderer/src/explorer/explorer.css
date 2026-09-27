@@ -231,7 +231,7 @@
 .ex-inspector .ws-chat-title { font-size: 15px; font-weight: 600; line-height: 1.35; margin: 0 0 4px; }
 .ex-inspector .workspace-chat-path { color: var(--ex-muted); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ex-inspector .ws-chat-close { padding: 4px 8px; font-size: 10px; color: var(--ex-muted); border: 1px solid var(--ex-line); border-radius: 4px; background: var(--ex-surface); }
-.ex-inspector .ws-chat-close:last-child { display: none; }
+.ex-inspector .ws-chat-head > .ws-chat-hide { display: none; }
 .ex-inspector .ws-chat-scope { margin: 0 12px; padding: 11px; flex-shrink: 0; max-height: 36%; overflow: auto; border: 1px solid var(--ex-line); border-radius: 6px; background: var(--ex-surface); }
 .ex-inspector .workspace-scope-toolbar { display: flex; flex-wrap: wrap; gap: 7px; justify-content: space-between; align-items: center; }
 .ex-inspector .ws-chat-scope-count, .ex-inspector .workspace-scope-help, .ex-inspector .ws-chat-meta { font-size: 10px; color: var(--ex-muted); }

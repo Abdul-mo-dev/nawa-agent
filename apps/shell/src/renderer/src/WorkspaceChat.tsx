@@ -20,6 +20,9 @@ import { HistoryDropdown } from './history/HistoryDropdown'
 import { ApprovalCard } from './directory-actions/ApprovalCard'
 import { ApprovalController, DirectoryActionClient, directoryMutationSkill } from './directory-actions/controller'
 import { ChangeNotice } from './history/ChangeNotice'
+import { PanelDialog } from './explorer/PanelDialog'
+import { usePanelActivity } from './explorer/panel-state'
+import { useSidebarText } from './explorer/sidebar-i18n'
 import './workspace-selection.css'
 import './history/history.css'
 
@@ -43,6 +46,7 @@ export function WorkspaceChat(props: WorkspaceChatProps) {
 }
 
 function HistoryWorkspace(props: WorkspaceChatProps) {
+  const { s } = useSidebarText()
   const [session, setSession] = useState<ConversationRecord | null>(null)
   const [mountVersion, setMountVersion] = useState(0)
   const [historyVersion, setHistoryVersion] = useState(0)
@@ -120,21 +124,20 @@ function HistoryWorkspace(props: WorkspaceChatProps) {
     }
     if (alive.current) setHistoryVersion(value => value + 1)
   })
-  const hide = () => transition(async () => { if (alive.current) props.onClose() })
-  if (!session) return <section className="ws-chat workspace-chat-main" aria-label="Nawa conversation history">
-    <header className="ws-chat-head"><NawaIcon size={27} /><h2>Nawa assistant</h2></header>
+  if (!session) return <section className="ws-chat workspace-chat-main" aria-label={s("Nawa conversation history")}>
+    <header className="ws-chat-head"><NawaIcon size={27} /><h2>{s("Nawa assistant")}</h2></header>
     <div className="ws-chat-notice" role={error ? 'alert' : 'status'}>{error || (loading ? 'Opening conversation history…' : 'No conversation loaded.')}</div>
-    {error && <button type="button" className="ws-chat-close" onClick={() => setRetry(value => value + 1)}>Retry opening history</button>}
-    <button type="button" className="ws-chat-close" onClick={props.onClose}>Hide chat</button>
+    {error && <button type="button" className="ws-chat-close" onClick={() => setRetry(value => value + 1)}>{s("Retry opening history")}</button>}
+    <button type="button" className="ws-chat-close" onClick={props.onClose}>{s("Hide chat")}</button>
   </section>
   return <DirectoryChat key={`${session.id}:${mountVersion}`} {...props} session={session}
     controls={controls} transitioning={transitioning} parentError={error}
-    onNew={() => { void newChat().catch(() => undefined) }} onHide={() => { void hide().catch(() => undefined) }}
+    onNew={() => { void newChat().catch(() => undefined) }} onHide={props.onClose}
     historyOpen={historyOpen} toggleHistory={() => setHistoryOpen(value => !value)}
     onSaved={() => { if (alive.current) setHistoryVersion(value => value + 1) }}
     historyDropdown={<HistoryDropdown folder={props.folder} currentId={session.id} title={session.title} version={historyVersion} disabled={transitioning} onOpen={openChat} />}
-    historyPanel={historyOpen ? <HistoryPanel folder={props.folder} currentId={session.id} version={historyVersion}
-      databasePath={databasePath} onOpen={openChat} onRename={renameChat} onDelete={deleteChat} onClose={() => setHistoryOpen(false)} /> : null} />
+    historyPanel={<PanelDialog open={historyOpen} title={s('Manage history')} onClose={() => setHistoryOpen(false)}>{historyOpen && <HistoryPanel folder={props.folder} currentId={session.id} version={historyVersion}
+      databasePath={databasePath} onOpen={openChat} onRename={renameChat} onDelete={deleteChat} onClose={() => setHistoryOpen(false)} />}</PanelDialog>} />
 }
 
 type DirectoryChatProps = WorkspaceChatProps & {
@@ -153,6 +156,9 @@ type DirectoryChatProps = WorkspaceChatProps & {
 
 function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenFile, session, controls,
   transitioning, parentError, onNew, onHide, historyOpen, toggleHistory, onSaved, historyPanel, historyDropdown }: DirectoryChatProps) {
+  const { s } = useSidebarText()
+  const [reviewOpen, setReviewOpen] = useState(false)
+  const followTail = useRef(true)
   const buffer = useMemo(() => new ConversationBuffer(session, window.nawaHistory), [session])
   const data = useSyncExternalStore(buffer.subscribe, buffer.getSnapshot, buffer.getSnapshot)
   const messages = data.messages, input = data.draft, modelId = data.modelId
@@ -171,6 +177,10 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
   const loopRef = useRef<AgentLoop | null>(null)
   const approvals = useMemo(() => new ApprovalController(), [])
   const workflow = useMemo(() => new WorkflowController(), [])
+  const approvalState = useSyncExternalStore(approvals.subscribe, approvals.getSnapshot, approvals.getSnapshot)
+  const workflowState = useSyncExternalStore(workflow.subscribe, workflow.getSnapshot, workflow.getSnapshot)
+  const needsReview = !!approvalState || !!workflowState?.interaction
+  usePanelActivity('ai', 'conversation', buffer.error ? { kind: 'error', text: s('Save needs attention') } : needsReview ? { kind: 'attention', text: s('Approval needed') } : busy ? { kind: 'busy', text: s('Response in progress') } : null)
   const actionClient = useRef<DirectoryActionClient | null>(null)
   const active = useRef<number | null>(null), epoch = useRef(0), alive = useRef(true)
   const activeScan = useRef<string | null>(null), comparisonScan = useRef<string | null>(null)
@@ -234,7 +244,7 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
     if (active.current !== null) stop('Selection or model changed. Send again to use the current selection.')
   }, [scopeKey, modelId, stop])
   useEffect(() => {
-    logRef.current?.scrollTo({ top: logRef.current.scrollHeight })
+    if (followTail.current) logRef.current?.scrollTo({ top: logRef.current.scrollHeight })
   }, [messages])
   const persistFinished = () => {
     void buffer.flush().then(() => {
@@ -336,54 +346,61 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
     }
   }
 
-  return <section className="ws-chat workspace-chat-main" aria-label={`Chat with ${folderName}`}>
-    <header className="ws-chat-head"><NawaIcon size={27} /><div className="workspace-chat-heading">
-      <span className="workspace-eyebrow">Nawa assistant · SQLite history</span><h1 className="ws-chat-title" title={data.title}>{data.title}</h1>
-      <div className="nawa-history-conversation-folder" title={data.folder || 'Workspace selection'}>{data.folderName}</div>
-    </div>
-      <button type="button" className="ws-chat-close" disabled={transitioning} onClick={onNew}>New chat</button>
-      <button type="button" className="ws-chat-close" aria-expanded={historyOpen} onClick={toggleHistory}>Manage history</button>
-      <button type="button" className="ws-chat-close" disabled={transitioning} onClick={onHide}>Hide chat</button></header>
-    {parentError && <div className="ws-chat-notice" role="alert">{parentError}</div>}
-    {historyDropdown}
+  return <section className="ws-chat workspace-chat-main" aria-label={s('Chat with {folder}', { folder: folderName })}>
+    <header className="ws-chat-head">
+      <div className="nawa-conversation-picker">{historyDropdown}</div>
+      <button type="button" className="ws-chat-close" disabled={transitioning} onClick={onNew}>{s('New chat')}</button>
+      <button type="button" className="ws-chat-close" aria-expanded={historyOpen} onClick={toggleHistory}>{s('Manage history')}</button>
+      <button type="button" className="ws-chat-close ws-chat-hide" onClick={onHide}>{s('Hide chat')}</button>
+    </header>
     {historyPanel}
-    <ApprovalCard controller={approvals} />
-    <WorkflowCard controller={workflow} />
-    
-    {!historyOpen && <>
+    <PanelDialog open={reviewOpen} title={s('Review assistant actions')} onClose={() => setReviewOpen(false)}>
+      <ApprovalCard controller={approvals} />
+      <WorkflowCard controller={workflow} />
+      {!approvalState && !workflowState && <p>{s('No actions awaiting review.')}</p>}
+    </PanelDialog>
+    <div className="ws-chat-scroll" ref={logRef} onScroll={event => {
+      const node = event.currentTarget
+      followTail.current = node.scrollHeight - node.scrollTop - node.clientHeight < 80
+    }}>
       <ChangeNotice report={comparison} checking={checking} error={checkError} recheck={() => void checkChanges()} />
-      <div className="ws-chat-scope" aria-label="Main-panel selection"><div className="workspace-scope-toolbar">
-        <strong>Selected in main panel</strong><span className="ws-chat-meta">{selection.files.length} files · {selection.directories.length} folders</span></div>
-        {!selection.files.length && !selection.directories.length && <p className="workspace-scope-help">Nothing selected. Select individual files to let the assistant read their contents.</p>}
-        <div className="nawa-selection-items">{selection.directories.map(path => <div key={path} className="nawa-selection-item" title={path}><FolderGlyph size={18} /><span>{displayPath(selection, path)}</span><small>Names only</small></div>)}
-          {selection.files.map(path => <div key={path} className="nawa-selection-item" title={path}><DocumentIcon ext={path.split('.').pop() || ''} size={18} /><button type="button" onClick={() => onOpenFile(path)}>{displayPath(selection, path)}</button><small>Can read</small></div>)}</div>
-        {folder && <div className="nawa-opened-folder" title={folder}>Opened: {folder} <span>· names only for AI</span></div>}
-        <p className="workspace-scope-help">Opening history does not reselect files. Selection changes stop the current response.</p></div>
-    </>}
-    {!!activity.length && <div className="ws-chat-notice" role="status">{activity.slice(-2).join(' · ')}</div>}
-    <div ref={logRef} className="ws-chat-log" role="log" aria-live="polite">
-      {messages.length > visibleMessages && <button type="button" className="ws-chat-close" onClick={() => setVisibleMessages(value => value + 100)}>Show earlier messages ({messages.length - visibleMessages} more)</button>}
-      {!messages.length && <div className="ws-chat-empty"><h2>Ask Nawa</h2><p>Select files to read, edit, or delete them. Create files in the opened or selected folder. Every AI file change requires approval.</p><p>New chat saves this conversation and starts another. Find previous conversations under History.</p></div>}
-      {messages.slice(-visibleMessages).map(message => !message.text && !message.streaming ? null : <div key={message.id} className={`ws-chat-msg ws-chat-${message.role}${message.error ? ' ws-chat-error' : ''}`}>
-        <span className="workspace-message-role">{message.role === 'user' ? 'You' : 'Nawa'}{message.modelLabel && <small className="nawa-message-model">{message.modelLabel}</small>}<time dateTime={new Date(message.createdAt).toISOString()}>{new Date(message.createdAt).toLocaleTimeString()}</time></span>
-        {message.streaming && !message.text ? 'Thinking…' : message.role === 'assistant' ? <Markdown text={message.text} /> : message.text}</div>)}
+      <details className="ws-chat-scope" aria-label={s('Selection details')}>
+        <summary className="nawa-scope-summary"><strong>{s('Selected files')}</strong><span>{s('{files} files · {folders} folders', { files: selection.files.length, folders: selection.directories.length })}</span></summary>
+        {!selection.files.length && !selection.directories.length && <p className="workspace-scope-help">{s('Select files in the workspace to let Nawa read their contents.')}</p>}
+        <div className="nawa-selection-items">{selection.directories.map(path => <div key={path} className="nawa-selection-item" title={path}><FolderGlyph size={18} /><bdi>{displayPath(selection, path)}</bdi><small>{s('Names only')}</small></div>)}
+          {selection.files.map(path => <div key={path} className="nawa-selection-item" title={path}><DocumentIcon ext={path.split('.').pop() || ''} size={18} /><button type="button" onClick={() => onOpenFile(path)}><bdi>{displayPath(selection, path)}</bdi></button><small>{s('Can read')}</small></div>)}</div>
+        {folder && <div className="nawa-opened-folder" title={folder}><bdi>{folder}</bdi> · {s('Names only')}</div>}
+        <p className="workspace-scope-help">{s('Opening history does not reselect files. Selection changes stop the current response.')}</p>
+      </details>
+      <div className="ws-chat-log" role="log" aria-live="polite">
+        {messages.length > visibleMessages && <button type="button" className="ws-chat-close" onClick={() => setVisibleMessages(value => value + 100)}>{s('Show earlier messages ({count} more)', { count: messages.length - visibleMessages })}</button>}
+        {!messages.length && <div className="ws-chat-empty"><h2>{s('Ask Nawa')}</h2><p>{s('Select files to ask questions or request changes. Every file change requires your approval.')}</p></div>}
+        {messages.slice(-visibleMessages).map(message => !message.text && !message.streaming ? null : <div key={message.id} className={`ws-chat-msg ws-chat-${message.role}${message.error ? ' ws-chat-error' : ''}`}>
+          <span className="workspace-message-role">{message.role === 'user' ? s('You') : 'Nawa'}{message.modelLabel && <small className="nawa-message-model">{message.modelLabel}</small>}<time dateTime={new Date(message.createdAt).toISOString()}>{new Date(message.createdAt).toLocaleTimeString()}</time></span>
+          {message.streaming && !message.text ? s('Thinking…') : message.role === 'assistant' ? <Markdown text={message.text} /> : message.text}</div>)}
+      </div>
+      {!!activity.length && <div className="ws-chat-notice" role="status">{activity.slice(-2).join(' · ')}</div>}
+      <details className="workspace-privacy-note"><summary>{s('Storage and file checks')}</summary><p>{s('Hashes are computed locally, including unselected files inside tracked folders. Only selected files can be sent to your model. Chat history is stored locally without encryption.')}</p></details>
     </div>
-    {buffer.error && <div className="ws-chat-notice" role="alert">Not saved: {buffer.error}<button type="button" className="ws-chat-close" onClick={() => void buffer.flush().catch(() => undefined)}>Retry saving</button></div>}
-    {notice && <div className="ws-chat-notice" role="status">{notice}</div>}
-    <ChatModelPicker loadSettings={loadSettings} initialId={modelId} onChange={id => {
-      modelRef.current = id; buffer.edit(record => record.modelId === id ? record : { ...record, modelId: id })
-    }} disabled={busy || transitioning} />
-    <form className="ws-chat-input-row" onSubmit={event => { event.preventDefault(); void send() }}>
-      <textarea ref={inputRef} aria-label="Message Nawa" className="ws-chat-input" value={input} rows={3} placeholder="Ask about this selection…"
-        onChange={event => buffer.edit(record => ({ ...record, draft: event.target.value }))}
-        onKeyDown={event => {
-          if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send() }
-          else if (event.key === 'Escape' && busy) { event.preventDefault(); stop() }
-        }} />
-      {busy ? <button type="button" className="ws-chat-send" onClick={() => stop()}>Stop</button>
-        : <button type="submit" className="ws-chat-send" disabled={!input.trim() || transitioning}>Send</button>}
-    </form>
-    <div className="nawa-history-save-status" role="status">{buffer.error ? 'Save needs attention' : buffer.dirty ? 'Saving locally…' : 'Saved locally'} · {data.messages.length} messages</div>
-    <div className="workspace-privacy-note">Hashes are computed locally, including unselected files inside the tracked folders. Hashing does not grant AI access: only explicitly selected files can be sent to your model. History is stored locally, not encrypted by this feature.</div>
+    <footer className="ws-chat-footer">
+      {(needsReview || workflowState) && <div className="nawa-chat-review-launch"><span role="status">{s(needsReview ? 'Approval needed' : 'Assistant activity')}</span><button type="button" className="set-btn" onClick={() => setReviewOpen(true)}>{s('Review')}</button></div>}
+      {parentError && <div className="ws-chat-notice" role="alert">{parentError}</div>}
+      {buffer.error && <div className="ws-chat-notice" role="alert">{s('Save needs attention')}: {buffer.error}<button type="button" className="ws-chat-close" onClick={() => void buffer.flush().catch(() => undefined)}>{s('Retry saving')}</button></div>}
+      {notice && <div className="ws-chat-notice" role="status">{notice}</div>}
+      <ChatModelPicker translate={s} emptyHint={s('Add saved models in Models.')} loadSettings={loadSettings} initialId={modelId} onChange={id => {
+        modelRef.current = id; buffer.edit(record => record.modelId === id ? record : { ...record, modelId: id })
+      }} disabled={busy || transitioning} />
+      <form className="ws-chat-input-row" onSubmit={event => { event.preventDefault(); followTail.current = true; void send() }}>
+        <textarea ref={inputRef} aria-label={s('Message Nawa')} className="ws-chat-input" value={input} rows={2} placeholder={s('Ask about this selection…')}
+          onChange={event => buffer.edit(record => ({ ...record, draft: event.target.value }))}
+          onKeyDown={event => {
+            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); followTail.current = true; void send() }
+            else if (event.key === 'Escape' && busy) { event.preventDefault(); event.stopPropagation(); stop() }
+          }} />
+        {busy ? <button type="button" className="ws-chat-send" onClick={() => stop()}>{s('Stop')}</button>
+          : <button type="submit" className="ws-chat-send" disabled={!input.trim() || transitioning}>{s('Send')}</button>}
+      </form>
+      <div className="nawa-history-save-status" role="status">{s(buffer.error ? 'Save needs attention' : buffer.dirty ? 'Saving locally…' : 'Saved locally')} · {s('{count} messages', { count: data.messages.length })}</div>
+    </footer>
   </section>
 }

@@ -1,7 +1,11 @@
+import { useSidebarText } from '../explorer/sidebar-i18n'
+import { usePanelActivity } from '../explorer/panel-state'
 import { useEffect, useState } from 'react'
 import type { RagProgress, RagSettingsView } from '../../../shared/rag-api'
 import './rag.css'
-export function RagToolbar({ folder , inSidebar = false }: { folder: string | null ; inSidebar?: boolean }) {
+export function RagToolbar({ folder, inSidebar = false, onStatus }: { folder: string | null; inSidebar?: boolean; onStatus?(value: string): void }) {
+  const { s } = useSidebarText()
+  const [retry, setRetry] = useState(0)
   const [settings, setSettings] = useState<RagSettingsView | null>(null), [progress, setProgress] = useState<RagProgress | null>(null)
   const [recursive, setRecursive] = useState(true), [consent, setConsent] = useState(false), [busy, setBusy] = useState(false), [clear, setClear] = useState(false), [error, setError] = useState('')
   useEffect(() => {
@@ -20,7 +24,7 @@ export function RagToolbar({ folder , inSidebar = false }: { folder: string | nu
     const off = window.nawaRag.onChanged(changed), timer = setInterval(poll, 2000)
     window.addEventListener('nawa:rag-settings-changed', changedSettings)
     return () => { alive = false; off(); clearInterval(timer); window.removeEventListener('nawa:rag-settings-changed', changedSettings) }
-  }, [folder])
+  }, [folder, retry])
   const action = async (kind: 'index' | 'cancel' | 'clear') => {
     if (!folder || busy) return
     setBusy(true); setError('')
@@ -31,19 +35,26 @@ export function RagToolbar({ folder , inSidebar = false }: { folder: string | nu
     } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false) }
   }
-  if (!folder) return null
   const running = progress?.running === true
-  return <section className="nawa-rag-toolbar" aria-label="Directory RAG indexing" onContextMenu={e => e.stopPropagation()}>
-    <details open={inSidebar || undefined}><summary>Directory RAG · {settings?.settings.enabled ? settings.settings.model : 'not configured'}</summary>
-      <p>Index the opened directory using <code>{settings?.settings.baseUrl ?? 'the configured embedding endpoint'}</code>. Use the Embedding settings button in the RAG &amp; Analytics tab.</p>
-      <label className="nawa-rag-check"><input type="checkbox" disabled={running || busy} checked={recursive} onChange={e => setRecursive(e.target.checked)}/> Include subdirectories (hidden entries, links and node_modules are excluded)</label>
-      <label className="nawa-rag-check"><input type="checkbox" disabled={running || busy} checked={consent} onChange={e => setConsent(e.target.checked)}/> I allow text from this directory to be sent to the configured embedding server and stored in Nawa’s unencrypted local RAG index.</label>
-      <p>Chat still reads only individually selected files. Indexing does not change the file-selection permission rules.</p>
-      <div className="nawa-rag-actions"><button className="set-btn primary" type="button" disabled={busy || running || !consent || !settings?.settings.enabled} onClick={() => void action('index')}>Index / refresh directory</button><button className="set-btn" type="button" disabled={busy || running} onClick={() => setClear(true)}>Clear this directory’s RAG index</button></div>
-      {clear && <div role="group" aria-label="Confirm clearing RAG index"><p>Remove indexed chunks and vectors for this directory and its subdirectories? Original files and chat history will stay unchanged.</p><button className="set-btn danger" disabled={busy} onClick={() => void action('clear')}>Clear index records</button> <button className="set-btn" disabled={busy} onClick={() => setClear(false)}>Keep index</button></div>}
+  const status = error ? 'Check needs attention' : running ? 'Indexing…' : !settings ? 'Loading…' : settings.settings.enabled && settings.settings.model ? 'Ready' : 'Needs setup'
+  useEffect(() => { onStatus?.(status) }, [onStatus, status])
+  usePanelActivity('ragAnalytics', 'index', error ? { kind: 'error', text: s('File search') + ': ' + error } : running ? { kind: 'busy', text: s('Indexing…') + ' ' + (progress?.folder ?? '') } : null)
+  if (!folder) return null
+  return <section className="nawa-rag-toolbar" aria-label={s('File search')} onContextMenu={e => e.stopPropagation()}>
+    <details open={inSidebar || undefined}><summary hidden={inSidebar}>{s('File search')} · {s(status)}</summary>
+      <p>{settings?.settings.model && <strong>{settings.settings.model} · </strong>}<bdi>{settings?.settings.baseUrl}</bdi></p>
+      {status === 'Needs setup' && <p role="status">{s('Configure and enable an embedding connection in Search settings.')}</p>}
+      <label className="nawa-rag-check"><input type="checkbox" disabled={running || busy} checked={recursive} onChange={e => setRecursive(e.target.checked)}/>{s('Include subdirectories')}</label>
+      <small>{s('Hidden files, links and node_modules are excluded.')}</small>
+      <label className="nawa-rag-check"><input type="checkbox" disabled={running || busy} checked={consent} onChange={e => setConsent(e.target.checked)}/>{s('I allow this directory’s text to be sent to the embedding server and stored in the unencrypted local index.')}</label>
+      <div className="nawa-rag-actions"><button className="set-btn primary" type="button" disabled={busy || running || !consent || !settings?.settings.enabled || !settings.settings.model} onClick={() => void action('index')}>{s('Index / refresh directory')}</button></div>
+      <details><summary>{s('Manage stored data')}</summary>
+        <button className="set-btn" type="button" disabled={busy || running} onClick={() => setClear(true)}>{s('Clear index')}</button>
+        {clear && <div role="group" aria-label={s('Clear index')}><p>{s('Clear these records? Source files and conversations are kept.')}</p><button className="set-btn danger" disabled={busy} onClick={() => void action('clear')}>{s('Clear')}</button> <button className="set-btn" disabled={busy} onClick={() => setClear(false)}>{s('Cancel')}</button></div>}
+      </details>
     </details>
-    {running && <div className="nawa-rag-running"><span role="status">{progress?.message} · {progress?.scanned} files checked · {progress?.embedded} embedded · {progress?.failed} failed</span><button type="button" className="set-btn" disabled={busy} onClick={() => void action('cancel')}>Stop indexing</button></div>}
+    {running && <div className="nawa-rag-running"><span role="status">{s('Indexing…')}<br/>{s('Job directory')}: <bdi>{progress.folder}</bdi><br/>{progress.message}<br/>{s('{scanned} files checked · {done} completed · {failed} failed', { scanned: progress.scanned, done: progress.embedded, failed: progress.failed })}</span><button type="button" className="set-btn" disabled={busy} onClick={() => void action('cancel')}>{s('Stop indexing')}</button></div>}
     {!running && progress?.folder === folder && progress.message && <p role="status">{progress.message}</p>}
-    {error && <p className="nawa-rag-error" role="alert">{error}</p>}
+    {error && <div role="alert" className="nawa-rag-error"><p>{error}</p><button type="button" className="set-btn" onClick={() => { setError(''); setRetry(value => value + 1) }}>{s('Retry')}</button></div>}
   </section>
 }

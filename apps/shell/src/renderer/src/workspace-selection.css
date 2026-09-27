@@ -10,6 +10,9 @@
 .ws-chat-msg .ai-md { min-width: 0; overflow-wrap: anywhere; }
 .ws-chat-msg .ai-md-pre { white-space: pre; overflow-x: auto; }
 .ws-chat-msg .ai-md-table-wrap { max-width: 100%; overflow-x: auto; }
+.workspace-chat-main .ws-chat-scroll { flex: 1; min-height: 0; overflow: auto; }
+.workspace-chat-main .ws-chat-scroll .ws-chat-log { overflow: visible; min-height: 0; }
+.workspace-chat-main .ws-chat-footer { flex: none; max-height: 60%; overflow: auto; }
 .ex-brand-symbol:has(.nawa-icon) { background: transparent; padding: 0; box-shadow: none; }
 .nawa-icon { display: inline-block; flex-shrink: 0; object-fit: contain; }
 

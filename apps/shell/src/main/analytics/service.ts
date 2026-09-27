@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path'
 import workerPath from './worker?modulePath'
 import { ANALYTICS_CHANNEL, ANALYTICS_CHANGED, DEFAULT_ANALYTICS_SETTINGS, type AnalyticsSettings, type AnalyticsProgress, type AnalyticsEnvelope, type AnalyticsReadAction } from '../../shared/analytics-api'
 import { authorizePath } from '../directory-actions/file-safety'
-import { settings as validateSettings, object, text, list, message } from './validation'
+import { settings as validateSettings, object, text, list } from './validation'
 import type { AnalyticsJob } from './engine'
 interface Options { roots():Promise<string[]>;isHomeSender(sender:WebContents):boolean }
 interface Active { owner:number;worker:Worker;flag:Int32Array;abort:AbortController;writer:boolean }
@@ -18,8 +18,10 @@ export class AnalyticsService {
   private saved:AnalyticsSettings|null=null
   private clients=new Map<number,WebContents>()
   private active=new Map<string,Active>()
+  private requests=new Map<string,{owner:number;abort:AbortController;writer:boolean}>()
   private writer=false
   private readers=0
+  private waitingReaders=new Set<()=>void>()
   private state=initial()
   private stopped=false
   private saving:Promise<unknown>=Promise.resolve()
@@ -27,7 +29,7 @@ export class AnalyticsService {
   private changed():void{for(const [id,c]of this.clients){if(c.isDestroyed())this.clients.delete(id);else if(this.options.isHomeSender(c))c.send(ANALYTICS_CHANGED)}}
   track(sender:WebContents):void{
     if(this.clients.has(sender.id))return;this.clients.set(sender.id,sender)
-    const revoke=()=>{for(const item of this.active.values())if(item.owner===sender.id)item.abort.abort();this.clients.delete(sender.id)}
+    const revoke=()=>{for(const item of this.requests.values())if(item.owner===sender.id)item.abort.abort();this.clients.delete(sender.id)}
     sender.once('destroyed',revoke);sender.on('render-process-gone',revoke);sender.on('did-start-navigation',(_event,_url,_inPlace,mainFrame)=>{if(mainFrame)revoke()})
   }
   private async config():Promise<AnalyticsSettings>{
@@ -40,21 +42,44 @@ export class AnalyticsService {
     const done=this.saving.then(save,save);this.saving=done.catch(()=>undefined);await done
   }
   progress():AnalyticsProgress{return {...this.state}}
-  cancel(owner:number):void{for(const item of this.active.values())if(item.owner===owner&&item.writer)item.abort.abort()}
+  cancel(owner:number):void{for(const item of this.requests.values())if(item.owner===owner&&item.writer)item.abort.abort()}
+  private async acquireReader(signal:AbortSignal,timeoutMs:number):Promise<void>{
+    if(signal.aborted)throw new Error('Analytics request cancelled.')
+    if(this.readers<2){this.readers++;return}
+    if(this.waitingReaders.size>=64)throw new Error('Too many queued analytics requests. Please retry shortly.')
+    // Reserve the freed slot before waking a waiter so newer reads cannot jump the queue.
+    await new Promise<void>((resolve,reject)=>{
+      const cleanup=()=>{clearTimeout(timer);signal.removeEventListener('abort',cancel);this.waitingReaders.delete(start)}
+      const start=()=>{cleanup();this.readers++;resolve()}
+      const cancel=()=>{cleanup();reject(new Error('Analytics request cancelled.'))}
+      const timer=setTimeout(()=>{cleanup();reject(new Error('Analytics request timed out waiting for an available reader.'))},timeoutMs)
+      this.waitingReaders.add(start)
+      signal.addEventListener('abort',cancel,{once:true})
+    })
+  }
+  private releaseReader():void{
+    this.readers--
+    this.waitingReaders.values().next().value?.()
+  }
   async request(owner:number,job:AnalyticsJob,signal?:AbortSignal):Promise<unknown>{
     const writer=['import','review','clear'].includes(job.action)
     if(this.stopped||signal?.aborted)throw new Error('Analytics request cancelled.')
-    if(writer?this.writer:this.readers>=2)throw new Error(writer?'Another data import/review is running.':'Analytics readers are busy; retry the request.')
+    if(writer&&this.writer)throw new Error('Another data import/review is running.')
     if(Buffer.byteLength(JSON.stringify(job))>256000)throw new Error('Analytics request is too large.')
-    if(writer)this.writer=true;else this.readers++
+    if(writer)this.writer=true
     const id=randomUUID(),abort=new AbortController(),forward=()=>abort.abort()
     signal?.addEventListener('abort',forward,{once:true})
+    this.requests.set(id,{owner,abort,writer})
     let worker:Worker|undefined
+    let readerAcquired=false
     try{
-      const config=await this.config(),roots=await this.options.roots()
+      const config=await this.config()
+      if(!writer){await this.acquireReader(abort.signal,config.queryTimeoutSeconds*1000);readerAcquired=true}
+      if(this.stopped||abort.signal.aborted)throw new Error('Analytics request cancelled.')
+      const roots=await this.options.roots()
       if(job.folder)await authorizePath(roots,job.folder)
       for(const path of job.paths??[])await authorizePath(roots,job.action==='statuses'||job.action==='discover'?dirname(path):path)
-      if(this.stopped||signal?.aborted)throw new Error('Analytics request cancelled.')
+      if(this.stopped||abort.signal.aborted)throw new Error('Analytics request cancelled.')
       const buffer=new SharedArrayBuffer(4),flag=new Int32Array(buffer)
       worker=new Worker(workerPath,{workerData:{databasePath:this.databasePath,roots,settings:config,job,cancel:buffer,deadline:Date.now()+(writer?24*3600*1000:config.queryTimeoutSeconds*1000)},resourceLimits:{maxOldGenerationSizeMb:512}})
       this.active.set(id,{owner,worker,flag,abort,writer})
@@ -62,7 +87,7 @@ export class AnalyticsService {
       const current=worker
       const result=await new Promise<unknown>((resolve,reject)=>{
         let ended=false,lastActivity=Date.now(),checking=false,killer:ReturnType<typeof setTimeout>|undefined
-        const finish=(error?:Error,value?:unknown)=>{if(ended)return;ended=true;clearInterval(watch);clearTimeout(deadline);clearTimeout(killer);current.off('message',onMessage);current.off('error',onError);current.off('exit',onExit);abort.signal.removeEventListener('abort',onAbort);error?reject(error):resolve(value)}
+        const finish=(error?:Error,value?:unknown)=>{if(ended)return;ended=true;clearInterval(watch);clearTimeout(deadline);clearTimeout(killer);current.off('message',onMessage);current.off('error',onError);current.off('exit',onExit);abort.signal.removeEventListener('abort',onAbort);if(error)reject(error);else resolve(value)}
         const terminate=(error:Error)=>{Atomics.store(flag,0,1);void current.terminate();finish(error)}
         const onError=(error:Error)=>finish(error)
         const onExit=(code:number)=>finish(new Error(`Analytics worker exited (${code}). Completed generations remain stored; retry the operation.`))
@@ -90,15 +115,15 @@ export class AnalyticsService {
       for(const source of (result as AnalyticsEnvelope|undefined)?.sources??[])await authorizePath(now,source.path)
       return result
     }finally{
-      signal?.removeEventListener('abort',forward);this.active.delete(id);if(worker)await worker.terminate().catch(()=>undefined)
-      if(writer){this.writer=false;this.state={...this.state,running:false};this.changed()}else this.readers--
+      signal?.removeEventListener('abort',forward);this.requests.delete(id);this.active.delete(id);if(worker)await worker.terminate().catch(()=>undefined)
+      if(writer){this.writer=false;this.state={...this.state,running:false};this.changed()}else if(readerAcquired)this.releaseReader()
     }
   }
   async selected(owner:number,paths:string[],action:AnalyticsReadAction,payload:unknown,signal:AbortSignal):Promise<AnalyticsEnvelope>{
     if(!['discover','describe','query','analyze','result','drill','verify'].includes(action))throw new Error('The agent has read-only analytical tools; importing/reviewing/clearing is user-controlled.')
     return await this.request(owner,{action,paths,payload},signal) as AnalyticsEnvelope
   }
-  stop():void{this.stopped=true;for(const item of this.active.values()){Atomics.store(item.flag,0,1);void item.worker.terminate()}this.active.clear()}
+  stop():void{this.stopped=true;for(const item of this.requests.values())item.abort.abort();for(const item of this.active.values()){Atomics.store(item.flag,0,1);void item.worker.terminate()}this.active.clear()}
 }
 export function registerAnalyticsIpc(options:Options):AnalyticsService{
   const service=new AnalyticsService(options)

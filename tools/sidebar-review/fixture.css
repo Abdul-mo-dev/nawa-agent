@@ -1,0 +1,18 @@
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+.fixture-controls {
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  border-bottom: 1px solid var(--ex-line);
+}
+.fixture-controls button {
+  padding: 8px;
+}
+.ex-center {
+  padding: 24px;
+}

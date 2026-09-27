@@ -9,8 +9,11 @@ export interface ChatModelPickerProps {
   storageKey?: string
   initialId?: string
   disabled?: boolean
+  translate?: (text: string) => string
+  emptyHint?: string
 }
-export function ChatModelPicker({ loadSettings, onChange, storageKey, initialId = '', disabled = false }: ChatModelPickerProps) {
+const identity = (text: string) => text
+export function ChatModelPicker({ loadSettings, onChange, storageKey, initialId = '', disabled = false, translate = identity, emptyHint }: ChatModelPickerProps) {
   const [models, setModels] = useState<ModelChoice[]>([])
   const [selected, setSelected] = useState(() => { try { return storageKey ? localStorage.getItem(storageKey) || '' : initialId } catch { return initialId } })
   const [defaultId, setDefaultId] = useState('')
@@ -54,18 +57,18 @@ export function ChatModelPicker({ loadSettings, onChange, storageKey, initialId 
     wasDisabled.current = disabled
   }, [disabled])
   return <div className="nawa-chat-model-control">
-    <label className="nawa-chat-model-label">Model
-      <select aria-label="Chat model" value={selected} disabled={disabled} onFocus={() => refreshRef.current()} onChange={event => {
+    <label className="nawa-chat-model-label">{translate('Model')}
+      <select aria-label={translate('Chat model')} value={selected} disabled={disabled} onFocus={() => refreshRef.current()} onChange={event => {
         const id = event.target.value
         selectedRef.current = id; setSelected(id); setError(null); changeRef.current(id)
         try { if (storageKey) localStorage.setItem(storageKey, id) } catch { /* Preference storage is optional. */ }
       }}>
-        <option value="">{defaultId ? `Default · ${models.find(m => m.id === defaultId)?.name || 'configured model'}` : 'Default provider model'}</option>
-        {selected && !models.some(m => m.id === selected) && <option value={selected}>Removed model — choose another</option>}
+        <option value="">{defaultId ? `${translate('Default')} · ${models.find(m => m.id === defaultId)?.name || translate('configured model')}` : translate('Default provider model')}</option>
+        {selected && !models.some(m => m.id === selected) && <option value={selected}>{translate('Removed model — choose another')}</option>}
         {models.map(model => <option key={model.id} value={model.id}>{model.name} · {model.config.model} ({model.provider})</option>)}
       </select>
     </label>
-    {error && <span role="alert" className="nawa-chat-model-error">{error}</span>}
-    {!models.length && !error && <span className="nawa-chat-model-hint">Add model profiles in Settings → AI model.</span>}
+    {error && <span role="alert" className="nawa-chat-model-error">{translate(error)}</span>}
+    {!models.length && !error && <span className="nawa-chat-model-hint">{emptyHint ?? translate('Add model profiles in Settings → AI model.')}</span>}
   </div>
 }

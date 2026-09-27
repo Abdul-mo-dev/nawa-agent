@@ -499,7 +499,7 @@ export function App(): React.JSX.Element {
       if (lazyWorkbookRef.current) return true
       const workbook = univerRef.current?.univerAPI.getActiveWorkbook()
       if (!workbook) return false
-      const snapshot = workbook.getSnapshot()
+      const snapshot = workbook.save()
       for (const sheet of Object.values(snapshot.sheets ?? {})) {
         for (const row of Object.values(sheet.cellData ?? {})) {
           for (const cell of Object.values(row ?? {}) as (ICellData | null | undefined)[]) {
@@ -1741,7 +1741,7 @@ export function App(): React.JSX.Element {
     const contextSubmenuReopenDisposable = installContextSubmenuReopenFix()
     // Enter in a context-menu count box (insert N rows/columns, column
     // width) runs the row's action instead of only committing the number.
-    installMenuInputEnter(runtime)
+    const menuInputEnterDisposable = installMenuInputEnter(runtime)
     // Pasting into an anchor-shaped target (rows a multiple, columns
     // narrower than the copy — or vice versa) repeats like Excel.
     installClipboardAnchorTile(runtime)
@@ -2899,6 +2899,7 @@ export function App(): React.JSX.Element {
       selectionWrapGuardDisposable.dispose()
       arrowCollapseDisposable.dispose()
       contextSubmenuReopenDisposable.dispose()
+      menuInputEnterDisposable.dispose()
       multiRowAutofitDisposable.dispose()
       cfFormulaFoldDisposable.dispose()
       cfDisplayKeyDisposable.dispose()

@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { useSidebarText } from '../explorer/sidebar-i18n'
+import { usePanelActivity } from '../explorer/panel-state'
 import { DEFAULT_ANALYTICS_SETTINGS, type AnalyticsSettings as Settings } from '../../../shared/analytics-api'
 import './analytics.css'
 const fields:Array<{key:keyof Settings;label:string;min:number;max:number;help:string}>=[
@@ -11,17 +13,21 @@ const fields:Array<{key:keyof Settings;label:string;min:number;max:number;help:s
   {key:'retainedResults',label:'Retained analysis receipts',min:10,max:10000,help:'Receipts contain SQL, parameters, results and source versions. Older receipts expire beyond this count.'},
 ]
 export function AnalyticsSettings(){
+  const { s } = useSidebarText()
+  const [baseline,setBaseline]=useState<Settings|null>(null),[retry,setRetry]=useState(0)
   const [value,setValue]=useState<Settings>({...DEFAULT_ANALYTICS_SETTINGS}),[database,setDatabase]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[saved,setSaved]=useState(false),[loading,setLoading]=useState(true)
-  useEffect(()=>{let live=true;if(!window.nawaAnalytics){setError('Analytics bridge unavailable. Rebuild and restart.');setLoading(false);return}void window.nawaAnalytics.settings().then(r=>{if(live){setValue(r.settings);setDatabase(r.databasePath)}}).catch(e=>{if(live)setError(String(e))}).finally(()=>{if(live)setLoading(false)});return()=>{live=false}},[])
-  const save=async()=>{setBusy(true);setError('');setSaved(false);try{await window.nawaAnalytics.saveSettings(value);setSaved(true)}catch(e){setError(e instanceof Error?e.message:String(e))}finally{setBusy(false)}}
-  return <div className="nawa-data-settings"><h3 className="set-pane-title">Structured Data Analysis</h3>
-    <p>Local SQLite tables for exact aggregation and reproducible statistics, alongside—not inside—conversation history or the RAG index. No database server, embedding request, Docker or Python service is required for importing/querying tables.</p>
-    <p>Supported analytical imports: CSV, TSV, JSON arrays of objects, JSONL/NDJSON, XLSX and XLSM. Review each table’s range, row grain, types, keys, units and formula policy before the agent can query it. PDF and narrative RAG are not validated table imports.</p>
-    <div className="nawa-data-settings-grid">{fields.map(f=><label className="nawa-data-field" key={f.key}><span>{f.label}</span><input className="set-input" type="number" min={f.min} max={f.max} step={1} disabled={busy||loading} value={Number.isNaN(value[f.key])?'':value[f.key]} onChange={e=>{setSaved(false);setValue(v=>({...v,[f.key]:Number(e.target.value)}))}}/><small>{f.help}</small></label>)}</div>
-    <p>SQL access is generated from validated structured requests. The agent cannot submit arbitrary SQL, change a schema, approve data, load extensions, attach databases, or read your chat-history database through these tools.</p>
-    <p>Source snapshots, raw records, approved tables and analysis receipts are stored unencrypted locally. Clearing a directory’s analytical data removes those records and related receipts, but not source files, chats or RAG embeddings. Logical deletion is not secure physical erasure.</p>
-    <p className="nawa-data-path">Database: <code>{database||'Loading…'}</code></p>
-    <button type="button" className="set-btn primary" disabled={busy||loading} onClick={()=>void save()}>Save analytics settings</button>
-    {saved&&<p role="status">Analytics settings saved. Embedding settings were not changed.</p>}{error&&<p role="alert" className="nawa-data-error">{error}</p>}
-  </div>
+  const dirty=!!baseline&&JSON.stringify(value)!==JSON.stringify(baseline)
+  usePanelActivity('ragAnalytics','analysis-settings',error?{kind:'error',text:error}:dirty?{kind:'unsaved',text:s('Unsaved analysis settings')}:null)
+  useEffect(()=>{let live=true;setError('');setLoading(true);if(!window.nawaAnalytics){setError('Analytics bridge unavailable. Rebuild and restart.');setLoading(false);return}void window.nawaAnalytics.settings().then(r=>{if(live){setValue(r.settings);setBaseline(r.settings);setDatabase(r.databasePath)}}).catch(e=>{if(live)setError(String(e))}).finally(()=>{if(live)setLoading(false)});return()=>{live=false}},[retry])
+  const save=async()=>{setBusy(true);setError('');setSaved(false);try{await window.nawaAnalytics.saveSettings(value);setBaseline(value);setSaved(true)}catch(e){setError(e instanceof Error?e.message:String(e))}finally{setBusy(false)}}
+  if(!baseline)return <div><p role={error?'alert':'status'}>{error||s('Loading…')}</p>{error&&<button type="button" className="set-btn" onClick={()=>setRetry(value=>value+1)}>{s('Retry')}</button>}</div>
+  return <div className="nawa-data-settings"><h3 className="set-pane-title">{s("Structured Data Analysis")}</h3>
+    <p>{s('Set limits for local table imports and analysis. Review each imported table before the assistant can query it.')}</p>
+    <div className="nawa-data-settings-grid">{fields.map(f=><label className="nawa-data-field" key={f.key}><span>{s(f.label)}</span><input className="set-input" type="number" min={f.min} max={f.max} step={1} disabled={busy||loading} value={Number.isNaN(value[f.key])?'':value[f.key]} onChange={e=>{setSaved(false);setValue(v=>({...v,[f.key]:Number(e.target.value)}))}}/><small>{s(f.help)}</small></label>)}</div>
+    <details><summary>{s('Storage details')}</summary><p>{s('Source snapshots, tables and analysis results are stored locally without encryption. Clearing analysis data keeps source files, conversations and search indexes.')}</p><p className="nawa-data-path">{s('Database')}: <code>{database}</code></p></details>
+    <div className="nawa-settings-footer">{dirty&&<p role="status">{s('Unsaved changes')}</p>}
+    <button type="button" className="set-btn" disabled={busy||!dirty} onClick={()=>{setValue(baseline);setError('');setSaved(false)}}>{s('Discard changes')}</button>
+    <button type="button" className="set-btn primary" disabled={busy||loading||!dirty} onClick={()=>void save()}>{s(busy?'Saving…':'Save analytics settings')}</button>
+    {saved&&<p role="status">{s("Analytics settings saved. Embedding settings were not changed.")}</p>}{error&&<p role="alert" className="nawa-data-error">{error}</p>}
+    </div></div>
 }

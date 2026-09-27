@@ -164,7 +164,7 @@ export function captureUndoCarry(runtime: UniverRuntime | null, newSha: string):
     const undoable = carriableSuffix(service._undoStacks?.get(oldUnitId) ?? [])
     const redoable = carriableSuffix(service._redoStacks?.get(oldUnitId) ?? [])
     if (undoable.length === 0 && redoable.length === 0) return null
-    const styles = (workbook.getSnapshot().styles ?? {}) as Record<string, unknown>
+    const styles = (workbook.save().styles ?? {}) as Record<string, unknown>
     const rewrite = (item: CarriedUndoItem): unknown =>
       rewriteCarriedValue(item, oldUnitId, newUnitId, styles)
     return {

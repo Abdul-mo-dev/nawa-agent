@@ -1,6 +1,8 @@
 import { ChatModelsEditor } from './ChatModelsEditor'
+import { usePanelActivity } from './explorer/panel-state'
+import { useSidebarText } from './explorer/sidebar-i18n'
 import { validateChatModels } from '@genoffice/ai-provider/browser'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useId, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
   AI_CUSTOM_FONT_MAX_PX,
@@ -253,6 +255,13 @@ function Field({
 
 /** AI model pane: provider / model / key / base URL, saved to userData/ai-settings.json */
 export function AiModelPane({ t }: { t: TFunc }) {
+  const id = useId()
+  const fieldId = (name: string) => `${id}-${name}`
+  const { s } = useSidebarText()
+  const [baseline, setBaseline] = useState<AiSettings | null>(null)
+  const [error, setError] = useState('')
+  const [retry, setRetry] = useState(0)
+  const [saving, setSaving] = useState(false)
   const [catalog, setCatalog] = useState<AiCatalogEntry[]>(
     () => window.aiOffice.getAiProviders?.() ?? [],
   )
@@ -263,6 +272,7 @@ export function AiModelPane({ t }: { t: TFunc }) {
   const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null)
   /** free-typed value of the output-cap field; committed (and clamped) on blur */
   const [maxTokensDraft, setMaxTokensDraft] = useState<string | null>(null)
+  usePanelActivity('provider', 'settings', error ? { kind: 'error', text: error } : dirty || maxTokensDraft !== null ? { kind: 'unsaved', text: s('Unsaved model settings') } : testing || saving ? { kind: 'busy', text: s('Working…') } : null)
 
   const refreshCodexModels = useCallback(async (cliPath = '', selectedModel = '') => {
     if (!window.aiOffice.getCodexModels) return
@@ -281,6 +291,7 @@ export function AiModelPane({ t }: { t: TFunc }) {
 
   useEffect(() => {
     let alive = true
+    setError('')
     void window.aiOffice.getAiSettings?.().then((s) => {
       if (!alive || !s) return
       // The switch is disabled with genspark, so never present it stranded
@@ -292,17 +303,18 @@ export function AiModelPane({ t }: { t: TFunc }) {
         s = { ...s, gskToolsEnabled: true }
       }
       setSettings(s)
+      setBaseline(s)
       const codex = s.providers.codex
       if (codex) {
         void refreshCodexModels(codex.cliPath ?? '', codex.model).catch(() => undefined)
       }
-    })
+    }).catch(cause => { if (alive) setError(cause instanceof Error ? cause.message : String(cause)) })
     return () => {
       alive = false
     }
-  }, [refreshCodexModels])
+  }, [refreshCodexModels, retry])
 
-  if (!settings) return null
+  if (!settings) return <div className="nawa-model-scroll"><p role={error ? 'alert' : 'status'}>{error || s('Loading model settings…')}</p>{error && <button className="set-btn" onClick={() => setRetry(value => value + 1)}>{s('Retry')}</button>}</div>
   const provider = settings.provider
   const meta = catalog.find((c) => c.id === provider)
   const config = settings.providers[provider] ?? {
@@ -318,6 +330,7 @@ export function AiModelPane({ t }: { t: TFunc }) {
     setDirty(true)
     setSaved(false)
     setTestResult(null)
+    setError('')
   }
   const updateConfig = (patch: Partial<typeof config>) => {
     setSettings({
@@ -345,18 +358,22 @@ export function AiModelPane({ t }: { t: TFunc }) {
     touch()
   }
   const save = () => {
-    const profileError = validateChatModels(settings)
-    if (profileError) { window.alert(profileError); return }
+    const next = maxTokensDraft === null ? settings : { ...settings, maxOutputTokens: clampMaxOutputTokens(Number.parseInt(maxTokensDraft, 10)) }
+    const profileError = validateChatModels(next)
+    if (profileError) { setError(profileError); return }
+    setSaving(true); setError('')
     window.aiOffice
-      .setAiSettings?.(settings)
+      .setAiSettings(next)
       .then(() => {
+        setSettings(next); setBaseline(next); setMaxTokensDraft(null)
         setDirty(false)
         setSaved(true)
         window.dispatchEvent(new Event('nawa:models-changed'))
       })
       .catch((error) => {
-        window.alert(error instanceof Error ? error.message : String(error))
+        setError(error instanceof Error ? error.message : String(error))
       })
+      .finally(() => setSaving(false))
   }
   const test = () => {
     setTesting(true)
@@ -376,9 +393,9 @@ export function AiModelPane({ t }: { t: TFunc }) {
   }
 
   return (
-    <>
-      <h3 className="set-pane-title">{t('setSecAiModel')}</h3>
-      <ChatModelsEditor settings={settings} catalog={catalog} onChange={next => { setSettings(next); touch() }} />
+    <div className="nawa-model-pane">
+      <fieldset className="nawa-model-scroll" disabled={saving || testing}>
+      <h3 className="set-pane-title">{s('Provider connection')}</h3>
       <div className="set-field">
         <div className="set-field-text">
           <label className="set-field-label">{t('setAiProvider')}</label>
@@ -405,7 +422,7 @@ export function AiModelPane({ t }: { t: TFunc }) {
       </div>
       <div className="set-field">
         <div className="set-field-text">
-          <label className="set-field-label">{t('setAiModelId')}</label>
+          <label className="set-field-label" htmlFor={fieldId('set-ai-model')}>{t('setAiModelId')}</label>
         </div>
         {meta && meta.models.length > 0 ? (
           <Dropdown
@@ -417,7 +434,7 @@ export function AiModelPane({ t }: { t: TFunc }) {
           />
         ) : (
           <input
-            id="set-ai-model"
+            id={fieldId('set-ai-model')}
             className="set-input"
             type="text"
             value={config.model}
@@ -431,14 +448,14 @@ export function AiModelPane({ t }: { t: TFunc }) {
         <div className="set-field">
           <div className="set-field-text">
             <div className="set-field-stack">
-              <label className="set-field-label" htmlFor="set-ai-cli-path">
+              <label className="set-field-label" htmlFor={fieldId('set-ai-cli-path')}>
                 {t('setAiCodexPath')}
               </label>
               <div className="set-field-desc">{t('setAiCodexPathHint')}</div>
             </div>
           </div>
           <input
-            id="set-ai-cli-path"
+            id={fieldId('set-ai-cli-path')}
             className="set-input"
             type="text"
             value={config.cliPath ?? ''}
@@ -457,14 +474,14 @@ export function AiModelPane({ t }: { t: TFunc }) {
           <div className="set-field">
             <div className="set-field-text">
               <div className="set-field-stack">
-                <label className="set-field-label" htmlFor="set-ai-key">
+                <label className="set-field-label" htmlFor={fieldId('set-ai-key')}>
                   {t('setAiApiKey')}
                 </label>
                 <div className="set-field-desc">{t('setAiKeyHint')}</div>
               </div>
             </div>
             <input
-              id="set-ai-key"
+              id={fieldId('set-ai-key')}
               className="set-input"
               type="password"
               value={config.apiKey}
@@ -477,7 +494,7 @@ export function AiModelPane({ t }: { t: TFunc }) {
           <div className="set-field">
             <div className="set-field-text">
               <div className="set-field-stack">
-                <label className="set-field-label" htmlFor="set-ai-base-url">
+                <label className="set-field-label" htmlFor={fieldId('set-ai-base-url')}>
                   {t('setAiBaseUrl')}
                 </label>
                 {!meta?.needsBaseUrl && (
@@ -486,7 +503,7 @@ export function AiModelPane({ t }: { t: TFunc }) {
               </div>
             </div>
             <input
-              id="set-ai-base-url"
+              id={fieldId('set-ai-base-url')}
               className="set-input"
               type="text"
               value={config.baseUrl ?? ''}
@@ -497,17 +514,17 @@ export function AiModelPane({ t }: { t: TFunc }) {
           </div>
         </>
       ) : null}
-      <div className="set-field">
+      <details className="nawa-model-advanced"><summary>{s('Advanced model settings')}</summary><div className="set-field">
         <div className="set-field-text">
           <div className="set-field-stack">
-            <label className="set-field-label" htmlFor="set-ai-max-tokens">
+            <label className="set-field-label" htmlFor={fieldId('set-ai-max-tokens')}>
               {t('setAiMaxTokens')}
             </label>
             <div className="set-field-desc">{t('setAiMaxTokensDesc')}</div>
           </div>
         </div>
         <input
-          id="set-ai-max-tokens"
+          id={fieldId('set-ai-max-tokens')}
           className="set-input"
           type="number"
           min={MIN_MAX_OUTPUT_TOKENS}
@@ -538,7 +555,12 @@ export function AiModelPane({ t }: { t: TFunc }) {
           }}
         />
       </div>
+      </details>
+      <ChatModelsEditor settings={settings} catalog={catalog} onChange={next => { setSettings(next); touch() }} />
+      </fieldset>
       <div className="set-pane-footer">
+        {error && <p className="nawa-form-error" role="alert">{error}</p>}
+        {(dirty || maxTokensDraft !== null) && <span role="status">{s('Unsaved changes')}</span>}
         <AiStatusPill
           status={
             testing
@@ -552,14 +574,15 @@ export function AiModelPane({ t }: { t: TFunc }) {
                   : null
           }
         />
-        <button className="set-btn" disabled={testing} onClick={test}>
+        <button className="set-btn" disabled={testing || saving} onClick={test}>
           {t('setAiTest')}
         </button>
-        <button className="set-btn primary" disabled={!dirty} onClick={save}>
-          {t('setAiSave')}
+        <button className="set-btn" disabled={saving || testing || (!dirty && maxTokensDraft === null)} onClick={() => { setSettings(baseline); setDirty(false); setMaxTokensDraft(null); setError(''); setSaved(false); setTestResult(null) }}>{s('Discard changes')}</button>
+        <button className="set-btn primary" disabled={saving || testing || (!dirty && maxTokensDraft === null)} onClick={save}>
+          {saving ? s('Saving…') : t('setAiSave')}
         </button>
       </div>
-    </>
+    </div>
   )
 }
 

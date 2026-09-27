@@ -1,7 +1,7 @@
 import { app, ipcMain, shell, type WebContents } from 'electron'
 import { join } from 'node:path'
 import { Worker } from 'node:worker_threads'
-import { CONVERSATION_CHANNEL } from '../../shared/conversation-api'
+import { CONVERSATION_CHANNEL, isHistoryScanCancelled } from '../../shared/conversation-api'
 import workerSource from './history-worker.cjs?raw'
 
 interface Options {
@@ -102,6 +102,7 @@ export function registerHistoryIpc(options: Options): void {
     const scanning = operation === 'capture' || operation === 'compare'
     const roots = scanning ? await options.roots() : []
     const result = await call(operation, payload, owner, roots)
+    if (scanning && isHistoryScanCancelled(result)) return result
     if (scanning && JSON.stringify(roots) !== JSON.stringify(await options.roots())) {
       throw new Error('Workspace folders changed during the fingerprint check. Check again.')
     }

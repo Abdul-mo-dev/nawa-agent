@@ -8,7 +8,7 @@
  * looks dead (user report: typed a count into "Insert N columns left" and pressed
  * Enter to no effect). Excel executes on Enter.
  *
- * Re-register the component (ComponentManager.register overwrites by key)
+ * Replace the registered component
  * with a wrapper that, after the input commits, activates the enclosing
  * menu-row <button> — the exact code path a mouse click takes, so command,
  * value plumbing, and menu dismissal all stay upstream's.
@@ -16,6 +16,7 @@
 import { createElement } from 'react'
 import type { ComponentType, KeyboardEvent as ReactKeyboardEvent, ReactElement } from 'react'
 import { ComponentManager } from '@univerjs/ui'
+import type { IDisposable } from '@univerjs/core'
 
 import type { UniverRuntime } from './univer-state'
 
@@ -25,6 +26,7 @@ const MENU_ITEM_INPUT_COMPONENT = 'UI_PLUGIN_SHEETS_MENU_ITEM_INPUT_COMPONENT'
 /** sheets-ui registers the component during its own lifecycle — poll briefly */
 const INSTALL_RETRIES = 20
 const INSTALL_RETRY_MS = 500
+const installations = new WeakMap<ComponentManager, IDisposable>()
 
 export function wrapWithEnterActivation(
   Original: ComponentType<Record<string, unknown>>,
@@ -48,16 +50,40 @@ export function wrapWithEnterActivation(
   }
 }
 
-export function installMenuInputEnter(runtime: UniverRuntime): void {
+export function installMenuInputEnter(runtime: UniverRuntime): IDisposable {
   const componentManager = runtime.univer.__getInjector().get(ComponentManager)
+  const installed = installations.get(componentManager)
+  if (installed) return installed
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let restore: (() => void) | undefined
+  let disposed = false
+  const disposable = {
+    dispose() {
+      if (disposed) return
+      disposed = true
+      clearTimeout(timer)
+      restore?.()
+      installations.delete(componentManager)
+    },
+  }
+  installations.set(componentManager, disposable)
   const attempt = (retries: number): void => {
+    if (disposed) return
     const original = componentManager.get(MENU_ITEM_INPUT_COMPONENT) as
       ComponentType<Record<string, unknown>> | undefined
     if (!original) {
-      if (retries > 0) setTimeout(() => attempt(retries - 1), INSTALL_RETRY_MS)
+      if (retries > 0) timer = setTimeout(() => attempt(retries - 1), INSTALL_RETRY_MS)
       return
     }
-    componentManager.register(MENU_ITEM_INPUT_COMPONENT, wrapWithEnterActivation(original))
+    const wrapped = wrapWithEnterActivation(original)
+    componentManager.delete(MENU_ITEM_INPUT_COMPONENT)
+    const registration = componentManager.register(MENU_ITEM_INPUT_COMPONENT, wrapped)
+    restore = () => {
+      if (componentManager.get(MENU_ITEM_INPUT_COMPONENT) !== wrapped) return
+      registration.dispose()
+      componentManager.register(MENU_ITEM_INPUT_COMPONENT, original)
+    }
   }
   attempt(INSTALL_RETRIES)
+  return disposable
 }
