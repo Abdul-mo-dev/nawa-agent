@@ -4,6 +4,11 @@ import type { DirectoryActivity, DirectoryActivityStep, ActivityStatus } from '.
 const MAX_STEPS = 100
 const SECRET = /^(?:.*(?:api.?key|password|secret|authorization|credential|access.?token|refresh.?token)|headers)$/i
 
+/** Skipped work is retained in diagnostics but is not an executed timeline step. */
+export function activitySteps(activity: DirectoryActivity) {
+  return { visible: activity.steps.filter(step => step.status !== 'skipped'), skipped: activity.steps.filter(step => step.status === 'skipped') }
+}
+
 /** Best-effort credential redaction; file contents may still be present in bounded diagnostics. */
 export function diagnosticText(value: unknown, limit = 2400): string {
   let raw: string

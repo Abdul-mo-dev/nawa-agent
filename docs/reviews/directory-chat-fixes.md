@@ -43,3 +43,20 @@ A failed batched history revision check conservatively omits the affected batch 
 A user trace exposed a routing miss for `list file in this dir`: the initial matcher accepted plural `files` and the full location words, so this request loaded six MyAgent tools and advertised 17 tools overall. The listing matcher now covers singular/plural names, `dir`, whitespace, polite wording, and common directory-listing questions. It still matches the entire request, so content filters and additional analytical/editing instructions cannot be mistaken for a simple listing.
 
 The exact reported phrase is now the browser regression scenario: four advertised metadata tools and zero MyAgent catalog requests. The dedicated routing suite covers 18 listing variants and eight content/combined-request exclusions. The routing and directory-review suites pass together (39 tests), alongside shell type checking, the activity browser harness and the production build.
+
+## Workbook overview and activity follow-up — 2026-09-28
+
+The `what is Survey data.xlsx about` trace used a suitable catalog tool, but needed a model round trip to request predictable metadata. A focused overview route now prepares the named selected workbook's catalog before the first model request and initially exposes eight tools instead of the general route's 17. It recognizes whole overview requests, excludes combined analytical/editing requests, and leaves ambiguous file references to the general route. Readers and further analytical tools remain available through explicit discovery.
+
+Overview context retains exact dataset identities, actual returned sheet names, column names, coverage flags and registered citations. It removes duplicate schema signatures and row counts, reduces long column lists across datasets evenly, and always produces valid JSON within 12,000 characters. Guidance distinguishes the subject suggested by column labels from respondent findings, and distinguishes logical dataset titles from worksheet names. The catalog is not treated as an exhaustive workbook inventory. Verified history can reuse the compact metadata; missing metadata falls back to readers, and changed sources still reject the final answer.
+
+Skipped preparation now appears only inside Debug details and no longer inflates the visible step count. Failed preparation stays visible. Zero-source directory listings use **Metadata-only response** instead of **Answer sources verified**; other zero-source responses use **No file sources to recheck**. Copied diagnostics retain skipped steps.
+
+Validation:
+
+- 80 focused tests passed across routing, metadata packing, activity, source/history integrity and MyAgent skill behavior.
+- The activity browser harness passed, including the exact survey question in one scripted model turn with eight tools, one targeted catalog execution, a registered citation, verified follow-up reuse, reader fallback and changed-source rejection. Existing approval, editing, count, listing, continuation and Arabic/RTL checks also passed.
+- Shell type checking and the production build passed.
+- The read-only live MyAgent check selected all 23 sample files and targeted only `Survey data.xlsx`. Both indexed sheet names and all 67 column names survived compaction, from 6,581 to 3,219 characters. The three HTTP requests were schema discovery, catalog execution and final source validation; all returned HTTP 200. Artifact: `.task/directory-chat-fixes/survey-overview.json`. No source files were edited and no model-provider requests were made.
+
+The browser model is scripted: one model turn demonstrates the supported path, not a guarantee for every provider response. Restart Nawa to load the build; no MyAgent server update or restart is required.

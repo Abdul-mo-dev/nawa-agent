@@ -1,10 +1,17 @@
 import { expect, it, vi } from 'vitest'
 import type { DirectoryActivity } from '../src/shared/directory-activity'
-import { diagnosticText, finishActivity, finishActivityStep, startActivityStep, TextFrameBuffer } from '../src/renderer/src/directory-actions/activity'
+import { activitySteps, diagnosticText, finishActivity, finishActivityStep, startActivityStep, TextFrameBuffer } from '../src/renderer/src/directory-actions/activity'
 import { ApprovalController, DirectoryActionClient } from '../src/renderer/src/directory-actions/controller'
 import type { DirectoryActionsApi } from '../src/shared/directory-actions-api'
 
 const trace = (): DirectoryActivity => ({ id: 'run', model: 'model', selectedFiles: 2, startedAt: 1, status: 'running', steps: [], omitted: 0 })
+it('retains skipped preparation in diagnostics and keeps failures in the visible timeline', () => {
+  let value = trace()
+  for (const status of ['skipped', 'failed', 'completed'] as const) value = startActivityStep(value, { id: status, tool: 'prepare', kind: 'preparation', status, startedAt: 1, summary: status, targets: [] })
+  expect(activitySteps(value).visible.map(step => step.status)).toEqual(['failed', 'completed'])
+  expect(activitySteps(value).skipped.map(step => step.status)).toEqual(['skipped'])
+  expect(value.steps).toHaveLength(3)
+})
 it('keeps a bounded timeline and records failed, completed and interrupted steps', () => {
   let value = trace()
   for (let i = 0; i < 110; i++) value = startActivityStep(value, { id: `tool-${i}`, tool: 'read', kind: 'tool', status: 'running', startedAt: 1, summary: 'Read', targets: [] })

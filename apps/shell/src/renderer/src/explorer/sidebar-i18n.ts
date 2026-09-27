@@ -2,6 +2,9 @@ import { useI18n } from '../locale'
 
 /** English is the fallback for untranslated copy, as in the Explorer catalog. */
 export const sidebarArabic: Record<string, string> = {
+  'Metadata-only response': 'إجابة من بيانات الملفات الوصفية فقط',
+  'No file sources to recheck': 'لا توجد مصادر ملفات لإعادة التحقق',
+  'Skipped preparation': 'تجهيز لم يكن مطلوبًا',
   'Incomplete': 'غير مكتمل',
   'Skipped': 'تم التخطي',
   'Continue answer': 'متابعة الإجابة',

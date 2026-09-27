@@ -10,7 +10,7 @@
 .directory-activity-indicator.is-waiting { outline: 1px solid currentColor; outline-offset: 2px; }
 .directory-activity-content { padding: 8px 0 0; }
 .directory-activity-context { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 5px; padding-bottom: 8px; font-size: 12px; overflow-wrap: anywhere; }
-.directory-activity-steps, .directory-step-targets { padding: 0; margin: 0; list-style: none; }
+.directory-activity-steps, .directory-activity-skipped, .directory-step-targets { padding: 0; margin: 0; list-style: none; }
 .directory-step { position: relative; display: flex; gap: 12px; padding: 8px 0 16px; }
 .directory-step:not(:last-child)::after { content: ''; position: absolute; inset-inline-start: 9.5px; top: 32px; bottom: -4px; width: 1px; background: var(--ex-line, var(--border)); }
 .directory-step.is-child { margin-inline-start: 20px; }

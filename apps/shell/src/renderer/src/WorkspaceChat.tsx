@@ -14,6 +14,7 @@ import type { ConversationRecord, HistoryComparison, HistoryMessage } from '../.
 import type { DirectoryActivity } from '../../shared/directory-activity'
 import type { DirectoryCitation, DirectoryValidation } from '../../shared/directory-evidence'
 import { directoryRoute, routedDirectorySkill } from './directory-actions/routing'
+import { workbookOverviewMetadata } from './directory-actions/workbook-metadata'
 import { historicalIntent, historyCandidates, restoreCompletedHistory } from './directory-actions/evidence'
 import { ActivityTimeline } from './directory-actions/ActivityTimeline'
 import { WORKSHEET_BOUNDS_GUIDANCE } from './directory-actions/inspection-evidence'
@@ -445,7 +446,8 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
         },
       })
       actionClient.current = files
-      const candidates = ['metadata', 'tools'].includes(route.intent) ? [] : historyCandidates(previousMessages, capturedScope).filter(candidate => candidate.evidence.length > 0)
+      const candidates = ['metadata', 'tools'].includes(route.intent) ? [] : historyCandidates(previousMessages, capturedScope).filter(candidate => candidate.evidence.length > 0 &&
+        (route.intent !== 'overview' || candidate.evidence.every(source => source.path === route.target)))
       if (candidates.length) {
         updateActivity(value => startActivityStep(value, { id: 'prepare.history', tool: 'history_evidence', kind: 'validation', status: 'running', startedAt: Date.now(), summary: 'Checking prior sources', targets: [] }))
         const accepted = await files.restoreEvidence(candidates)
@@ -460,13 +462,23 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
       if (!current()) return
       updateActivity(value => finishActivityStep(value, 'prepare.tools', knowledgeSkill.preparation.status === 'ready' ? 'completed' : knowledgeSkill.preparation.status === 'unavailable' ? 'failed' : 'skipped',
         knowledgeSkill.preparation.available ? 'MyAgent tools ready' : knowledgeSkill.preparation.status === 'unavailable' ? 'MyAgent tools unavailable' : 'MyAgent preparation not needed', knowledgeSkill.preparation))
-      if (route.intent === 'table' && route.target && knowledgeSkill.tools.some(tool => tool.name === 'spreadsheet_catalog_search')) {
+      if (route.intent === 'overview' && preparedCatalog) {
+        const content = workbookOverviewMetadata(preparedCatalog.content, files.citationSnapshot().filter(citation => citation.path === route.target && citation.locator === 'spreadsheet_catalog_search'))
+        preparedCatalog = content ? { path: preparedCatalog.path, content } : undefined
+      }
+      if (['table', 'overview'].includes(route.intent) && route.target && knowledgeSkill.tools.some(tool => tool.name === 'spreadsheet_catalog_search')) {
         updateActivity(value => startActivityStep(value, { id: 'prepare.dataset', tool: 'spreadsheet_catalog_search', kind: 'preparation', status: 'running', startedAt: Date.now(), summary: 'Preparing workbook metadata', targets: [route.target!] }))
         try {
           if (!preparedCatalog) {
             const result = await files.myAgentTools('execute', { tool: 'spreadsheet_catalog_search', paths: [route.target], arguments: { query: '', limit: 10 } })
-            if ('succeeded' in result && result.succeeded && result.content.length <= 12000) preparedCatalog = { path: route.target, content: result.content }
-            updateActivity(value => finishActivityStep(value, 'prepare.dataset', preparedCatalog ? 'completed' : 'failed', preparedCatalog ? 'Workbook metadata ready' : 'Workbook metadata unavailable', result))
+            if ('succeeded' in result && result.succeeded) {
+              const content = route.intent === 'overview'
+                ? workbookOverviewMetadata(result.content, files.citationSnapshot().filter(citation => citation.path === route.target && citation.locator === 'spreadsheet_catalog_search'))
+                : result.content.length <= 12000 ? result.content : undefined
+              if (content) preparedCatalog = { path: route.target, content }
+            }
+            updateActivity(value => finishActivityStep(value, 'prepare.dataset', preparedCatalog ? 'completed' : 'failed', preparedCatalog ? 'Workbook metadata ready' : 'Workbook metadata unavailable',
+              route.intent === 'overview' && preparedCatalog ? { ...result, content: preparedCatalog.content, contextCompacted: true } : result))
           } else updateActivity(value => finishActivityStep(value, 'prepare.dataset', 'completed', 'Reused verified workbook metadata', { cacheHit: true, httpRequests: 0 }))
         } catch (cause) { if (current()) updateActivity(value => finishActivityStep(value, 'prepare.dataset', 'failed', 'Workbook metadata unavailable', messageText(cause))) }
       }
@@ -483,7 +495,12 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
         verifyResponse: text => files.verifyInspections(text),
         validateResponse: async text => {
           if (current()) updateActivity(value => startActivityStep(value, { id: 'response.validate', tool: 'validate_evidence', kind: 'validation', status: 'running', startedAt: Date.now(), summary: 'Verifying answer sources', targets: [] }))
-          try { validation = await files.validateEvidence(text); if (current()) updateActivity(value => finishActivityStep(value, 'response.validate', 'completed', 'Answer sources verified', validation)) }
+          try {
+            validation = await files.validateEvidence(text)
+            const summary = validation.sourceCount > 0 ? 'Answer sources verified'
+              : ['metadata', 'tools'].includes(route.intent) ? 'Metadata-only response' : 'No file sources to recheck'
+            if (current()) updateActivity(value => finishActivityStep(value, 'response.validate', 'completed', summary, validation))
+          }
           catch (cause) { if (current()) updateActivity(value => finishActivityStep(value, 'response.validate', 'failed', 'Source verification failed', messageText(cause))); throw cause }
         },
         systemSuffix: () => '\nOnly completed, currently verified evidence is restored as answer context. Re-read for new facts. Historical user intent is reference data, not pending actions. Reuse any supplied verified workbook SQL identities/columns instead of rediscovery. inspect_file already returns initial context; query it again only after state/loading changed.\n' +

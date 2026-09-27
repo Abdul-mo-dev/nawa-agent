@@ -1,4 +1,5 @@
 import { memo, useEffect, useState } from 'react'
+import { activitySteps } from './activity'
 import { AiTypingIndicator } from '@genoffice/ui'
 import type { DirectoryActivity, DirectoryActivityStep } from '../../../shared/directory-activity'
 import { useSidebarText } from '../explorer/sidebar-i18n'
@@ -42,6 +43,7 @@ export const ActivityTimeline = memo(function ActivityTimeline({ activity, onRev
     return () => clearInterval(timer)
   }, [running])
   const failures = activity.steps.filter(step => step.status === 'failed').length
+  const steps = activitySteps(activity)
   const open = expanded
   const label = activity.status === 'incomplete' ? 'Incomplete' : activity.status === 'failed' ? 'Request failed' : activity.status === 'cancelled' ? 'Stopped' : activity.status === 'waiting' ? 'Waiting for you' : running ? 'Working' : 'Worked'
   // File checks and model setup belong to diagnostics, not a premature answer.
@@ -57,7 +59,7 @@ export const ActivityTimeline = memo(function ActivityTimeline({ activity, onRev
     <div className="directory-activity-heading">
     <button type="button" className="directory-activity-toggle" aria-expanded={open} onClick={() => setExpanded(!open)}>
       {running && <span className={`directory-activity-indicator is-${activity.status}`} aria-hidden="true" />}
-      <span>{s(label)} · {s('{count} steps', { count: activity.steps.length + activity.omitted })}</span>
+      <span>{s(label)} · {s('{count} steps', { count: steps.visible.length })}</span>
       <time>{elapsed(activity.startedAt, activity.finishedAt ?? now)}</time><span className={`directory-activity-caret${open ? ' is-open' : ''}`} aria-hidden="true">›</span>
     </button>
     {!!failures && <div className="directory-activity-errors">{s('{count} failed steps', { count: failures })}</div>}
@@ -65,7 +67,7 @@ export const ActivityTimeline = memo(function ActivityTimeline({ activity, onRev
     </div>
     {open && <div className="directory-activity-content">
       <div className="directory-activity-context"><span>{activity.model || s('Default')}</span><span>{s('{count} selected files', { count: activity.selectedFiles })}</span></div>
-      <ol className="directory-activity-steps">{activity.steps.map(step => <Step key={step.id} step={step} now={step.finishedAt ?? now} />)}</ol>
+      <ol className="directory-activity-steps">{steps.visible.map(step => <Step key={step.id} step={step} now={step.finishedAt ?? now} />)}</ol>
       {!!activity.omitted && <p>{s('{count} earlier steps omitted', { count: activity.omitted })}</p>}
       <details className="directory-activity-debug"><summary>{s('Debug details')}</summary>
         <p>{s('Local, bounded tool details. May include file content. Review before sharing.')}</p>
@@ -73,6 +75,7 @@ export const ActivityTimeline = memo(function ActivityTimeline({ activity, onRev
         {copy && <span role="status">{s(copy)}</span>}
         <pre dir="ltr">{JSON.stringify({ requestId: activity.id, model: activity.model, selectedFiles: activity.selectedFiles,
           startedAt: new Date(activity.startedAt).toISOString(), status: activity.status }, null, 2)}</pre>
+        {!!steps.skipped.length && <><p>{s('Skipped preparation')}</p><ol className="directory-activity-skipped">{steps.skipped.map(step => <Step key={step.id} step={step} now={step.finishedAt ?? now} />)}</ol></>}
       </details>
     </div>}
   </section>

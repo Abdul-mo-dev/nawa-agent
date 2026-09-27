@@ -130,7 +130,10 @@ const state = {
   staleCitation: false,
   openedFiles: [] as string[],
   requests: [] as any[],
+  toolRequests: [] as any[],
+  rejectHistory: false,
 }
+const runSources = new Map<string, Map<string, any>>()
 const streamListeners = new Set<(chunk: any) => void>()
 const turns = new Map<string, number>()
 let releaseTool: (() => void) | undefined
@@ -142,6 +145,17 @@ const stream = async (request: any) => {
   await new Promise(resolve => setTimeout(resolve, 50))
   if (state.scenario === 'connection-error') { emit({ type: 'error', error: 'Fixture provider unavailable' }); return }
   if (state.scenario === 'cutoff') { emit({ type: 'delta', text: 'This answer stopped midway.' }); emit({ type: 'done', stopReason: 'max_tokens' }); return }
+  if (state.scenario.startsWith('overview')) {
+    if (state.scenario === 'overview-missing' && turn <= 2) emit({ type: 'tool-call', toolCall: {
+      id: crypto.randomUUID(), name: turn === 1 ? 'discover_file_tools' : 'inspect_file', input: turn === 1 ? { capability: 'reading' } : { path: surveySource.path },
+    } })
+    else {
+      const citation = JSON.stringify(request.messages).match(/RAG:[a-z\d-]+/i)?.[0]
+      emit({ type: 'delta', text: state.scenario === 'overview-missing' ? 'The saved workbook contains questions about safety and neighbors.'
+        : `The indexed sheets Survey 1 and Survey 2 contain questions about safety and neighbor interaction. [Survey source](${citation})` })
+    }
+    emit({ type: 'done' }); return
+  }
   if (['listing', 'count', 'citation', 'intermediate-failure'].includes(state.scenario)) {
     if (turn === 1) {
       if (state.scenario === 'intermediate-failure') emit({ type: 'delta', text: 'Unverified intermediate claim.' })
@@ -170,6 +184,7 @@ const stream = async (request: any) => {
   emit({ type: 'done' })
 }
 const source = { path: folder + '\\revenue.xlsx', server: 'http://127.0.0.1:5187', documentId: 'doc', contentHash: 'a'.repeat(64), indexRevision: 'v1', datasetRevision: 'table-v1' }
+const surveySource = { ...source, path: folder + '\\Survey data.xlsx', documentId: 'survey' }
 const definition = { name: 'spreadsheet_query_sql', description: 'Query the selected workbook', inputSchema: { type: 'object', properties: { sql: { type: 'string' } }, required: ['sql'] } }
 let proposal: any
 Object.assign(window, {
@@ -208,23 +223,42 @@ Object.assign(window, {
     aiStreamCancel: async () => {},
   },
   nawaDirectory: {
-    begin: async () => crypto.randomUUID(), cancel: async () => {}, verifyInspections: async () => null,
-    validateEvidence: async () => ({ evidence: [{ path: source.path, hash: source.contentHash, myAgent: source }], sourceCount: 1, durationMs: 2, httpRequests: 1 }),
-    restoreEvidence: async (_run: string, requests: any[]) => requests.map(request => request.id),
+    begin: async () => { const id = crypto.randomUUID(); runSources.set(id, new Map()); return id }, cancel: async (id: string) => { runSources.delete(id) }, verifyInspections: async () => null,
+    validateEvidence: async (run: string) => {
+      if (state.scenario === 'overview-changed') throw new Error('Survey source changed during the answer.')
+      const sources = [...(runSources.get(run)?.values() ?? [])]
+      return { evidence: sources.map(value => ({ path: value.path, hash: value.contentHash, myAgent: value })), sourceCount: sources.length, durationMs: 2, httpRequests: sources.length ? 1 : 0 }
+    },
+    restoreEvidence: async (_run: string, requests: any[]) => {
+      if (state.rejectHistory) return []
+      for (const request of requests) for (const value of request.evidence) if (value.myAgent) runSources.get(_run)?.set(value.path, value.myAgent)
+      return requests.map(request => request.id)
+    },
+    inspect: async (run: string, path: string) => {
+      runSources.get(run)?.set(path, surveySource)
+      return { id: 'inspection', path, sourceHash: source.contentHash, kind: 'sheets', systemPrompt: 'Read only', context: 'Survey 1: safety and neighbor interaction questions.', tools: [] }
+    },
     checkCitation: async () => !state.staleCitation,
     myAgentTools: async (_run: string, action: string, payload: any) => {
+      state.toolRequests.push({ action, payload: clone(payload) })
       if (action === 'catalog') {
         if (state.holdCapture) await new Promise<void>(resolve => { releaseCapture = resolve })
         state.catalogCalls++
         if (state.catalogUnavailable) throw new Error('MyAgent tool API not found (HTTP 404). Rebuild and restart MyAgent.')
-        const definitions = state.scenario === 'count' ? [definition, { name: 'spreadsheet_catalog_search', description: 'Dataset catalog', inputSchema: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'number' } } } }] : [definition]
+        const definitions = state.scenario === 'count' || state.scenario.startsWith('overview') ? [definition, { name: 'spreadsheet_catalog_search', description: 'Dataset catalog', inputSchema: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'number' } } } }] : [definition]
+        if (state.scenario.startsWith('overview')) definitions.push({ name: 'spreadsheet_describe_dataset', description: 'Describe dataset', inputSchema: { type: 'object', properties: { datasetId: { type: 'string' } } } } as any)
         return { available: true, tools: definitions, initialTools: payload.initial ? definitions : [], total: definitions.length, nextOffset: null,
           sources: [], files: [{ path: source.path, status: 'unchecked', documentId: 'doc' }], warnings: [], diagnostics: { httpRequests: 1, durationMs: 2 } }
       }
       state.executionCalls++
       if (state.scenario === 'slow') await new Promise<void>(resolve => { releaseTool = resolve })
-      return { tool: payload.tool, succeeded: state.scenario !== 'fail', sources: [source], warnings: [],
-        content: state.scenario === 'fail' ? '' : payload.tool === 'spreadsheet_catalog_search' ? JSON.stringify({ datasets: [{ Id: 'table', SqlObjectName: 'revenue', RowCount: 99, ColumnNames: ['id', 'amount'] }] }) : JSON.stringify({ rows: [{ count: 99 }], apiKey: 'fixture-secret-must-be-redacted' }),
+      const target = payload.paths?.[0] === surveySource.path ? surveySource : source
+      runSources.get(_run)?.set(target.path, target)
+      const datasets = state.scenario === 'overview-missing' ? [] : target === surveySource
+        ? [1, 2].map(n => ({ Id: `survey-${n}`, SqlObjectName: `survey_sql_${n}`, DisplayName: `Logical survey ${n}`, SheetNames: [`Survey ${n}`], ColumnNames: ['Safety perception', 'Neighbor interaction'], ColumnCount: 2, SchemaSignature: 'Large repeated schema '.repeat(1000) }))
+        : [{ Id: 'table', SqlObjectName: 'revenue', RowCount: 99, ColumnNames: ['id', 'amount'] }]
+      return { tool: payload.tool, succeeded: state.scenario !== 'fail', sources: [target], warnings: [],
+        content: state.scenario === 'fail' ? '' : payload.tool === 'spreadsheet_catalog_search' ? JSON.stringify({ datasets }) : JSON.stringify({ rows: [{ count: 99 }], apiKey: 'fixture-secret-must-be-redacted' }),
         error: state.scenario === 'fail' ? 'revenue.xlsx needs indexing/refresh.' : null }
     },
     propose: async (_run: string, input: any) => { proposal = { ...input, id: crypto.randomUUID(), run: _run }; return proposal },
@@ -401,7 +435,7 @@ function Fixture() {
             <WorkspaceChat
               folder={folder}
               folderName="Quarterly reports"
-              scopePaths={[folder + '\\revenue.xlsx']}
+              scopePaths={[folder + '\\revenue.xlsx', surveySource.path]}
               scopeDirs={[]}
               onOpenFile={path => { state.openedFiles.push(path) }}
               onClose={() => setVisible(false)}
