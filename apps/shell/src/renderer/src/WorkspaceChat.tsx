@@ -1,5 +1,5 @@
 import { WorkflowController } from './directory-actions/workflow-controller'
-import { FileSearchPanel } from './directory-actions/FileSearchPanel'
+
 import { WorkflowCard } from './directory-actions/WorkflowCard'
 import { directoryInspectionSkill } from './directory-actions/inspection-skill'
 import { analyticsSkill } from './analytics/skill'
@@ -349,7 +349,7 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
     {historyPanel}
     <ApprovalCard controller={approvals} />
     <WorkflowCard controller={workflow} />
-    <FileSearchPanel folder={folder} openFile={onOpenFile} />
+    
     {!historyOpen && <>
       <ChangeNotice report={comparison} checking={checking} error={checkError} recheck={() => void checkChanges()} />
       <div className="ws-chat-scope" aria-label="Main-panel selection"><div className="workspace-scope-toolbar">

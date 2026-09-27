@@ -35,7 +35,7 @@ export function RagToolbar({ folder , inSidebar = false }: { folder: string | nu
   const running = progress?.running === true
   return <section className="nawa-rag-toolbar" aria-label="Directory RAG indexing" onContextMenu={e => e.stopPropagation()}>
     <details open={inSidebar || undefined}><summary>Directory RAG · {settings?.settings.enabled ? settings.settings.model : 'not configured'}</summary>
-      <p>Index the opened directory using <code>{settings?.settings.baseUrl ?? 'the configured embedding endpoint'}</code>. Configure it in Settings → Embeddings &amp; RAG.</p>
+      <p>Index the opened directory using <code>{settings?.settings.baseUrl ?? 'the configured embedding endpoint'}</code>. Use the Embedding settings button in the RAG &amp; Analytics tab.</p>
       <label className="nawa-rag-check"><input type="checkbox" disabled={running || busy} checked={recursive} onChange={e => setRecursive(e.target.checked)}/> Include subdirectories (hidden entries, links and node_modules are excluded)</label>
       <label className="nawa-rag-check"><input type="checkbox" disabled={running || busy} checked={consent} onChange={e => setConsent(e.target.checked)}/> I allow text from this directory to be sent to the configured embedding server and stored in Nawa’s unencrypted local RAG index.</label>
       <p>Chat still reads only individually selected files. Indexing does not change the file-selection permission rules.</p>

@@ -1,4 +1,4 @@
-import { WorkspaceInspector } from './WorkspaceInspector'
+import { WorkspaceControlPanel } from './WorkspaceControlPanel'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, MouseEvent, ReactNode } from 'react'
 import type { FolderRoot, HomeApi, RecentPage } from '../../../shared/home-api'
@@ -287,9 +287,8 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
     { label: t('compact'), checked: prefs.compact, divider: true, action: () => changePrefs({ compact: !prefs.compact }) },
     { label: t('navigation'), icon: 'pane', checked: prefs.navigationVisible, action: () => changePrefs({ navigationVisible: !prefs.navigationVisible }) },
     { label: t('assistant'), icon: 'sparkles', checked: prefs.pane === 'ai', disabled: editorActive, action: () => changePrefs({ pane: prefs.pane === 'ai' ? 'none' : 'ai' }) },
-    { label: t('details'), icon: 'info', checked: prefs.pane === 'details', disabled: editorActive, action: () => changePrefs({ pane: prefs.pane === 'details' ? 'none' : 'details' }) },
-    { label: 'Directory RAG', icon: 'search', checked: prefs.pane === 'rag', disabled: editorActive || windowWidth < 900, action: () => changePrefs({ pane: 'rag' }) },
-    { label: 'Structured Data Analysis', icon: 'list', checked: prefs.pane === 'analytics', disabled: editorActive || windowWidth < 900, action: () => changePrefs({ pane: 'analytics' }) },
+    { label: 'RAG & Analytics', icon: 'search', checked: prefs.pane === 'ragAnalytics', disabled: editorActive || windowWidth < 900, action: () => changePrefs({ pane: 'ragAnalytics' }) },
+    { label: 'AI Provider', icon: 'settings', checked: prefs.pane === 'provider', disabled: editorActive || windowWidth < 900, action: () => changePrefs({ pane: 'provider' }) },
     { label: t('resetLayout'), divider: true, action: () => setPrefs({ ...DEFAULT_PREFERENCES }) },
     { label: 'Original home', icon: 'home', divider: true, action: onOpenLegacy },
   ]
@@ -407,7 +406,7 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
       <span className="ex-command-divider" /><button className="ex-tool with-label" disabled={editorActive} onClick={e => toolbarMenu(e, [...(['name', 'modified', 'type', 'size'] as const).map(key => ({ label: t(key), checked: prefs.sort === key, action: () => changePrefs({ sort: key }) })), { label: t('ascending'), divider: true, checked: !prefs.descending, action: () => changePrefs({ descending: false }) }, { label: t('descending'), checked: prefs.descending, action: () => changePrefs({ descending: true }) }])}><Icon name="sort" /><span>{t('sort')}</span><Icon name="down" size={11} /></button>
       <button className="ex-tool with-label" onClick={e => toolbarMenu(e, viewActions())}><Icon name="list" /><span>{t('view')}</span><Icon name="down" size={11} /></button>
       <button className="ex-tool" aria-label="More actions" title="More actions" onClick={e => toolbarMenu(e, [{ label: t('add'), icon: 'plus', action: () => { void addRoot() } }, { label: t('openFile'), icon: 'open', action: () => { void act(() => window.aiOffice.browse()) } }, { label: t('settings'), icon: 'settings', divider: true, action: () => setSettingsOpen(true) }, { label: 'Original home', icon: 'home', action: onOpenLegacy }])}><Icon name="more" /></button>
-      <span className="ex-toolbar-spacer" /><ToolButton icon="pane" label={t('navigation')} pressed={navigationVisible} onClick={() => changePrefs({ navigationVisible: !prefs.navigationVisible })} /><ToolButton icon="info" label={t('details')} disabled={editorActive || windowWidth < 900} pressed={inspectorVisible && prefs.pane === 'details'} onClick={() => changePrefs({ pane: prefs.pane === 'details' ? 'none' : 'details' })} /><button className="ex-tool with-label ex-assistant-toggle" disabled={editorActive || windowWidth < 900} aria-pressed={inspectorVisible && prefs.pane === 'ai'} onClick={() => changePrefs({ pane: prefs.pane === 'ai' ? 'none' : 'ai' })}><Icon name="sparkles" /><span>{t('assistant')}</span></button>
+      <span className="ex-toolbar-spacer" /><ToolButton icon="pane" label={t('navigation')} pressed={navigationVisible} onClick={() => changePrefs({ navigationVisible: !prefs.navigationVisible })} /><button className="ex-tool with-label ex-assistant-toggle" disabled={editorActive || windowWidth < 900} aria-pressed={inspectorVisible && prefs.pane === 'ai'} onClick={() => changePrefs({ pane: prefs.pane === 'ai' ? 'none' : 'ai' })}><Icon name="sparkles" /><span>{t('assistant')}</span></button>
     </div>
     <div className="ex-body">
       {navigationVisible && <><aside className="ex-navigation" aria-label={t('navigation')}>
@@ -437,16 +436,13 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
           {!folder && page.entries.length < page.total && <div className="ex-pagination"><span>{page.entries.length.toLocaleString(dateLocale)} / {page.total.toLocaleString(dateLocale)}</span><button disabled={pageLoading} onClick={() => { void loadMore() }}>{pageLoading ? t('loading') : t('loadMore')}</button></div>}
         </>}
       </main>
-      {inspectorVisible && <><Splitter label={prefs.pane === 'rag' ? 'Directory RAG' : prefs.pane === 'analytics' ? 'Structured Data Analysis' : prefs.pane === 'ai' ? t('assistant') : t('details')} value={effectiveInspectorWidth} min={300} max={Math.min(560, Math.max(300, windowWidth - (navigationVisible ? prefs.navigationWidth : 0) - 380))} reverse onChange={inspectorWidth => changePrefs({ inspectorWidth })} />
-        <WorkspaceInspector active={prefs.pane === 'none' ? 'ai' : prefs.pane}
-          assistantLabel={t('assistant')} detailsLabel={t('details')} closeLabel={t('close')}
+      {inspectorVisible && <><Splitter label={prefs.pane === 'ragAnalytics' ? 'RAG & Analytics' : prefs.pane === 'provider' ? 'AI Provider' : t('assistant')} value={effectiveInspectorWidth} min={300} max={Math.min(560, Math.max(300, windowWidth - (navigationVisible ? prefs.navigationWidth : 0) - 380))} reverse onChange={inspectorWidth => changePrefs({ inspectorWidth })} />
+        <WorkspaceControlPanel active={prefs.pane === 'none' ? 'ai' : prefs.pane}
+          assistantLabel={t('assistant')} closeLabel={t('close')}
           folder={folder && currentRootPath ? folder : null}
           onChange={pane => changePrefs({ pane })} onClose={() => changePrefs({ pane: 'none' })}
           onAddFolder={() => { void addRoot() }}
           assistant={(folder && currentRootPath) || selectedItems.length > 0 ? <WorkspaceChat folder={folder} folderName={folder ? basename(folder) : 'Selected items'} scopePaths={selectedItems.filter(item => item.kind === 'file').map(item => item.path)} scopeDirs={selectedItems.filter(item => item.kind === 'folder').map(item => item.path)} onOpenFile={openFile} onClose={() => changePrefs({ pane: 'none' })} /> : <div className="ex-pane-empty"><span className="ex-ai-orb"><Icon name="sparkles" size={32} /></span><h2>{t('chooseFolder')}</h2><p>{t('chooseFolderHelp')}</p><button className="ex-secondary" onClick={() => { void addRoot() }}><Icon name="plus" size={15} />{t('add')}</button><div className="ex-readonly"><Icon name="check" size={13} />{t('readOnly')}</div></div>}
-          details={detailsPane()}
-          rag={<RagToolbar folder={folder} key={folder ?? "no-directory"} inSidebar />}
-          analytics={<AnalyticsToolbar folder={folder} key={folder ?? "no-directory"} inSidebar />}
         />
       </>}
     </div>
