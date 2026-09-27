@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent, MouseEvent } from 'react'
 import type { Item, Preferences, SortKey } from './model'
 import { sizeLabel } from './model'
+import { RagBadge, useRagStatuses } from '../rag/RagStatus'
 import { DocumentIcon, FolderGlyph, Icon } from './Icons'
 import type { ExplorerString } from './strings'
 interface Props {
@@ -32,6 +33,7 @@ export function FileList({ items, selected, cutPaths, preferences: p, locale, te
   const firstRow = Math.max(0, Math.floor(viewport.top / rowHeight) - 4)
   const lastRow = Math.min(rows, Math.ceil((viewport.top + viewport.height) / rowHeight) + 4)
   const first = firstRow * columns, last = Math.min(items.length, lastRow * columns)
+  const { statuses: ragStatuses, error: ragStatusError } = useRagStatuses(items.slice(first, last).filter(item => item.kind === 'file'))
   useEffect(() => {
     const el = scroll.current
     if (!el) return
@@ -108,7 +110,7 @@ export function FileList({ items, selected, cutPaths, preferences: p, locale, te
           onClick={e => { setFocused(item.path); host.current?.focus({ preventScroll: true }); onSelect(item.path, { toggle: e.ctrlKey || e.metaKey, range: e.shiftKey, additive: e.ctrlKey || e.metaKey }) }}
           onDoubleClick={() => onOpen(item)} onContextMenu={e => { setFocused(item.path); onContext(e, item) }}>
           <div role="gridcell" className="ex-check-cell"><input type="checkbox" tabIndex={-1} aria-label={`${t('checked')}: ${item.name}`} checked={selected.has(item.path)} onClick={e => e.stopPropagation()} onChange={() => { setFocused(item.path); onSelect(item.path, { toggle: true }) }} /></div>
-          <div role="gridcell" className="ex-file-name"><span className="ex-file-symbol">{item.kind === 'folder' ? <FolderGlyph size={tile ? 70 : 24} /> : <DocumentIcon ext={item.ext} size={tile ? 66 : 26} />}</span><span className="ex-file-label" dir="auto">{item.name}</span>{item.starred && <Icon name="star" size={12} className="ex-starred-mark" />}{item.missing && <span className="ex-error">{t('unavailable')}</span>}</div>
+          <div role="gridcell" className="ex-file-name"><span className="ex-file-symbol">{item.kind === 'folder' ? <FolderGlyph size={tile ? 70 : 24} /> : <DocumentIcon ext={item.ext} size={tile ? 66 : 26} />}</span><span className="ex-file-label" dir="auto">{item.name}</span>{item.kind === 'file' && <RagBadge value={ragStatuses[item.path]} error={ragStatusError} />}{item.starred && <Icon name="star" size={12} className="ex-starred-mark" />}{item.missing && <span className="ex-error">{t('unavailable')}</span>}</div>
           {!tile && <><div role="gridcell" className="ex-column-modified">{date(item.mtimeMs)}</div><div role="gridcell" className="ex-column-type">{type(item)}</div><div role="gridcell" className="ex-column-size">{item.kind === 'file' ? sizeLabel(item.sizeBytes, locale) : '—'}</div></>}
           {tile && <span className="ex-tile-meta">{item.kind === 'folder' ? t('folder') : sizeLabel(item.sizeBytes, locale)}</span>}
         </div>)}

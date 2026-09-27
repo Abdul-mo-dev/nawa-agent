@@ -8,6 +8,7 @@ import { WorkspaceChat } from '../WorkspaceChat'
 import '../workspace.css'
 import { DirectoryTree } from './Tree'
 import { FileList } from './FileList'
+import { RagToolbar } from '../rag/RagToolbar'
 import { DocumentIcon, FolderGlyph, Icon, NawaIcon } from './Icons'
 import { Dialog, Menu, Splitter, ToolButton, useEditorSlot } from './Controls'
 import type { MenuAction } from './Controls'
@@ -424,6 +425,7 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
           ] })
         }}>
         {editorActive ? <div className="ex-editor-placeholder" aria-hidden="true"><Icon name="open" size={28} /><span>{editorTab?.title}</span></div> : <>
+          <RagToolbar folder={folder} />
           <div className="ex-content-heading"><span className="ex-heading-icon">{headerIcon}</span><div><h1 dir="auto">{title}</h1><p>{loading ? t('loading') : `${itemCount.toLocaleString(dateLocale)} ${t('items')}`}{selectedItems.length > 0 && ` · ${selectedItems.length} ${t('selected')}`}</p></div><span className="ex-toolbar-spacer" />{folder && <button className="ex-text-button" title={t('ask')} onClick={() => { changePrefs({ pane: 'ai' }) }}><Icon name="sparkles" size={15} /><span>{t('folderScope')}</span></button>}</div>
           {notice && <div className={`ex-notice${notice.error ? ' is-error' : ''}`} role={notice.error ? 'alert' : 'status'}><span>{notice.text}</span><button aria-label={t('close')} onClick={() => setNotice(null)}><Icon name="close" size={14} /></button></div>}
           {listError ? <div className="ex-empty"><Icon name="info" size={40} /><h2>{t('unavailable')}</h2><p>{listError}</p><button className="ex-primary" onClick={refresh}>{t('retry')}</button></div> : loading && !items.length ? <div className="ex-empty" role="status"><span className="ex-spinner" /><p>{t('loading')}</p></div> : !items.length ? <div className="ex-empty"><FolderGlyph size={86} /><h2>{search ? t('noResults') : !roots.length && location.kind === 'home' ? t('welcome') : t('empty')}</h2><p>{search ? t('noResultsHelp') : !roots.length && location.kind === 'home' ? t('welcomeHelp') : t('emptyHelp')}</p>{search ? <button className="ex-secondary" onClick={() => setSearch('')}>{t('clearSearch')}</button> : <div className="ex-empty-actions"><button className="ex-primary" onClick={() => { void addRoot() }}><Icon name="plus" size={16} />{t('add')}</button><button className="ex-secondary" onClick={() => { void act(() => window.aiOffice.browse()) }}>{t('openFile')}</button></div>}</div> : <FileList key={folder ?? location.kind} items={items} selected={selected} cutPaths={cutPaths} preferences={prefs} locale={dateLocale} text={t} onSelect={choose} onSelectAll={selectAll} onOpen={openItem} onContext={(event, item) => showItemMenu(event, item)} onRename={() => requestRename()} onDelete={() => requestDelete()} onSort={sort} />}

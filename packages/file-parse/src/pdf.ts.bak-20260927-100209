@@ -169,7 +169,7 @@ export async function pdfToPages(bytes: Uint8Array): Promise<string[]> {
       pages.push(text.trim())
       page.cleanup()
     }
-    return pages
+    return pages.join('\n\n')
   } finally {
     await loadingTask.destroy()
   }
@@ -179,4 +179,3 @@ export async function pdfToPages(bytes: Uint8Array): Promise<string[]> {
 export async function pdfToText(bytes: Uint8Array): Promise<string> {
   return (await pdfToPages(bytes)).join('\n\n')
 }
-

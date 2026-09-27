@@ -1,4 +1,5 @@
 import { ChatModelsEditor } from './ChatModelsEditor'
+import { RagSettings } from './rag/RagSettings'
 import { validateChatModels } from '@genoffice/ai-provider/browser'
 import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
@@ -132,11 +133,12 @@ function CustomFontSizeInput({
   )
 }
 
-type SectionId = 'account' | 'aiModel' | 'aiMedia' | 'general' | 'integrations' | 'about'
+type SectionId = 'account' | 'aiModel' | 'aiMedia' | 'general' | 'integrations' | 'about' | 'rag'
 
 const SECTIONS: readonly { id: SectionId; labelKey: StringKey }[] = [
   { id: 'account', labelKey: 'setSecAccount' },
   { id: 'aiModel', labelKey: 'setSecAiModel' },
+  { id: 'rag', labelKey: 'setSecAiModel' },
   { id: 'aiMedia', labelKey: 'setSecAiMedia' },
   { id: 'general', labelKey: 'setSecGeneral' },
   { id: 'integrations', labelKey: 'setSecIntegrations' },
@@ -1108,7 +1110,7 @@ export function SettingsModal({
                 onClick={() => setSection(s.id)}
               >
                 <SectionIcon id={s.id} />
-                {t(s.labelKey)}
+                {s.id === 'rag' ? 'Embeddings & RAG' : t(s.labelKey)}
                 {s.id === 'integrations' && updateDue && (
                   <span className="set-nav-dot" role="img" aria-label={t('intgUpdateDue')} />
                 )}
@@ -1165,6 +1167,7 @@ export function SettingsModal({
               </>
             )}
             {section === 'aiModel' && <AiModelPane t={t} />}
+            {section === 'rag' && <RagSettings />}
             {section === 'aiMedia' && <AiMediaPane t={t} />}
             {section === 'general' && (
               <>

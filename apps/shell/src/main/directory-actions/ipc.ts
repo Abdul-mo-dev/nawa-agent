@@ -1,5 +1,6 @@
 import { discoverLinkedImages, stageLinkedImages, finalizeWorkflowAssets } from './assets'
 import { DirectorySearchService } from '../file-index/service'
+import { registerRagIpc } from '../rag/service'
 import { FILE_SEARCH_CHANNEL } from '../../shared/file-search-api'
 import { convertWorkflowFile, reviewWorkflowFile } from './workflow-cli'
 import { reviewFileChanges } from '@genoffice/file-parse'
@@ -19,6 +20,7 @@ export function registerDirectoryActionsIpc(options: {
   changed(directories: string[]): void
 }): void {
   const search = new DirectorySearchService({ stateDirectory: app.getPath('userData'), roots: options.roots })
+  const rag = registerRagIpc(options)
   let manager: DirectoryActionManager | undefined
   const owners = new Set<number>()
   const getManager = () => manager ??= new DirectoryActionManager({
@@ -26,7 +28,7 @@ export function registerDirectoryActionsIpc(options: {
     open: openNativeStage, blank: nativeBlank, assertClosed: assertOriginalClosed,
     trash: path => shell.trashItem(path), extract: options.extract,
     linkedImages: discoverLinkedImages, stageImages: stageLinkedImages, finalizeAssets: finalizeWorkflowAssets,
-    search: (owner, paths, query, signal) => search.selected(owner, paths, query, signal),
+    search: (owner, paths, query, signal) => rag.searchSelected(owner, paths, query, signal, () => search.selected(owner, paths, query, signal)),
     review: reviewFileChanges, convert: convertWorkflowFile, quality: reviewWorkflowFile,
     changed: path => options.changed([dirname(path)]),
   })
