@@ -43,7 +43,7 @@ const server = http.createServer(async (req, res) => {
 })
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
 after(() => new Promise(resolve => server.close(resolve)))
-const settings = patch => ({ ...DEFAULT_RAG_SETTINGS, enabled: true, model: 'test-embedding', baseUrl: `http://127.0.0.1:${server.address().port}/v1`, ...patch })
+const settings = patch => ({ ...DEFAULT_RAG_SETTINGS, backend: 'local', enabled: true, model: 'test-embedding', baseUrl: `http://127.0.0.1:${server.address().port}/v1`, ...patch })
 async function fixture(fn) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'nawa-rag-fixture-')), root = path.join(dir, 'workspace'), state = path.join(dir, 'state')
   await fs.mkdir(root); await fs.mkdir(state)

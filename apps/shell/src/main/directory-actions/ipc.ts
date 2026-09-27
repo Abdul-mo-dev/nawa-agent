@@ -32,6 +32,7 @@ export function registerDirectoryActionsIpc(options: {
     trash: path => shell.trashItem(path), extract: options.extract,
     linkedImages: discoverLinkedImages, stageImages: stageLinkedImages, finalizeAssets: finalizeWorkflowAssets,
     search: (owner, paths, query, signal) => rag.searchSelected(owner, paths, query, signal, () => search.selected(owner, paths, query, signal)),
+    myAgentTools: (paths, sessionId, action, payload, signal) => rag.toolsSelected(paths, sessionId, action, payload, signal),
     analytics: (owner, paths, action, payload, signal) => analytics.selected(owner, paths, action, payload, signal),
     review: reviewFileChanges, convert: convertWorkflowFile, quality: reviewWorkflowFile,
     changed: path => options.changed([dirname(path)]),
@@ -72,6 +73,10 @@ export function registerDirectoryActionsIpc(options: {
       case 'analytics': {
         if (typeof args[1] !== 'string') throw new Error('Invalid analytical action.')
         return m.analyticsData(owner, id(), args[1] as AnalyticsReadAction, args[2])
+      }
+      case 'myAgentTools': {
+        if (args[1] !== 'catalog' && args[1] !== 'execute') throw new Error('Invalid MyAgent tool action.')
+        return m.myAgentTools(owner, id(), args[1], args[2])
       }
       case 'searchContents': {
         if (typeof args[1] !== 'string') throw new Error('Invalid search query.')

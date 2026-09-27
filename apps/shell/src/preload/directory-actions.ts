@@ -4,6 +4,7 @@ import { DIRECTORY_ACTION_CHANNEL, type DirectoryActionsApi } from '../shared/di
 export function installDirectoryActionsApi(): void {
   const invoke = (action: string, ...args: unknown[]) => ipcRenderer.invoke(DIRECTORY_ACTION_CHANNEL, action, ...args)
   const api: DirectoryActionsApi = {
+    myAgentTools: (run, action, payload) => invoke('myAgentTools', run, action, payload),
     analytics: (run, action, payload) => invoke('analytics', run, action, payload),
     searchContents: (run, query) => invoke('searchContents', run, query),
     validateFile: (run, path) => invoke('validateFile', run, path),

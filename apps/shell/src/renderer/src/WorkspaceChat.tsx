@@ -3,6 +3,7 @@ import { WorkflowController } from './directory-actions/workflow-controller'
 import { WorkflowCard } from './directory-actions/WorkflowCard'
 import { directoryInspectionSkill } from './directory-actions/inspection-skill'
 import { analyticsSkill } from './analytics/skill'
+import { prepareMyAgentKnowledgeSkill } from './rag/myagent-skill'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { AgentLoop, DEFAULT_MAX_TURNS, composeSkills, type AgentMessage } from '@genoffice/agent-core'
 import { applyChatModel, chatModelLabel } from '@genoffice/ai-provider/browser'
@@ -306,6 +307,10 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
         },
       })
       actionClient.current = files
+      setActivity(['Checking available file tools…'])
+      const knowledgeSkill = await prepareMyAgentKnowledgeSkill(files, question)
+      if (!current()) return
+      setActivity([])
       const reader = createDirectorySkill({ selection: selected })
       const readerWithEvidence = { ...reader, executeTool: async (call: Parameters<typeof reader.executeTool>[0], signal?: AbortSignal) => {
         const result = await reader.executeTool(call, signal)
@@ -314,7 +319,7 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
       } }
       const loop = new AgentLoop({
         transport: createShellTransport(() => settings),
-        skill: composeSkills('directory', '', [readerWithEvidence, directoryInspectionSkill(files, selected), analyticsSkill(files), directoryMutationSkill(files, selected)]),
+        skill: composeSkills('directory', '', [readerWithEvidence, directoryInspectionSkill(files, selected), analyticsSkill(files), knowledgeSkill, directoryMutationSkill(files, selected)]),
         maxTurns: DEFAULT_MAX_TURNS, maxHistory: 40,
         verifyResponse: text => files.verifyInspections(text),
         systemSuffix: () => '\nConversation history refers only to messages with matching selected paths and verified file fingerprints. Do not imply that historical file contents are current. Read selected files again when necessary.',

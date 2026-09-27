@@ -1,4 +1,5 @@
 import type { FileSearchResult } from '../../../shared/file-search-api'
+import type { MyAgentToolResponse } from '../../../shared/myagent-tools-api'
 import type { AnalyticsReadAction, AnalyticsResult } from '../../../shared/analytics-api'
 import type { WorkflowController } from './workflow-controller'
 import { AgentLoop, DEFAULT_MAX_TURNS, type AgentSkill, type AgentTransport, type AgentToolCall, type ToolExecution } from '@genoffice/agent-core'
@@ -33,6 +34,7 @@ export class DirectoryActionClient {
   private inspections = new Map<string, DirectoryInspection>()
   private evidenceOmitted = 0
   private usedAnalytics = false
+  private usedMyAgent = false
   private evidence: { path: string; sourceHash?: string; text: string }[] = []
   private runPromise: Promise<string> | null = null
   private child: AgentLoop | null = null
@@ -89,6 +91,18 @@ export class DirectoryActionClient {
     const result = await this.options.api.searchContents(await this.run(), query)
     this.check()
     for (const hit of result.hits) this.addEvidence({ path: hit.path, sourceHash: hit.sourceHash, text: hit.excerpt ?? hit.snippet?.map(part => part.text).join('') ?? '' })
+    return result
+  }
+  async myAgentTools(action: 'catalog' | 'execute', payload: unknown): Promise<MyAgentToolResponse> {
+    const execute = this.options.api.myAgentTools
+    if (!execute) throw new Error('MyAgent tool bridge unavailable. Rebuild and restart Nawa.')
+    const result = await execute(await this.run(), action, payload)
+    this.check()
+    if ('succeeded' in result && result.succeeded && result.sources[0]) {
+      this.usedMyAgent = true
+      this.addEvidence({ path: result.sources[0].path, sourceHash: result.sources[0].contentHash,
+        text: JSON.stringify({ tool: result.tool, sources: result.sources, content: result.content, warnings: result.warnings, coverage: result.coverage }) })
+    }
     return result
   }
   async validateFile(path: string): Promise<DirectoryQuality> {
@@ -222,8 +236,9 @@ export class DirectoryActionClient {
       }
       await this.verifyInspections(''); this.check()
       const result = await this.options.api.commit(id)
-      this.evidence = this.usedAnalytics ? [] : this.evidence.filter(e => e.path !== result.path)
+      this.evidence = this.usedAnalytics || this.usedMyAgent ? [] : this.evidence.filter(e => e.path !== result.path)
       this.usedAnalytics = false
+      this.usedMyAgent = false
       for (const [key, inspection] of this.inspections) if (inspection.path === result.path) this.inspections.delete(key)
       this.options.committed(result)
       return JSON.stringify({ status: 'committed', ...result, summary })

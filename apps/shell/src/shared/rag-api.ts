@@ -3,6 +3,8 @@ export const RAG_CHANNEL = 'nawa:rag:v1'
 export const RAG_CHANGED = 'nawa:rag:changed'
 export type RagState = 'not-indexed' | 'embedding' | 'embedded' | 'stale' | 'failed'
 export interface RagSettings {
+  backend: 'local' | 'myagent'
+  serverUrl: string
   enabled: boolean
   baseUrl: string
   model: string
@@ -22,6 +24,7 @@ export interface RagSettings {
   contextChars: number
 }
 export const DEFAULT_RAG_SETTINGS: RagSettings = {
+  backend: 'myagent', serverUrl: 'http://127.0.0.1:5187',
   enabled: false, baseUrl: 'http://127.0.0.1:8081/v1', model: '', modelRevision: '',
   allowRemote: false, dimensions: 0, documentPrefix: '', queryPrefix: '',
   tokenizer: 'llama.cpp', maxInputTokens: 512, chunkTokens: 384, overlapTokens: 48,

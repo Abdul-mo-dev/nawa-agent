@@ -31,7 +31,7 @@ let settings = {
     },
   ],
 }
-let rag = { ...DEFAULT_RAG_SETTINGS, model: 'local-embedding', enabled: true }
+let rag = { ...DEFAULT_RAG_SETTINGS, backend: 'local', model: 'local-embedding', enabled: true }
 let analytics = { ...DEFAULT_ANALYTICS_SETTINGS }
 const now = Date.now()
 let record = {

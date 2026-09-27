@@ -14,9 +14,25 @@ export function embeddingUrl(base: string): URL {
 export function isLoopback(url: URL): boolean {
   return url.hostname === 'localhost' || url.hostname === '[::1]' || /^127\.\d+\.\d+\.\d+$/.test(url.hostname)
 }
+/** The shared-files adapter only targets a server on this machine. */
+export function myAgentUrl(base: string): string {
+  const url = new URL(base)
+  if (!['http:', 'https:'].includes(url.protocol) || !isLoopback(url) || url.username || url.password || url.search || url.hash || !['', '/'].includes(url.pathname)) {
+    throw new Error('Use a localhost MyAgent server URL without credentials or a path, for example http://127.0.0.1:5187.')
+  }
+  return url.origin
+}
+export function credentialScope(s: RagSettings): string {
+  return s.backend === 'myagent' ? `myagent:${myAgentUrl(s.serverUrl)}` : `local:${embeddingUrl(s.baseUrl).origin}`
+}
 export function validateSettings(raw: unknown): RagSettings {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Invalid embedding settings.')
   const r = raw as Record<string, unknown>, s = { ...DEFAULT_RAG_SETTINGS }
+  // Existing installations retain their local index until explicitly switched.
+  if (r.backend !== undefined && r.backend !== 'local' && r.backend !== 'myagent') throw new Error('Invalid RAG backend.')
+  s.backend = r.backend === 'myagent' ? 'myagent' : 'local'
+  if (r.serverUrl !== undefined && typeof r.serverUrl !== 'string') throw new Error('Invalid MyAgent server URL.')
+  s.serverUrl = myAgentUrl(typeof r.serverUrl === 'string' ? r.serverUrl : s.serverUrl)
   for (const key of ['enabled', 'allowRemote'] as const) {
     if (typeof r[key] !== 'boolean') throw new Error(`Invalid ${key}.`)
     s[key] = r[key]
@@ -41,11 +57,12 @@ export function validateSettings(raw: unknown): RagSettings {
   const url = embeddingUrl(s.baseUrl)
   if (!isLoopback(url) && !s.allowRemote) throw new Error('This endpoint is not loopback. Explicitly allow sending text to a LAN/remote embedding server.')
   s.baseUrl = url.toString().replace(/\/embeddings$/, '')
-  if (s.enabled && !s.model) throw new Error('Enter the model/alias exposed by your embedding server.')
+  if (s.backend === 'local' && s.enabled && !s.model) throw new Error('Enter the model/alias exposed by your embedding server.')
   return s
 }
 /** A new model, prefix or parsing policy cannot silently reuse incompatible vectors. */
 export function profileId(s: RagSettings): string {
+  if (s.backend === 'myagent') return hashText(credentialScope(s))
   return createHash('sha256').update(JSON.stringify({
     version: CHUNKER_VERSION, baseUrl: embeddingUrl(s.baseUrl).toString(), model: s.model,
     revision: s.modelRevision, dimensions: s.dimensions, documentPrefix: s.documentPrefix,

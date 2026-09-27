@@ -1,4 +1,5 @@
 import type { LinkedImage } from '../../shared/directory-actions-api'
+import type { MyAgentSource, MyAgentToolAction, MyAgentToolResponse } from '../../shared/myagent-tools-api'
 import type { FileSearchResult } from '../../shared/file-search-api'
 import type { AnalyticsReadAction, AnalyticsEnvelope, SourceRef } from '../../shared/analytics-api'
 import { conversionSupported } from '../../../../../packages/cli/src/conversion-routes'
@@ -22,6 +23,7 @@ export interface NativeStage {
   close(): Promise<void>
 }
 export interface ActionDependencies {
+  myAgentTools?(paths: string[], sessionId: string, action: MyAgentToolAction, payload: unknown, signal: AbortSignal): Promise<MyAgentToolResponse>
   search?(owner: number, paths: string[], query: string, signal: AbortSignal): Promise<FileSearchResult>
   analytics?(owner: number, paths: string[], action: AnalyticsReadAction, payload: unknown, signal: AbortSignal): Promise<AnalyticsEnvelope>
   linkedImages?(file: string, roots: string[]): Promise<LinkedImage[]>
@@ -39,7 +41,7 @@ export interface ActionDependencies {
   convert?(source: string, target: string, conversion: DirectoryConversion, signal: AbortSignal, network?: boolean): Promise<string[]>
   quality?(path: string, images: boolean, signal: AbortSignal): Promise<DirectoryQuality>
 }
-interface Run { owner: number; scope: DirectoryActionScope; expires: number; cancelled: boolean; abort: AbortController; evidence: Map<string, string>; analyticsEvidence?: Map<string, SourceRef> }
+interface Run { owner: number; scope: DirectoryActionScope; expires: number; cancelled: boolean; abort: AbortController; evidence: Map<string, string>; analyticsEvidence?: Map<string, SourceRef>; myAgentSources?: MyAgentSource[]; myAgentTools?: Set<string> }
 interface Pending extends DirectoryApproval {
   run: string
   stagePath?: string
@@ -310,6 +312,11 @@ export class DirectoryActionManager {
         item.phase = 'done'
         this.runs.get(item.run)?.evidence.delete(item.path)
         this.runs.get(item.run)?.analyticsEvidence?.clear()
+        const run = this.runs.get(item.run)
+        if (run?.myAgentSources?.some(source => samePath(source.path, item.path))) {
+          run.myAgentSources = run.myAgentSources.filter(source => !samePath(source.path, item.path))
+          run.myAgentTools?.clear()
+        }
         try { await this.inspections.invalidatePath(owner, item.run, item.path) } catch (cause) { console.warn('Nawa: inspection cleanup after commit failed.', cause) }
         try { this.deps.changed(item.path) } catch (cause) { console.warn('Nawa: refresh notification failed after file commit.', cause) }
         await this.cleanup(item)
@@ -344,6 +351,11 @@ export class DirectoryActionManager {
   }
   async verifySources(owner: number, id: string): Promise<void> {
     const run = this.run(owner, id), roots = await this.deps.roots()
+    if (run.myAgentSources?.length) {
+      if (!this.deps.myAgentTools) throw new Error('MyAgent evidence verification is unavailable.')
+      await this.deps.myAgentTools(run.myAgentSources.map(source => source.path), id, 'verify', { sources: run.myAgentSources }, run.abort.signal)
+      this.run(owner, id)
+    }
     if (run.analyticsEvidence?.size) {
       if (!this.deps.analytics) throw new Error('Analytical evidence verification is unavailable.')
       await this.deps.analytics(owner, [...run.scope.files], 'verify', { sources: [...run.analyticsEvidence.values()] }, run.abort.signal)
@@ -370,6 +382,42 @@ export class DirectoryActionManager {
       evidence.set(source.datasetId, source)
     }
     return result.value
+  }
+  async myAgentTools(owner: number, id: string, action: 'catalog' | 'execute', payload: unknown): Promise<MyAgentToolResponse> {
+    const run = this.run(owner, id)
+    if (!this.deps.myAgentTools) throw new Error('MyAgent tools are unavailable. Rebuild and restart Nawa.')
+    if (action !== 'catalog' && action !== 'execute') throw new Error('Unknown MyAgent tool action.')
+    if (action === 'execute' && (!payload || typeof payload !== 'object' || !run.myAgentTools?.has((payload as { tool: string }).tool)))
+      throw new Error('Discover the MyAgent tool and its argument schema before calling it.')
+    const metadataOnly = action === 'catalog' && (payload as { scope?: unknown } | null)?.scope !== 'selected'
+    if (action === 'execute') await this.verifySources(owner, id)
+    const result = await this.deps.myAgentTools(metadataOnly ? [] : [...run.scope.files], id, action, payload, run.abort.signal)
+    this.run(owner, id)
+    if (action === 'catalog' && result.sources.length) throw new Error('Tool metadata must not contain file evidence.')
+    if ('files' in result && result.files?.some(file => !run.scope.files.some(path => samePath(path, file.path))))
+      throw new Error('Tool readiness returned an unselected file.')
+    for (const source of result.sources) {
+      if (!run.scope.files.some(path => samePath(path, source.path))) throw new Error('MyAgent returned an unselected source.')
+      const previous = run.myAgentSources?.find(v => samePath(v.path, source.path))
+      if (previous && (previous.server !== source.server || previous.documentId !== source.documentId || previous.contentHash !== source.contentHash || previous.indexRevision !== source.indexRevision || previous.datasetRevision !== source.datasetRevision))
+        throw new Error('MyAgent evidence revisions changed within this request. Start a new request.')
+      const previousHash = run.evidence.get(source.path)
+      if (previousHash && previousHash !== source.contentHash || [...(run.analyticsEvidence?.values() ?? [])].some(v => samePath(v.path, source.path) && v.hash !== source.contentHash))
+        throw new Error('MyAgent and Nawa evidence use different source revisions. Start a new request.')
+      await regularFile(await this.deps.roots(), source.path)
+      if (await hashFile(source.path) !== source.contentHash) throw new Error('MyAgent source changed during tool execution.')
+    }
+    this.run(owner, id)
+    if (result.sources.length) {
+      // Each call can target a different subset. Final verification must retain every source used.
+      run.myAgentSources = [...(run.myAgentSources ?? []).filter(previous => !result.sources.some(source => samePath(source.path, previous.path))), ...result.sources]
+      for (const source of result.sources) run.evidence.set(source.path, source.contentHash)
+    }
+    if ('tools' in result) {
+      const advertised = run.myAgentTools ??= new Set<string>()
+      for (const tool of [...result.tools, ...(result.initialTools ?? [])]) advertised.add(tool.name)
+    }
+    return result
   }
   async searchContents(owner: number, id: string, query: string): Promise<FileSearchResult> {
     const run = this.run(owner, id)

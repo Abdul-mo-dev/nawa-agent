@@ -2,6 +2,9 @@ import { useI18n } from '../locale'
 
 /** English is the fallback for untranslated copy, as in the Explorer catalog. */
 export const sidebarArabic: Record<string, string> = {
+  'MyAgent document tools': 'أدوات المستندات في MyAgent',
+  'The assistant can read pages, sections and slides, inspect visuals, query spreadsheets and classify text in selected indexed files. Nawa keeps its editing and reviewed-table tools.': 'يمكن للمساعد قراءة الصفحات والأقسام والشرائح، وفحص المحتوى المرئي، والاستعلام عن الجداول وتصنيف النص في الملفات المحددة والمفهرسة. يحتفظ Nawa بأدوات التحرير وتحليل الجداول المُراجعة.',
+  'Visual analysis and text classification use MyAgent’s configured models, which may be remote. Classifications are saved on the server. Document-tool calls allow at least 3 minutes; classification allows at least 10 minutes. Stop in chat cancels the request.': 'يستخدم التحليل المرئي وتصنيف النص نماذج MyAgent المُعدّة، وقد تكون بعيدة. تُحفظ التصنيفات على الخادم. مهلة أدوات المستندات 3 دقائق على الأقل، والتصنيف 10 دقائق على الأقل. يتيح زر الإيقاف في المحادثة إلغاء الطلب.',
   'Chats using “Default” follow this setting. A specific model selected in Chat stays with that conversation.': 'تتبع المحادثات التي تستخدم «الافتراضي» هذا الإعداد. يبقى النموذج المحدد صراحةً في تبويب المحادثة مرتبطًا بتلك المحادثة.',
   'Use form': 'استخدام النموذج',
   'Advanced policy JSON': 'سياسة JSON المتقدمة',

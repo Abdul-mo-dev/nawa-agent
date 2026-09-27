@@ -3,12 +3,14 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, rename, writeFile, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { app, ipcMain, safeStorage, type WebContents } from 'electron'
+import type { MyAgentToolAction, MyAgentToolResponse } from '../../shared/myagent-tools-api'
 import workerPath from './worker?modulePath'
 import { RAG_CHANNEL, RAG_CHANGED, DEFAULT_RAG_SETTINGS, type RagProgress, type RagSettings, type RagSettingsView, type RagFileStatus } from '../../shared/rag-api'
 import type { FileSearchResult } from '../../shared/file-search-api'
 import type { RagJob } from './engine'
 import { authorizePath, regularFile, hashFile } from '../directory-actions/file-safety'
-import { validateSettings, embeddingUrl, profileId } from './config'
+import { validateSettings, credentialScope, profileId } from './config'
+import { MyAgentRag } from './myagent'
 interface Options { roots(): Promise<string[]>; isHomeSender(sender: WebContents): boolean }
 interface Saved { settings: RagSettings; encryptedKey: string }
 interface Slot { worker: Worker | null }
@@ -26,7 +28,10 @@ export class RagService {
   private activeRequests = 0
   private readonly directory = join(app.getPath('userData'), 'rag')
   private readonly databasePath = join(this.directory, 'content-v1.sqlite3')
+  private readonly mappingPath = join(this.directory, 'myagent-files-v1.json')
+  private remote?: MyAgentRag
   constructor(private options: Options) {}
+  private myAgent(): MyAgentRag { return this.remote ??= new MyAgentRag(this.mappingPath, () => this.options.roots()) }
   private changed(): void { for (const [id, client] of this.clients) { if (client.isDestroyed()) this.clients.delete(id); else if (this.options.isHomeSender(client)) client.send(RAG_CHANGED) } }
   track(sender: WebContents): void {
     if (this.clients.has(sender.id)) return
@@ -52,12 +57,12 @@ export class RagService {
       if (typeof replacement !== 'string' || replacement.length > 8192) throw new Error('Invalid embedding API key.')
       return replacement.trim()
     }
-    if (current.encryptedKey && settings && embeddingUrl(settings.baseUrl).origin !== embeddingUrl(current.settings.baseUrl).origin) throw new Error('The endpoint origin changed. Re-enter the key or explicitly remove it; the old key will not be sent to another host.')
+    if (current.encryptedKey && settings && credentialScope(settings) !== credentialScope(current.settings)) throw new Error('The RAG backend or endpoint changed. Re-enter its key or explicitly remove the stored key before saving.')
     if (!current.encryptedKey) return ''
     if (!safeStorage.isEncryptionAvailable()) throw new Error('OS-protected key storage is unavailable.')
     return safeStorage.decryptString(Buffer.from(current.encryptedKey, 'base64'))
   }
-  async settings(): Promise<RagSettingsView> { const saved = await this.load(); return { settings: saved.settings, hasKey: !!saved.encryptedKey, databasePath: this.databasePath } }
+  async settings(): Promise<RagSettingsView> { const saved = await this.load(); return { settings: saved.settings, hasKey: !!saved.encryptedKey, databasePath: saved.settings.backend === 'myagent' ? this.mappingPath : this.databasePath } }
   async save(raw: unknown, replacement?: string): Promise<RagSettingsView> {
     const run = async () => {
       if (this.indexing) throw new Error('Stop indexing before changing embedding settings.')
@@ -134,23 +139,27 @@ export class RagService {
   }
   async test(raw: unknown, replacement?: string): Promise<{ dimensions: number; message: string }> {
     const settings = validateSettings(raw)
+    if (settings.backend === 'myagent') return this.myAgent().test(settings, await this.key(settings, replacement))
     if (!settings.model) throw new Error('Enter the embedding model ID/alias first.')
     return await this.request(this.reader, { action: 'test', roots: [], settings, apiKey: await this.key(settings, replacement) }) as { dimensions: number; message: string }
   }
   async index(owner: number, folder: string, recursive: boolean, consent: boolean): Promise<RagProgress> {
-    if (!consent) throw new Error('Confirm that this directory may be sent to the configured embedding server and stored locally.')
+    if (!consent) throw new Error('Confirm that the configured RAG backend may index and store this directory’s contents.')
     if (this.indexing || this.settingsBusy) throw new Error('An indexing or settings operation is already running.')
     const saved = await this.load()
-    if (!saved.settings.enabled || !saved.settings.model) throw new Error('Configure and enable Settings → Embeddings & RAG first.')
+    if (!saved.settings.enabled || (saved.settings.backend === 'local' && !saved.settings.model)) throw new Error('Configure and enable the RAG backend in Search settings first.')
     await authorizePath(await this.options.roots(), folder)
     const apiKey = await this.key(saved.settings), abort = new AbortController(), id = randomUUID()
     // No await between the second check and reserving the slot.
     if (this.indexing || this.settingsBusy) throw new Error('Indexing is already running.')
     if (this.saved !== saved) throw new Error('Embedding settings changed while indexing was starting. Review the current endpoint and retry.')
     this.state = { ...blankProgress(), folder, running: true, message: 'Starting directory indexing…' }
-    const done = this.request(this.indexer, { action: 'index', folder, recursive, roots: [], settings: saved.settings, apiKey }, abort.signal, p => { this.state = p; this.changed() }, id)
+    const report = (p: RagProgress) => { this.state = p; this.changed() }
+    const done = saved.settings.backend === 'myagent'
+      ? this.myAgent().index(saved.settings, apiKey, folder, recursive, abort.signal, report)
+      : this.request(this.indexer, { action: 'index', folder, recursive, roots: [], settings: saved.settings, apiKey }, abort.signal, report, id)
     this.indexing = { owner, id, abort, done }
-    void done.then(result => { this.state = result as RagProgress }, async e => { this.state = { ...this.state, running: false, incomplete: true, message: e instanceof Error ? e.message : String(e) }; await this.request(this.reader, { action: 'recover', roots: [], settings: saved.settings, apiKey: '' }).catch(() => undefined) }).finally(() => { if (this.indexing?.id === id) this.indexing = null; this.changed() })
+    void done.then(result => { this.state = result as RagProgress }, async e => { this.state = { ...this.state, running: false, incomplete: true, message: e instanceof Error ? e.message : String(e) }; if (saved.settings.backend === 'local') await this.request(this.reader, { action: 'recover', roots: [], settings: saved.settings, apiKey: '' }).catch(() => undefined) }).finally(() => { if (this.indexing?.id === id) this.indexing = null; this.changed() })
     this.changed(); return { ...this.state }
   }
   progress(): RagProgress { return { ...this.state } }
@@ -161,10 +170,13 @@ export class RagService {
   }
   async statuses(paths: string[], verify = false): Promise<RagFileStatus[]> {
     const settings = (await this.load()).settings
+    if (settings.backend === 'myagent') return this.myAgent().statuses(settings, paths)
     return await this.request(this.reader, { action: 'statuses', roots: [], settings, apiKey: '', paths, verify }) as RagFileStatus[]
   }
   async clear(folder: string): Promise<void> {
     if (this.indexing) throw new Error('Stop indexing before clearing a folder index.')
+    const settings = (await this.load()).settings
+    if (settings.backend === 'myagent') { await this.myAgent().clear(settings, folder); this.changed(); return }
     await this.request(this.reader, { action: 'clear', roots: [], settings: (await this.load()).settings, apiKey: '', folder }); this.changed()
   }
   async searchSelected(_owner: number, paths: string[], query: string, signal: AbortSignal, fallback: () => Promise<FileSearchResult>): Promise<FileSearchResult> {
@@ -173,7 +185,9 @@ export class RagService {
     if (paths.length > 256) throw new Error('Select at most 256 files for one retrieval request.')
     const roots = await this.options.roots()
     for (const path of paths) await regularFile(roots, path)
-    const result = await this.request(this.reader, { action: 'retrieve', roots, paths, query, settings: saved.settings, apiKey: await this.key() }, signal) as FileSearchResult
+    const result = saved.settings.backend === 'myagent'
+      ? await this.myAgent().search(saved.settings, await this.key(saved.settings), paths, query, signal)
+      : await this.request(this.reader, { action: 'retrieve', roots, paths, query, settings: saved.settings, apiKey: await this.key(saved.settings) }, signal) as FileSearchResult
     if (profileId((await this.load()).settings) !== profileId(saved.settings)) throw new Error('Embedding settings changed during retrieval. Retry with the current profile.')
     const currentRoots = await this.options.roots()
     for (const hit of result.hits) {
@@ -182,6 +196,18 @@ export class RagService {
       await regularFile(currentRoots, hit.path)
       if (await hashFile(hit.path) !== hit.sourceHash) throw new Error('Retrieved source changed; request fresh evidence.')
     }
+    return result
+  }
+  async toolsSelected(paths: string[], sessionId: string, action: MyAgentToolAction, payload: unknown, signal: AbortSignal): Promise<MyAgentToolResponse> {
+    const saved = await this.load()
+    if (!saved.settings.enabled || saved.settings.backend !== 'myagent') {
+      if (action !== 'catalog') throw new Error('Enable the MyAgent backend in File search settings to use its document tools.')
+      return { available: false, tools: [], total: 0, nextOffset: null, sources: [], warnings: ['Enable the MyAgent backend in File search settings. Nawa native inspection and reviewed-table tools remain available.'] }
+    }
+    const result = await this.myAgent().tools(saved.settings, await this.key(saved.settings), paths, sessionId, action, payload, signal)
+    const current = (await this.load()).settings
+    if (!current.enabled || profileId(current) !== profileId(saved.settings)) throw new Error('MyAgent settings changed during tool execution. Start a new request.')
+    signal.throwIfAborted()
     return result
   }
   stop(): void { this.stopped = true; this.indexing?.abort.abort(); for (const slot of [this.indexer, this.reader]) { void slot.worker?.terminate(); slot.worker = null } }

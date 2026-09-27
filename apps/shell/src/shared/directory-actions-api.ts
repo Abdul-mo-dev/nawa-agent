@@ -49,6 +49,7 @@ export interface DirectoryApproval {
 }
 export interface DirectoryCommit { path: string; operation: DirectoryOperation; backupPath?: string }
 export interface DirectoryActionsApi {
+  myAgentTools?(run: string, action: 'catalog' | 'execute', payload: unknown): Promise<import('./myagent-tools-api').MyAgentToolResponse>
   analytics?(run: string, action: AnalyticsReadAction, payload: unknown): Promise<unknown>
   searchContents(run: string, query: string): Promise<FileSearchResult>
   validateFile(run: string, path: string): Promise<DirectoryQuality>
