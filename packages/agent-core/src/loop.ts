@@ -66,6 +66,10 @@ export interface AgentLoopOptions<TSnapshot = unknown> {
   /** Optional remote verifier for delegated native skills. Failures abort the run. */
   verifyResponse?(text: string, executed: readonly ExecutedToolCall[]):
     string | null | Promise<string | null>
+  /** Mandatory integrity check on EVERY accepted terminal response, independent of claim retries. */
+  validateResponse?(text: string, executed: readonly ExecutedToolCall[]): void | Promise<void>
+  /** Optional task-specific error budget; editor defaults remain unchanged. */
+  maxErrorTurns?: number
   /** wrap instruction + skill context into the user message text */
   formatUserMessage?(instruction: string, context: string): string
   /** appended to the system prompt each turn (e.g. reply-language directive following the UI language) */
@@ -676,6 +680,19 @@ export class AgentLoop<TSnapshot = unknown> {
     // no-tools finalizing turn after hitting the limit
     // (a cancelled turn drops its tool calls — no results would follow)
     if (toolCalls.length === 0 || this.cancelled || this.finalizing) {
+      if (!this.cancelled && this.options.validateResponse) {
+        const generation = this.generation
+        try { await this.options.validateResponse(this.turnText, [...this.executedCalls]) }
+        catch (cause) {
+          if (generation !== this.generation) return
+          if (!this.cancelled) {
+            this.running = false; this.rollbackFailedRun()
+            events?.onError?.(`Response validation failed: ${cause instanceof Error ? cause.message : String(cause)}`)
+            return
+          }
+        }
+        if (generation !== this.generation) return
+      }
       // The turn-limit note has served its purpose once the finalizing turn
       // ends. Left in history it would tell every later run "no more tools may
       // be called" — a stale directive models obey (or worse, echo verbatim
@@ -728,17 +745,17 @@ export class AgentLoop<TSnapshot = unknown> {
     const generation = this.generation
     const results: AgentToolResult[] = []
     let turnMutated = false
-    for (const call of toolCalls) {
+    const executeOne = async (call: AgentToolCall, index: number): Promise<void> => {
       // The user hit stop while an earlier tool was running: skip remaining tools,
       // but fill in paired error results to keep tool_use/tool_result pairs valid for the next request
       if (this.cancelled) {
-        results.push({
+        results[index] = {
           id: call.id,
           name: call.name,
           output: '(the user stopped the run; this tool was not executed)',
           isError: true,
-        })
-        continue
+        }
+        return
       }
       // Unusable input (truncated by the token limit, or JSON that failed to parse):
       // don't execute; feed a targeted error back so the model retries correctly
@@ -747,12 +764,12 @@ export class AgentLoop<TSnapshot = unknown> {
         const output = call.truncated
           ? 'Tool arguments were cut off by the output length limit; the tool was not executed. Split this operation into several smaller tool calls (less content per call) and try again.'
           : `Tool input JSON failed to parse; the tool was not executed: ${call.inputError}\nFix the arguments (make sure quotes inside strings are escaped) and call again.`
-        results.push({ id: call.id, name: call.name, output, isError: true })
+        results[index] = { id: call.id, name: call.name, output, isError: true }
         events?.onToolExecuted?.({
           call,
           execution: { output, isError: true, summary: call.name },
         })
-        continue
+        return
       }
       this.inputParseFails = 0
       events?.onToolStart?.(call)
@@ -774,17 +791,26 @@ export class AgentLoop<TSnapshot = unknown> {
         this.mutationSeen = true
         turnMutated = true
       }
-      results.push({
+      results[index] = {
         id: call.id,
         name: call.name,
         output: execution.output,
         isError: execution.isError,
-      })
+      }
       events?.onToolExecuted?.({
         call,
         execution,
         snapshotBefore: firstMutation ? snapshot : undefined,
       })
+    }
+    for (let index = 0; index < toolCalls.length;) {
+      const start = index, first = toolCalls[index++]
+      const independent = (call: AgentToolCall) => !call.truncated && !call.inputError && skill.canExecuteParallel?.(call) === true
+      if (independent(first)) while (index < toolCalls.length && index - start < 4 && independent(toolCalls[index])) index++
+      // Contiguous independent reads share a bounded batch. Mutations, native sessions,
+      // discovery, and approvals are barriers; result order remains the model's order.
+      await Promise.all(toolCalls.slice(start, index).map((call, offset) => executeOne(call, start + offset)))
+      if (generation !== this.generation) return
     }
     this.history.push({ role: 'tool', results })
 
@@ -810,11 +836,12 @@ export class AgentLoop<TSnapshot = unknown> {
     // (unknown-tool loops from malformed BYOK streams, hallucinated tools)
     // would otherwise burn the whole turn budget re-erroring.
     this.allErrorTurns = results.every((r) => r.isError) ? this.allErrorTurns + 1 : 0
-    if (this.allErrorTurns >= MAX_ALL_ERROR_TURNS) {
+    const errorLimit = this.options.maxErrorTurns ?? MAX_ALL_ERROR_TURNS
+    if (this.allErrorTurns >= errorLimit) {
       this.running = false
       this.rollbackFailedRun()
       events?.onError?.(
-        `Every tool call failed for ${MAX_ALL_ERROR_TURNS} turns in a row; the run was stopped. Please send the request again`,
+        `Every tool call failed for ${errorLimit} turns in a row; the run was stopped. Please send the request again`,
       )
       return
     }

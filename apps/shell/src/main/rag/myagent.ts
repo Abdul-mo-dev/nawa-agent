@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -31,6 +32,7 @@ export class MyAgentRag {
   private loaded?: Promise<void>
   private entries = new Map<string, Entry>()
   private writes: Promise<void> = Promise.resolve()
+  private telemetry = new AsyncLocalStorage<{ httpRequests: number; startedAt: number }>()
   constructor(private mappingPath: string, private roots: () => Promise<string[]>, private fetcher: typeof fetch = fetch, private pollMs = 500) {}
   private key(server: string, path: string): string { return server + '\0' + pathKey(path) }
   private async load(): Promise<void> {
@@ -56,6 +58,7 @@ export class MyAgentRag {
     const done = this.writes.then(save, save); this.writes = done.catch(() => undefined); await done
   }
   private async request<T>(s: RagSettings, key: string, route: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+    const metrics = this.telemetry.getStore(); if (metrics) metrics.httpRequests++
     const timeout = AbortSignal.timeout(s.timeoutMs)
     const combined = signal ? AbortSignal.any([signal, timeout]) : timeout
     const response = await this.fetcher(myAgentUrl(s.serverUrl) + '/api/v1/rag/' + route, {
@@ -77,7 +80,12 @@ export class MyAgentRag {
     } finally { await reader?.cancel().catch(() => undefined) }
     const raw = Buffer.concat(parts).toString('utf8')
     let value: unknown
-    try { value = JSON.parse(raw) } catch { throw new Error(`MyAgent returned an invalid response (HTTP ${response.status}).`) }
+    try { value = JSON.parse(raw) } catch {
+      if (response.status === 404 && route.startsWith('tools/'))
+        throw new Error(`MyAgent tool API not found (HTTP 404 at /api/v1/rag/${route}). Rebuild and restart the MyAgent server with the Nawa tools API, and check the server URL in Search settings. Basic RAG search may still work on an older server.`)
+      if (!response.ok) throw new Error(`MyAgent request failed (HTTP ${response.status} at /api/v1/rag/${route}).`)
+      throw new Error(`MyAgent returned invalid JSON at /api/v1/rag/${route} (HTTP ${response.status}).`)
+    }
     if (!response.ok) throw new Error(`MyAgent HTTP ${response.status}: ${String((value as { message?: unknown })?.message ?? 'Request failed').slice(0, 1000)}`)
     combined.throwIfAborted()
     return value as T
@@ -90,7 +98,8 @@ export class MyAgentRag {
   }
   async test(s: RagSettings, key: string): Promise<{ dimensions: number; message: string }> {
     const roots = await this.serverRoots(s, key)
-    return { dimensions: 0, message: roots.length ? `Connected to MyAgent. ${roots.filter(r => r.available).length} available shared roots: ${roots.map(r => `${r.displayName} (${r.localPath})`).join(', ')}. Embeddings are managed by MyAgent.` : 'Connected to MyAgent. Configure document folders under MyAgent RAG roots before indexing.' }
+    await this.tools(s, key, [], randomUUID(), 'catalog', { scope: 'server', namesOnly: true }, new AbortController().signal)
+    return { dimensions: 0, message: roots.length ? `Connected to MyAgent RAG and document tools. ${roots.filter(r => r.available).length} available shared roots: ${roots.map(r => `${r.displayName} (${r.localPath})`).join(', ')}. Embeddings are managed by MyAgent.` : 'Connected to MyAgent RAG and document tools. Configure document folders under MyAgent RAG roots before indexing.' }
   }
   private async document(s: RagSettings, key: string, id: string, signal?: AbortSignal): Promise<Document> {
     const d = await this.request<Document>(s, key, `documents/${encodeURIComponent(id)}`, undefined, signal)
@@ -212,9 +221,17 @@ export class MyAgentRag {
   }
   async tools(s: RagSettings, key: string, paths: string[], sessionId: string, action: MyAgentToolAction,
     payload: unknown, signal: AbortSignal): Promise<MyAgentToolResponse> {
+    const metrics = { httpRequests: 0, startedAt: Date.now() }
+    return this.telemetry.run(metrics, async () => ({ ...await this.toolsImpl(s, key, paths, sessionId, action, payload, signal),
+      diagnostics: { httpRequests: metrics.httpRequests, durationMs: Date.now() - metrics.startedAt } }))
+  }
+  private async toolsImpl(s: RagSettings, key: string, paths: string[], sessionId: string, action: MyAgentToolAction,
+    payload: unknown, signal: AbortSignal): Promise<MyAgentToolResponse> {
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('MyAgent arguments must be an object.')
     const args = payload as Record<string, unknown>
     if (action === 'catalog') {
+      // Discovery is metadata, not a content-readiness scan. One bounded HTTP attempt, regardless of selection size.
+      s = { ...s, timeoutMs: Math.min(s.timeoutMs, 5000) }
       if (args.scope !== undefined && args.scope !== 'server' && args.scope !== 'selected') throw new Error('Choose server or selected tool discovery.')
       if (args.namesOnly !== undefined && typeof args.namesOnly !== 'boolean') throw new Error('namesOnly must be a boolean.')
       if (args.query !== undefined && (typeof args.query !== 'string' || args.query.length > 256)) throw new Error('Use a tool search query of at most 256 characters.')
@@ -230,23 +247,19 @@ export class MyAgentRag {
           throw new Error('MyAgent returned file data for metadata-only discovery. Update the MyAgent tools API.')
         return { ...catalog, available: true, sources: [], warnings: ['Server tool definitions only. No selected files were read or checked. Tool execution still requires selected, indexed files; use scope="selected" to obtain their document IDs.'] }
       }
-      if (paths.length > 100) throw new Error('MyAgent tools support at most 100 selected files.')
+      if (paths.length > 256) throw new Error('Select at most 256 files.')
+      await this.load()
       const files: MyAgentFileReadiness[] = []
-      // Readiness is advisory. One missing/stale index must not hide the tool catalog.
       for (const path of paths) {
-        try {
-          const source = await this.toolSource(s, key, path, signal)
-          files.push({ path, status: 'ready', documentId: source.documentId })
-        } catch (cause) {
-          signal.throwIfAborted()
-          const reason = errorText(cause)
-          files.push({ path, status: /indexing\/refresh|index revision/i.test(reason) ? 'needs-index' : 'unavailable', reason })
-        }
+        const entry = this.entries.get(this.key(myAgentUrl(s.serverUrl), path))
+        files.push(entry?.status === 'embedded' && entry.documentId && entry.indexRevision
+          ? { path, status: 'unchecked', documentId: entry.documentId, reason: 'Mapped indexed snapshot; execution checks current file and server versions.' }
+          : { path, status: 'needs-index', reason: 'No indexed mapping. Index/refresh this file before content tools.' })
       }
       const limit = args.namesOnly === true ? 100 : 8
       const catalog = await this.request<MyAgentToolCatalog>(s, key, 'tools/catalog', {
         extensions: [...new Set(paths.map(path => extname(path).toLowerCase()))],
-        documentIds: files.flatMap(file => file.documentId ? [file.documentId] : []),
+        documentIds: [...new Set(files.flatMap(file => file.documentId ? [file.documentId] : []))].slice(0, 100),
         query: args.query ?? '', offset: args.offset ?? 0, limit, namesOnly: args.namesOnly === true,
         initial: args.initial === true, task: args.task,
       }, signal)
@@ -254,14 +267,14 @@ export class MyAgentRag {
       if (catalog.scopeChecked !== false || catalog.selectionFiltered !== true || !Array.isArray(catalog.sources) || catalog.sources.length)
         throw new Error('Update MyAgent to support file-type discovery without indexing.')
       return { ...catalog, available: true, sources: [], files, warnings: [
-        'Tools are filtered by selected file types and available server capabilities. Readiness is advisory; execution rechecks only its target files.',
-        ...files.filter(file => file.status !== 'ready').map(file => `${file.path}: ${file.reason}`),
+        'Tools are filtered by selected types and capabilities. Mapping metadata is unchecked; no file content was hashed for discovery. Execution checks only its targets.',
+        ...files.filter(file => file.status === 'needs-index').map(file => `${file.path}: ${file.reason}`),
       ] }
     }
     if (!paths.length) {
       throw new Error('Select individual indexed files before using MyAgent tools.')
     }
-    if (paths.length > 100) throw new Error('MyAgent tools support at most 100 selected files.')
+    if (paths.length > 256) throw new Error('Select at most 256 files.')
     await this.load()
     const server = myAgentUrl(s.serverUrl), sources: MyAgentSource[] = []
     const selectedCount = paths.length
@@ -291,12 +304,13 @@ export class MyAgentRag {
         }
       }
     }
+    if (paths.length > 100) throw new Error('Target at most 100 selected files per MyAgent operation. Use paths to narrow the target or explicitly batch the task.')
     const coverage = { selected: selectedCount, requested: paths, covered: [] as string[], completeSelection: false }
     const expected = action === 'verify' ? args.sources as MyAgentSource[] : undefined
     const missing: string[] = []
     for (const path of paths) {
       let source: MyAgentSource
-      try { source = await this.toolSource(s, key, path, signal) }
+      try { source = await this.toolSource(s, key, path, signal, action !== 'verify') }
       catch (cause) {
         signal.throwIfAborted()
         if (action !== 'execute') throw cause
@@ -323,7 +337,10 @@ export class MyAgentRag {
     }
     // Classification and visual extraction can span several server model calls.
     // The run abort signal still cancels the HTTP request and server work.
-    const requestSettings = action === 'execute' ? { ...s, timeoutMs: Math.max(s.timeoutMs, args.tool === 'spreadsheet_analyze_text' ? 600000 : 180000) } : s
+    const metadataTool = ['spreadsheet_catalog_search', 'spreadsheet_describe_dataset'].includes(String(args.tool))
+    const requestSettings = action === 'execute'
+      ? { ...s, timeoutMs: metadataTool ? Math.min(s.timeoutMs, 8000) : Math.max(s.timeoutMs, args.tool === 'spreadsheet_analyze_text' ? 600000 : 180000) }
+      : { ...s, timeoutMs: Math.min(s.timeoutMs, 10000) }
     const result = await this.request<MyAgentToolResponse>(requestSettings, key, action === 'execute' ? 'tools/execute' : 'tools/catalog', body, signal)
     if (!Array.isArray(result.sources) || result.sources.length !== sources.length || new Set(result.sources.map(v => v.documentId)).size !== sources.length)
       throw new Error('Invalid MyAgent tool source manifest.')
@@ -337,8 +354,8 @@ export class MyAgentRag {
     }
     for (const source of sources) {
       signal.throwIfAborted(); await regularFile(await this.roots(), source.path)
-      const d = await this.document(s, key, source.documentId, signal)
-      if (fingerprint(d) !== source.contentHash || d.indexRevision !== source.indexRevision || await hashFile(source.path) !== source.contentHash)
+      // The scoped server response validates its manifest before/after execution. Validate local bytes once on return.
+      if (await hashFile(source.path) !== source.contentHash)
         throw new Error('A source changed during MyAgent tool execution. Refresh and retry.')
     }
     const warnings = [`This operation targets ${paths.length} of ${selectedCount} selected files. File-scope coverage does not imply all rows/pages were processed; check tool truncation and coverage fields.`,
@@ -348,20 +365,17 @@ export class MyAgentRag {
     if (action === 'execute') {
       if (!('succeeded' in result) || typeof result.succeeded !== 'boolean' || result.tool !== args.tool || typeof result.content !== 'string' || result.content.length > 64000 || result.error != null && typeof result.error !== 'string')
         throw new Error('Invalid MyAgent tool result.')
-      return { ...result, sources, warnings, coverage: { ...coverage, covered: result.succeeded ? paths : [], completeSelection: result.succeeded && paths.length === selectedCount } }
+      return { ...result, sources, warnings, localSourcesVerified: true, coverage: { ...coverage, covered: result.succeeded ? paths : [], completeSelection: result.succeeded && paths.length === selectedCount } }
     }
     const catalog = result as MyAgentToolCatalog
     this.validateToolCatalog(catalog, args, args.namesOnly === true ? 100 : 8)
-    return { ...catalog, available: true, sources, warnings }
+    return { ...catalog, available: true, sources, warnings, localSourcesVerified: true }
   }
-  private async toolSource(s: RagSettings, key: string, path: string, signal: AbortSignal): Promise<MyAgentSource> {
+  private async toolSource(s: RagSettings, key: string, path: string, signal: AbortSignal, checkBytes = true): Promise<MyAgentSource> {
     signal.throwIfAborted(); await regularFile(await this.roots(), path); await this.load()
     const server = myAgentUrl(s.serverUrl), entry = this.entries.get(this.key(server, path))
-    if (!entry?.documentId || !entry.indexRevision || entry.status !== 'embedded' || await hashFile(path) !== entry.sourceHash)
+    if (!entry?.documentId || !entry.indexRevision || entry.status !== 'embedded' || checkBytes && await hashFile(path) !== entry.sourceHash)
       throw new Error(`${basename(path)} needs MyAgent indexing/refresh before using document tools.`)
-    const document = await this.document(s, key, entry.documentId, signal)
-    if (fingerprint(document) !== entry.sourceHash || document.indexRevision !== entry.indexRevision)
-      throw new Error(`${basename(path)} has a different MyAgent index revision. Refresh and start a new request.`)
     return { path, server, documentId: entry.documentId, contentHash: entry.sourceHash!, indexRevision: entry.indexRevision, datasetRevision: null }
   }
   private validateToolCatalog(catalog: MyAgentToolCatalog, args: Record<string, unknown>, limit: number): void {
@@ -375,6 +389,11 @@ export class MyAgentRag {
       throw new Error('Invalid MyAgent initial tool catalog.')
   }
   async search(s: RagSettings, key: string, paths: string[], query: string, signal: AbortSignal): Promise<FileSearchResult> {
+    const metrics = { httpRequests: 0, startedAt: Date.now() }
+    return this.telemetry.run(metrics, async () => ({ ...await this.searchImpl(s, key, paths, query, signal),
+      diagnostics: { httpRequests: metrics.httpRequests, durationMs: Date.now() - metrics.startedAt } }))
+  }
+  private async searchImpl(s: RagSettings, key: string, paths: string[], query: string, signal: AbortSignal): Promise<FileSearchResult> {
     if (!paths.length) return { hits: [], total: 0, warnings: ['Select individual files before searching.'] }
     if (paths.length > 100) throw new Error('MyAgent supports at most 100 selected files per search.')
     if (!query.trim() || query.length > 2048) throw new Error('Use a search query of 1–2048 characters.')
@@ -401,19 +420,26 @@ export class MyAgentRag {
     }
     const chunks = [...result.results]; chunks.forEach(validate)
     const used = new Set(chunks.map(h => `${h.documentId}:${h.chunkId}`))
+    let neighborBudget = s.contextChars - chunks.reduce((sum, hit) => sum + hit.text.length + 200, 0)
+    const neighborWindows = new Set<string>()
     for (const hit of result.results.slice(0, 2)) {
+      if (neighborBudget < 500 || [-1, 0, 1].some(offset => neighborWindows.has(`${hit.documentId}:${hit.chunkIndex + offset}`))) continue
+      neighborWindows.add(`${hit.documentId}:${hit.chunkIndex}`)
       const window = await this.request<{ documentId: string; contentHash?: string; indexRevision?: string; chunks: Array<{ chunkId: string; chunkIndex: number; text: string; citation: Citation }> }>(s, key, `documents/${encodeURIComponent(hit.documentId)}/chunks/${hit.chunkIndex}?before=1&after=1&sameSourceBlockOnly=true`, undefined, signal)
       if (window.documentId !== hit.documentId || fingerprint(window) !== hit.contentHash?.toLowerCase() || window.indexRevision !== hit.indexRevision || !Array.isArray(window.chunks) || window.chunks.length > 7) throw new Error('MyAgent chunk context changed during retrieval.')
       for (const c of window.chunks) {
         const h: Hit = { ...c, documentId: window.documentId, contentHash: window.contentHash, indexRevision: window.indexRevision, score: hit.score }
         validate(h); const id = `${h.documentId}:${h.chunkId}`
-        if (!used.has(id)) { used.add(id); chunks.push(h) }
+        if (!used.has(id)) { used.add(id); chunks.push(h); neighborBudget -= h.text.length + 200 }
       }
     }
-    const groups = new Map<string, FileSearchResult['hits'][number] & { chunks: unknown[] }>()
+    const groups = new Map<string, FileSearchResult['hits'][number] & { chunks: NonNullable<FileSearchResult['hits'][number]['chunks']> }>()
     let budget = s.contextChars
     for (const h of chunks) {
-      const e = validate(h), location = locator(h.citation), citation = `RAG:${e.sourceHash!.slice(0, 12)}:${h.chunkIndex}`
+      const e = validate(h), location = locator(h.citation)
+      // Identical copies share a content hash but must retain distinct source citations.
+      const sourceId = createHash('sha256').update(pathKey(e.path)).digest('hex').slice(0, 12)
+      const citation = `RAG:${sourceId}:${e.sourceHash!.slice(0, 12)}:${h.chunkIndex}`
       const heading = `[${citation}] ${basename(e.path)} — ${location}\n`
       if (budget <= heading.length) break
       const text = h.text.slice(0, budget - heading.length); budget -= heading.length + text.length

@@ -13,12 +13,13 @@ import type { DirectoryActionScope, DirectoryProposal, DirectoryPrepareContext }
 import { DIRECTORY_ACTION_CHANNEL } from '../../shared/directory-actions-api'
 import { DirectoryActionManager } from './manager'
 import { assertOriginalClosed, nativeBlank, openNativeStage } from './native-runtime'
-import { copyWorkspacePaths } from './file-safety'
+import { copyWorkspacePaths, regularFile, hashFile } from './file-safety'
 
 export function registerDirectoryActionsIpc(options: {
   roots(): Promise<string[]>
   isHomeSender(sender: WebContents): boolean
   extract(path: string): Promise<string>
+  readText?: import('./manager').ActionDependencies['readText']
   changed(directories: string[]): void
 }): void {
   const search = new DirectorySearchService({ stateDirectory: app.getPath('userData'), roots: options.roots })
@@ -29,7 +30,7 @@ export function registerDirectoryActionsIpc(options: {
   const getManager = () => manager ??= new DirectoryActionManager({
     roots: options.roots, stateDirectory: app.getPath('userData'),
     open: openNativeStage, blank: nativeBlank, assertClosed: assertOriginalClosed,
-    trash: path => shell.trashItem(path), extract: options.extract,
+    trash: path => shell.trashItem(path), extract: options.extract, readText: options.readText,
     linkedImages: discoverLinkedImages, stageImages: stageLinkedImages, finalizeAssets: finalizeWorkflowAssets,
     search: (owner, paths, query, signal) => rag.searchSelected(owner, paths, query, signal, () => search.selected(owner, paths, query, signal)),
     myAgentTools: (paths, sessionId, action, payload, signal) => rag.toolsSelected(paths, sessionId, action, payload, signal),
@@ -80,7 +81,14 @@ export function registerDirectoryActionsIpc(options: {
       }
       case 'searchContents': {
         if (typeof args[1] !== 'string') throw new Error('Invalid search query.')
-        return m.searchContents(owner, id(), args[1])
+        return m.searchContents(owner, id(), args[1], args[2] as string[] | undefined)
+      }
+      case 'readFile': return m.readFile(owner, id(), args[1] as string, args[2] as number | undefined, args[3] as number | undefined)
+      case 'validateEvidence': return m.validateEvidence(owner, id())
+      case 'restoreEvidence': return m.restoreEvidence(owner, id(), args[1] as Parameters<DirectoryActionManager['restoreEvidence']>[2])
+      case 'checkCitation': {
+        if (typeof args[0] !== 'string' || typeof args[1] !== 'string' || !/^[a-f\d]{64}$/.test(args[1])) throw new Error('Invalid citation.')
+        try { await regularFile(await options.roots(), args[0]); return await hashFile(args[0]) === args[1] } catch { return false }
       }
       case 'validateFile': {
         if (typeof args[1] !== 'string') throw new Error('Invalid validation path.')
@@ -100,7 +108,6 @@ export function registerDirectoryActionsIpc(options: {
       }
       case 'verifyInspections': {
         if (typeof args[1] !== 'string') throw new Error('Invalid response text.')
-        await m.verifySources(owner, id())
         return m.inspections.verify(owner, id(), args[1])
       }
       case 'verify': {

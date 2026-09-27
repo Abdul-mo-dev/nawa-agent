@@ -14,7 +14,7 @@ export function ChangeNotice({ report, checking, error, recheck }: {
       : changed ? 'This directory has changed since this chat'
       : report?.status === 'unchanged' ? 'No content changes detected'
       : report?.status === 'incomplete' ? 'Change check is incomplete'
-      : 'File check runs with your next message')}</strong>
+      : 'Check saved files on demand')}</strong>
       <button type="button" className="ws-chat-close" disabled={checking} onClick={recheck}>{s('Check again')}</button></div>
     {error && <p>{error} {s("Earlier answers may be out of date.")}</p>}
     {!checking && report && (changed || report.status === 'incomplete') && <>

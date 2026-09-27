@@ -1,0 +1,36 @@
+.directory-activity { align-self: stretch; min-width: 0; font-size: 14px; line-height: 1.5; white-space: normal; color: var(--ex-muted, var(--text-secondary)); }
+.directory-activity-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
+.directory-activity-toggle { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; max-width: 100%; border: 0; padding: 4px 0; background: none; color: inherit; text-align: start; cursor: pointer; font: inherit; }
+.directory-activity-toggle:hover { color: var(--ex-text, var(--text)); }
+.directory-activity-toggle time { font-size: 12px; font-variant-numeric: tabular-nums; }
+.directory-activity-caret { display: inline-block; font-size: 18px; line-height: 1; }
+.directory-activity-caret.is-open { transform: rotate(90deg); }
+[dir='rtl'] .directory-activity-caret:not(.is-open) { transform: rotate(180deg); }
+.directory-activity-indicator { flex: none; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.directory-activity-indicator.is-waiting { outline: 1px solid currentColor; outline-offset: 2px; }
+.directory-activity-content { padding: 8px 0 0; }
+.directory-activity-context { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 5px; padding-bottom: 8px; font-size: 12px; overflow-wrap: anywhere; }
+.directory-activity-steps, .directory-step-targets { padding: 0; margin: 0; list-style: none; }
+.directory-step { position: relative; display: flex; gap: 12px; padding: 8px 0 16px; }
+.directory-step:not(:last-child)::after { content: ''; position: absolute; inset-inline-start: 9.5px; top: 32px; bottom: -4px; width: 1px; background: var(--ex-line, var(--border)); }
+.directory-step.is-child { margin-inline-start: 20px; }
+.directory-step-mark { display: inline-flex; justify-content: center; flex: 0 0 20px; height: 20px; }
+.directory-step.is-failed > .directory-step-mark, .directory-activity-errors { color: var(--ex-danger, var(--danger)); }
+.directory-step-body { min-width: 0; flex: 1; }
+.directory-step summary { cursor: pointer; overflow-wrap: anywhere; }
+.directory-step-body > details > summary { display: flex; align-items: baseline; gap: 8px; list-style: none; }
+.directory-step-body > details > summary::-webkit-details-marker { display: none; }
+.directory-step-title { color: var(--ex-text, var(--text)); }
+.directory-step-body > details > summary:hover .directory-step-title { text-decoration: underline; text-underline-offset: 3px; }
+.directory-step-time { flex: none; margin-inline-start: auto; font-size: 12px; }
+.directory-step-meta, .directory-step-files { margin-top: 5px; font-size: 12px; overflow-wrap: anywhere; }
+.directory-step-meta { display: flex; flex-wrap: wrap; gap: 6px; }
+.directory-step-targets { margin-top: 6px; overflow-wrap: anywhere; }
+.directory-step-data, .directory-activity-debug { margin-top: 8px; }
+.directory-activity pre { padding: 8px; max-height: 240px; max-width: 100%; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--ex-hover, var(--surface-subtle)); border-radius: var(--radius-6); font-size: 11px; line-height: 1.5; user-select: text; color: var(--ex-text, var(--text)); }
+.directory-activity-errors { font-size: 12px; }
+.directory-activity-debug { padding-top: 8px; border-top: 1px solid var(--ex-line, var(--border)); font-size: 12px; }
+.directory-activity-debug > p { margin-block: 8px; }
+.directory-activity-debug > span { display: block; margin-top: 5px; }
+.directory-activity button:focus-visible, .directory-activity summary:focus-visible { outline: 2px solid var(--ex-accent, var(--accent)); outline-offset: 2px; border-radius: 4px; }
+@media (prefers-reduced-motion: no-preference) { .directory-activity-indicator.is-running { animation: directory-working 1.8s ease-in-out infinite; } @keyframes directory-working { 50% { opacity: .35; } } }

@@ -100,23 +100,27 @@ export class DirectoryInspectionManager {
   }
   async verify(owner: number, run: string, text: string): Promise<string | null> {
     if (typeof text !== 'string' || text.length > 128000) throw new Error('Invalid response for native verification.')
-    for (const source of this.sources.values()) if (source.owner === owner && source.run === run) {
-      await this.authorize(owner, run, source.path)
-      if (await hashFile(source.path) !== source.hash) throw new Error('An inspected source changed, including a closed inspection. Read it again before using its evidence.')
-      await this.authorize(owner, run, source.path)
-    }
     for (const item of [...this.sessions.values()].filter(s => s.owner === owner && s.run === run)) {
       if (item.busy || !item.native) throw new Error('An inspection is still running.')
       item.busy = true
       try {
-        await this.validate(item)
         const correction = await item.native.verify(text)
-        await this.validate(item)
         if (correction) return correction + '\nOnly a private read-only copy is open. Do not claim to select or modify the user’s visible document; reword any such claim.'
       } catch (cause) { item.cancelled = true; throw cause }
       finally { item.busy = false; if (item.cancelled) await this.cleanup(item) }
     }
     return null
+  }
+  evidence(owner: number, run: string): { path: string; hash: string }[] {
+    return [...this.sources.values()].filter(source => source.owner === owner && source.run === run).map(({ path, hash }) => ({ path, hash }))
+  }
+  async validateSources(owner: number, run: string, alreadyChecked: Set<string> = new Set()): Promise<void> {
+    for (const source of this.evidence(owner, run)) {
+      await this.authorize(owner, run, source.path)
+      if (!alreadyChecked.has(source.path) && await hashFile(source.path) !== source.hash)
+        throw new Error('An inspected source changed, including a closed inspection. Read it again before using its evidence.')
+      await this.authorize(owner, run, source.path)
+    }
   }
   private async cleanup(item: Session): Promise<void> {
     try { await item.native?.close() } catch { /* A dead renderer must not leak its snapshot. */ } finally {

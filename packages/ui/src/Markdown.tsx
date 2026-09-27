@@ -15,6 +15,7 @@ export interface MarkdownNav {
   /** href prefix that renders as an in-app navigation link (e.g. 'docnav://') */
   scheme: string
   onNavigate: (href: string) => void
+  isAllowed?: (href: string) => boolean
 }
 
 // Hrefs may carry one level of balanced parens (sheet names like `Data (2)`
@@ -39,7 +40,7 @@ function renderInline(text: string, nav?: MarkdownNav): ReactNode[] {
     else if (tok.startsWith('[')) {
       const link = LINK_RE.exec(tok)
       const href = link?.[2] ?? ''
-      if (link && nav && href.startsWith(nav.scheme)) {
+      if (link && nav && href.startsWith(nav.scheme) && (nav.isAllowed?.(href) ?? true)) {
         out.push(
           <a
             key={key++}

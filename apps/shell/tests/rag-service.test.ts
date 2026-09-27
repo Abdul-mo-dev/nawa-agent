@@ -34,7 +34,7 @@ it('routes MyAgent operations without starting embedding workers or returning cr
   await s.statuses(['C:\\Documents\\file.txt'])
   await s.clear('C:\\Documents')
   const fallback = vi.fn()
-  await s.searchSelected(1, ['C:\\Documents\\file.txt'], 'question', new AbortController().signal, fallback)
+  expect(await s.searchSelected(1, ['C:\\Documents\\file.txt'], 'question', new AbortController().signal, fallback)).toMatchObject({ backend: 'myagent' })
   expect(mocks.search).toHaveBeenCalled(); expect(fallback).not.toHaveBeenCalled(); expect(mocks.worker).not.toHaveBeenCalled()
 })
 it('does not forward a stored embedding credential to MyAgent when switching backends', async () => {
@@ -52,7 +52,7 @@ it('requires directory consent and uses the original fallback when RAG is disabl
   await expect(s.index(1, 'C:\\Documents', true, false)).rejects.toThrow('Confirm')
   await s.save({ ...settings, enabled: false })
   const fallback = vi.fn().mockResolvedValue({ hits: [], total: 0, warnings: [] })
-  await s.searchSelected(1, [], 'question', new AbortController().signal, fallback)
+  expect(await s.searchSelected(1, [], 'question', new AbortController().signal, fallback)).toMatchObject({ backend: 'local-text' })
   expect(fallback).toHaveBeenCalledOnce(); expect(mocks.search).not.toHaveBeenCalled()
 })
 it('routes tools through the main-process credential and disables them with local or disabled RAG', async () => {

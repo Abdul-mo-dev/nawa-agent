@@ -57,6 +57,11 @@ let record = {
     },
   ],
 }
+const activityMode = new URLSearchParams(location.search).has('activity')
+if (activityMode) {
+  const saved = sessionStorage.getItem('fixture.activity-history')
+  if (saved) record = JSON.parse(saved)
+}
 const columns = Array.from({ length: 16 }, (_, i) => ({
   id: `c${i}`,
   name: i ? `Amount ${i}` : 'Invoice ID',
@@ -116,10 +121,63 @@ const state = {
   reviewed: 0,
   compares: 0,
   cancelScans: 0,
+  scenario: 'read',
+  catalogCalls: 0,
+  executionCalls: 0,
+  commits: 0,
+  catalogUnavailable: false,
+  holdCapture: false,
+  staleCitation: false,
+  openedFiles: [] as string[],
+  requests: [] as any[],
 }
+const streamListeners = new Set<(chunk: any) => void>()
+const turns = new Map<string, number>()
+let releaseTool: (() => void) | undefined
+let releaseCapture: (() => void) | undefined
+const stream = async (request: any) => {
+  state.requests.push(clone(request))
+  const emit = (chunk: any) => streamListeners.forEach(listener => listener({ ...chunk, requestId: request.requestId }))
+  const turn = (turns.get(request.sessionId) ?? 0) + 1; turns.set(request.sessionId, turn)
+  await new Promise(resolve => setTimeout(resolve, 50))
+  if (state.scenario === 'connection-error') { emit({ type: 'error', error: 'Fixture provider unavailable' }); return }
+  if (state.scenario === 'cutoff') { emit({ type: 'delta', text: 'This answer stopped midway.' }); emit({ type: 'done', stopReason: 'max_tokens' }); return }
+  if (['listing', 'count', 'citation', 'intermediate-failure'].includes(state.scenario)) {
+    if (turn === 1) {
+      if (state.scenario === 'intermediate-failure') emit({ type: 'delta', text: 'Unverified intermediate claim.' })
+      emit({ type: 'tool-call', toolCall: { id: crypto.randomUUID(), name: state.scenario === 'listing' ? 'list_directory' : 'spreadsheet_query_sql',
+        input: state.scenario === 'listing' ? { path: '.' } : { sql: 'SELECT COUNT(*) FROM revenue', _nawaFiles: [folder + '\\revenue.xlsx'] } } })
+    } else {
+      if (state.scenario === 'intermediate-failure') { emit({ type: 'error', error: 'Fixture failed after commentary' }); return }
+      const tools = request.messages.filter((message: any) => message.role === 'tool').flatMap((message: any) => message.results)
+      const result = tools.length ? JSON.parse(tools.at(-1).output) : {}
+      emit({ type: 'delta', text: state.scenario === 'listing' ? 'revenue.xlsx' : state.scenario === 'citation'
+        ? `The count is 99. [Source](${result.citations[0].id}) [Unregistered](RAG:unknown)` : 'The workbook contains 99 data rows.' })
+    }
+    emit({ type: 'done' }); return
+  }
+  const native = request.system.includes('editing a private staging copy')
+  if (native && turn === 1) emit({ type: 'tool-call', toolCall: { id: crypto.randomUUID(), name: 'native_format', input: { range: 'A1:B4' } } })
+  else if (!native && state.scenario === 'edit' && turn === 1) emit({ type: 'tool-call', toolCall: { id: crypto.randomUUID(), name: 'update_file', input: { path: folder + '\\revenue.xlsx', instruction: 'Format the revenue table' } } })
+  else if (!native && state.scenario !== 'edit' && turn === 1) {
+    for (let i = 0; i < 2; i++) emit({ type: 'tool-call', toolCall: { id: crypto.randomUUID(), name: 'discover_knowledge_tools', input: { scope: 'selected', query: 'spreadsheet' } } })
+  } else if (!native && state.scenario !== 'edit' && turn === 2) emit({ type: 'tool-call', toolCall: { id: crypto.randomUUID(), name: 'use_knowledge_tool', input: { tool: 'spreadsheet_query_sql', paths: [folder + '\\revenue.xlsx'], arguments: { sql: 'SELECT COUNT(*) FROM revenue' } } } })
+  else {
+    const declined = JSON.stringify(request.messages).includes('user declined')
+    const text = native ? 'Formatting is ready for review.' : state.scenario === 'edit' ? declined ? 'No changes were saved.' : 'The approved changes were saved.' : state.scenario === 'fail' ? 'The file needs a refresh before I can calculate the total.' : 'The selected table contains **99 rows**.'
+    for (const character of text) emit({ type: 'delta', text: character })
+  }
+  emit({ type: 'done' })
+}
+const source = { path: folder + '\\revenue.xlsx', server: 'http://127.0.0.1:5187', documentId: 'doc', contentHash: 'a'.repeat(64), indexRevision: 'v1', datasetRevision: 'table-v1' }
+const definition = { name: 'spreadsheet_query_sql', description: 'Query the selected workbook', inputSchema: { type: 'object', properties: { sql: { type: 'string' } }, required: ['sql'] } }
+let proposal: any
 Object.assign(window, {
   sidebarFixture: {
     state,
+    release: () => releaseTool?.(),
+    releaseCapture: () => releaseCapture?.(),
+    messages: () => clone(record.messages),
     refresh: () => {
       dataset.generation = 'v2'
       callbacks.forEach((fn) => fn())
@@ -130,6 +188,7 @@ Object.assign(window, {
     },
   },
   aiOffice: {
+    listWorkspaceFolder: async () => ({ files: [{ name: 'revenue.xlsx', path: source.path, sizeBytes: 2048 }], folders: [] }),
     getAiProviders: () => [
       { id: 'custom', label: 'Custom provider', defaultModel: '', models: [], needsBaseUrl: true },
     ],
@@ -144,15 +203,54 @@ Object.assign(window, {
     },
     testAiSettings: async () => ({ ok: true }),
     setLanguage: async () => {},
+    onAiStreamChunk: (listener: (chunk: any) => void) => { streamListeners.add(listener); return () => streamListeners.delete(listener) },
+    aiStream: stream,
+    aiStreamCancel: async () => {},
+  },
+  nawaDirectory: {
+    begin: async () => crypto.randomUUID(), cancel: async () => {}, verifyInspections: async () => null,
+    validateEvidence: async () => ({ evidence: [{ path: source.path, hash: source.contentHash, myAgent: source }], sourceCount: 1, durationMs: 2, httpRequests: 1 }),
+    restoreEvidence: async (_run: string, requests: any[]) => requests.map(request => request.id),
+    checkCitation: async () => !state.staleCitation,
+    myAgentTools: async (_run: string, action: string, payload: any) => {
+      if (action === 'catalog') {
+        if (state.holdCapture) await new Promise<void>(resolve => { releaseCapture = resolve })
+        state.catalogCalls++
+        if (state.catalogUnavailable) throw new Error('MyAgent tool API not found (HTTP 404). Rebuild and restart MyAgent.')
+        const definitions = state.scenario === 'count' ? [definition, { name: 'spreadsheet_catalog_search', description: 'Dataset catalog', inputSchema: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'number' } } } }] : [definition]
+        return { available: true, tools: definitions, initialTools: payload.initial ? definitions : [], total: definitions.length, nextOffset: null,
+          sources: [], files: [{ path: source.path, status: 'unchecked', documentId: 'doc' }], warnings: [], diagnostics: { httpRequests: 1, durationMs: 2 } }
+      }
+      state.executionCalls++
+      if (state.scenario === 'slow') await new Promise<void>(resolve => { releaseTool = resolve })
+      return { tool: payload.tool, succeeded: state.scenario !== 'fail', sources: [source], warnings: [],
+        content: state.scenario === 'fail' ? '' : payload.tool === 'spreadsheet_catalog_search' ? JSON.stringify({ datasets: [{ Id: 'table', SqlObjectName: 'revenue', RowCount: 99, ColumnNames: ['id', 'amount'] }] }) : JSON.stringify({ rows: [{ count: 99 }], apiKey: 'fixture-secret-must-be-redacted' }),
+        error: state.scenario === 'fail' ? 'revenue.xlsx needs indexing/refresh.' : null }
+    },
+    propose: async (_run: string, input: any) => { proposal = { ...input, id: crypto.randomUUID(), run: _run }; return proposal },
+    prepare: async () => ({ kind: 'sheets', systemPrompt: 'Fixture native editor.', context: 'Selected staged workbook.', tools: [{ name: 'native_format', description: 'Format workbook', inputSchema: { type: 'object', properties: { range: { type: 'string' } } } }] }),
+    execute: async () => ({ output: 'Formatted 8 cells', summary: 'Formatted the revenue table', mutated: true }),
+    verify: async () => null,
+    preview: async () => ({ ...proposal, bytes: 2048, beforeText: 'Before formatting', afterText: 'After formatting' }),
+    commit: async () => { state.commits++; return { path: proposal.path, operation: 'update', backupPath: proposal.path + '.backup' } },
+    discard: async () => {},
   },
   nawaHistory: {
     initialize: async () => ({ databasePath: 'fixture/history.sqlite', imported: 0 }),
     list: async () => ({ conversations: [clone(record)], total: 1 }),
     get: async () => clone(record),
     create: async () => clone(record),
-    save: async (input: Partial<typeof record>) => {
+    save: async (input: Partial<typeof record> & { delta?: boolean; removedIds?: string[] }) => {
       if (state.failHistorySave) throw new Error('Local storage temporarily unavailable')
-      record = { ...record, ...clone(input), revision: record.revision + 1 }
+      const { delta, removedIds, ...next } = clone(input)
+      if (delta) {
+        const updates = new Map((next.messages ?? []).map(message => [message.id, message]))
+        next.messages = record.messages.filter(message => !removedIds?.includes(message.id)).map(message => {
+          const update = updates.get(message.id); updates.delete(message.id); return update ?? message
+        }).concat([...updates.values()])
+      }
+      record = { ...record, ...next, revision: record.revision + 1 }
+      if (activityMode) sessionStorage.setItem('fixture.activity-history', JSON.stringify(record))
       return { revision: record.revision, updatedAt: now, title: record.title }
     },
     compare: async () => {
@@ -173,6 +271,10 @@ Object.assign(window, {
     },
     cancelScan: async () => {
       state.cancelScans++
+    },
+    capture: async () => {
+      if (state.holdCapture) await new Promise<void>(resolve => { releaseCapture = resolve })
+      return { id: crypto.randomUUID(), hash: 'a'.repeat(64), complete: true, startedAt: Date.now(), finishedAt: Date.now(), fileCount: 1, directoryCount: 1, bytesHashed: 2048, issues: [] }
     },
     rename: async (_: string, title: string) => {
       record.title = title
@@ -301,7 +403,7 @@ function Fixture() {
               folderName="Quarterly reports"
               scopePaths={[folder + '\\revenue.xlsx']}
               scopeDirs={[]}
-              onOpenFile={() => {}}
+              onOpenFile={path => { state.openedFiles.push(path) }}
               onClose={() => setVisible(false)}
             />
           }

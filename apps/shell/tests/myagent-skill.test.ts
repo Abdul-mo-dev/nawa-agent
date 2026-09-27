@@ -21,6 +21,7 @@ it('preloads the server-selected bundle and routes direct calls with explicit ta
   const skill = await prepareMyAgentKnowledgeSkill(client, 'Count rows')
   expect(client.myAgentTools).toHaveBeenCalledWith('catalog', { scope: 'selected', initial: true, task: 'Count rows' })
   expect(skill.tools.map(tool => tool.name)).toEqual(['spreadsheet_query_sql', 'discover_knowledge_tools', 'use_knowledge_tool'])
+  expect(skill.preparation).toMatchObject({ available: true, loadedTools: 1, warnings: [] })
   expect(skill.tools[0].inputSchema).toMatchObject({ additionalProperties: false, required: ['sql'], properties: { sql: { type: 'string' }, _nawaFiles: { type: 'array' } } })
   expect(skill.buildContext?.()).toContain('needs-index')
   client.myAgentTools.mockResolvedValueOnce({ succeeded: true, tool: 'spreadsheet_query_sql', content: '3', sources: [], warnings: [] })
@@ -34,6 +35,7 @@ it('keeps the bridge available when automatic preparation fails, without pretend
   const skill = await prepareMyAgentKnowledgeSkill(client, 'Read this file')
   expect(skill.tools.map(tool => tool.name)).toEqual(['discover_knowledge_tools', 'use_knowledge_tool'])
   expect(skill.buildContext?.()).toContain('Server offline')
+  expect(skill.preparation).toMatchObject({ available: false, loadedTools: 0, warnings: [expect.stringContaining('Server offline')] })
   expect(skill.systemPrompt).toContain('No MyAgent tools were preloaded')
 })
 it('cancels in-flight calls and rejects late results', async () => {

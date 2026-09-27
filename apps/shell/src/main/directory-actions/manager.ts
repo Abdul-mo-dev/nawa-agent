@@ -1,6 +1,8 @@
 import type { LinkedImage } from '../../shared/directory-actions-api'
 import type { MyAgentSource, MyAgentToolAction, MyAgentToolResponse } from '../../shared/myagent-tools-api'
 import type { FileSearchResult } from '../../shared/file-search-api'
+import type { DirectoryEvidence, DirectoryRead, DirectoryValidation } from '../../shared/directory-evidence'
+import type { WorkspaceFileText } from '../../shared/home-api'
 import type { AnalyticsReadAction, AnalyticsEnvelope, SourceRef } from '../../shared/analytics-api'
 import { conversionSupported } from '../../../../../packages/cli/src/conversion-routes'
 import { directoryToolAllowed, DIRECTORY_PROTOCOL_VERSION } from '@genoffice/agent-core'
@@ -11,7 +13,7 @@ import { copyFile, lstat, mkdir, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join } from 'node:path'
 import type { AgentToolCall, ToolExecution, DirectoryEditorDescription, DirectoryWorkflowOptions, DirectoryWorkflowStatus, DirectoryInteractionReply } from '@genoffice/agent-core'
 import type { DirectoryActionScope, DirectoryApproval, DirectoryCommit, DirectoryProposal, DirectoryReview, DirectoryPrepareContext, DirectoryConversion, DirectoryQuality } from '../../shared/directory-actions-api'
-import { authorizePath, exists, hashFile, publishFile, regularFile, safeName, samePath, validAbsolute } from './file-safety'
+import { authorizePath, exists, hashFile, publishFile, regularFile, safeName, samePath, validAbsolute, within } from './file-safety'
 
 export interface NativeStage {
   describe(mode?: 'read' | 'edit', workflow?: DirectoryWorkflowOptions): Promise<DirectoryEditorDescription>
@@ -36,6 +38,7 @@ export interface ActionDependencies {
   assertClosed(path: string): Promise<void>
   trash(path: string): Promise<void>
   extract(path: string): Promise<string>
+  readText?(path: string, maxChars: number, offset: number): Promise<WorkspaceFileText>
   changed(path: string): void
   review?(before: string | null, after: string): Promise<DirectoryReview>
   convert?(source: string, target: string, conversion: DirectoryConversion, signal: AbortSignal, network?: boolean): Promise<string[]>
@@ -77,7 +80,11 @@ export class DirectoryActionManager {
     if (!raw || !Array.isArray(raw.files) || !Array.isArray(raw.directories) || raw.files.length + raw.directories.length > 256) throw new Error('Invalid directory selection.')
     const scope = { opened: raw.opened, files: [...new Set(raw.files)], directories: [...new Set(raw.directories)] }
     const roots = await this.deps.roots()
-    for (const path of [scope.opened, ...scope.files, ...scope.directories].filter((p): p is string => p !== null)) await authorizePath(roots, path)
+    // Freeze authority without reading/statting every selection. Actual operations revalidate roots and files.
+    for (const path of [scope.opened, ...scope.files, ...scope.directories].filter((p): p is string => p !== null)) {
+      validAbsolute(path)
+      if (!roots.some(root => within(root, path))) throw new Error('Path is outside the registered workspace folders.')
+    }
     // Only one active directory run per home renderer; old permissions are revoked.
     await this.cancelOwner(owner)
     const id = randomUUID(); this.runs.set(id, { owner, scope, expires: Date.now() + 30 * 60 * 1000, cancelled: false, abort: new AbortController(), evidence: new Map() }); return id
@@ -315,7 +322,6 @@ export class DirectoryActionManager {
         const run = this.runs.get(item.run)
         if (run?.myAgentSources?.some(source => samePath(source.path, item.path))) {
           run.myAgentSources = run.myAgentSources.filter(source => !samePath(source.path, item.path))
-          run.myAgentTools?.clear()
         }
         try { await this.inspections.invalidatePath(owner, item.run, item.path) } catch (cause) { console.warn('Nawa: inspection cleanup after commit failed.', cause) }
         try { this.deps.changed(item.path) } catch (cause) { console.warn('Nawa: refresh notification failed after file commit.', cause) }
@@ -349,11 +355,17 @@ export class DirectoryActionManager {
     await Promise.all([...this.pending.values()].filter(item => item.run === id).map(item => this.discard(owner, item.id)))
     this.runs.delete(id)
   }
-  async verifySources(owner: number, id: string): Promise<void> {
+  async verifySources(owner: number, id: string): Promise<number> {
     const run = this.run(owner, id), roots = await this.deps.roots()
+    const verified: string[] = []; let httpRequests = 0
     if (run.myAgentSources?.length) {
       if (!this.deps.myAgentTools) throw new Error('MyAgent evidence verification is unavailable.')
-      await this.deps.myAgentTools(run.myAgentSources.map(source => source.path), id, 'verify', { sources: run.myAgentSources }, run.abort.signal)
+      for (let offset = 0; offset < run.myAgentSources.length; offset += 100) {
+        const batch = run.myAgentSources.slice(offset, offset + 100)
+        const result = await this.deps.myAgentTools(batch.map(source => source.path), id, 'verify', { sources: batch }, run.abort.signal)
+        httpRequests += result.diagnostics?.httpRequests ?? 0
+        if (result.localSourcesVerified) verified.push(...batch.map(source => source.path))
+      }
       this.run(owner, id)
     }
     if (run.analyticsEvidence?.size) {
@@ -362,10 +374,109 @@ export class DirectoryActionManager {
       this.run(owner, id)
     }
     for (const [path, hash] of run.evidence) {
+      if (verified.some(value => samePath(value, path)) ||
+          [...(run.analyticsEvidence?.values() ?? [])].some(source => samePath(source.path, path) && source.hash === hash)) continue
       await regularFile(roots, path)
       if (!run.scope.files.some(p => samePath(p, path)) || await hashFile(path) !== hash) throw new Error('A searched source changed; read it again in a new request.')
     }
     this.run(owner, id)
+    return httpRequests
+  }
+  async validateEvidence(owner: number, id: string): Promise<DirectoryValidation> {
+    const started = Date.now(), run = this.run(owner, id)
+    const httpRequests = await this.verifySources(owner, id)
+    await this.inspections.validateSources(owner, id, new Set(this.evidenceSnapshot(owner, id).filter(e => run.evidence.has(e.path) || e.myAgent || e.analytics?.length).map(e => e.path)))
+    this.run(owner, id)
+    const evidence = this.evidenceSnapshot(owner, id)
+    return { evidence, durationMs: Date.now() - started, sourceCount: evidence.length, httpRequests }
+  }
+  private evidenceSnapshot(owner: number, id: string): DirectoryEvidence[] {
+    const run = this.run(owner, id), values = new Map<string, DirectoryEvidence>()
+    const add = (path: string, hash: string) => {
+      const previous = [...values.values()].find(value => samePath(value.path, path))
+      if (previous && previous.hash !== hash) throw new Error('Evidence revisions differ. Read the changed file in a new request.')
+      const value = previous ?? { path, hash }; values.set(value.path, value); return value
+    }
+    for (const [path, hash] of run.evidence) add(path, hash)
+    for (const source of run.myAgentSources ?? []) add(source.path, source.contentHash).myAgent = source
+    for (const source of run.analyticsEvidence?.values() ?? []) (add(source.path, source.hash).analytics ??= []).push(source)
+    for (const source of this.inspections.evidence(owner, id)) add(source.path, source.hash)
+    return [...values.values()]
+  }
+  async restoreEvidence(owner: number, id: string, requests: { id: string; evidence: DirectoryEvidence[] }[]): Promise<string[]> {
+    if (!Array.isArray(requests) || requests.length > 20 || JSON.stringify(requests).length > 256000) throw new Error('Invalid history evidence.')
+    const run = this.run(owner, id), accepted: string[] = [], checked = new Map<string, boolean>()
+    const roots = await this.deps.roots(), eligible: DirectoryEvidence[] = []
+    // Restoration is optional context. Bound the entire network phase and avoid retrying
+    // the same unavailable service for every historical source.
+    const signal = AbortSignal.any([run.abort.signal, AbortSignal.timeout(7500)])
+    for (const request of requests) {
+      if (!request || typeof request.id !== 'string' || request.id.length > 100 || !Array.isArray(request.evidence) || request.evidence.length > 256) throw new Error('Invalid history receipt.')
+      for (const source of request.evidence) {
+        const key = JSON.stringify(source)
+        if (checked.has(key)) continue
+        checked.set(key, false)
+        if (!source || typeof source.path !== 'string' || !/^[a-f\d]{64}$/.test(source.hash) || !run.scope.files.some(path => samePath(path, source.path))) continue
+        if (source.myAgent && (!samePath(source.myAgent.path, source.path) || source.myAgent.contentHash !== source.hash)) continue
+        if (source.analytics?.some(value => !samePath(value.path, source.path) || value.hash !== source.hash)) continue
+        try {
+          await regularFile(roots, source.path)
+          // Server-backed receipts receive their local hash check after the HTTP wait.
+          if (!source.myAgent && !source.analytics?.length && await hashFile(source.path) !== source.hash) continue
+          eligible.push(source); checked.set(key, true)
+        } catch { /* An unavailable source invalidates its own historical answer. */ }
+      }
+    }
+    const remote = eligible.filter(source => source.myAgent)
+    for (let offset = 0; offset < remote.length; offset += 100) {
+      const batch = remote.slice(offset, offset + 100)
+      try {
+        signal.throwIfAborted()
+        if (!this.deps.myAgentTools) throw new Error('MyAgent unavailable')
+        const result = await this.deps.myAgentTools(batch.map(source => source.path), id, 'verify', { sources: batch.map(source => source.myAgent) }, signal)
+        if (!result.localSourcesVerified) for (const source of batch) if (await hashFile(source.path) !== source.hash) checked.set(JSON.stringify(source), false)
+      } catch {
+        // A rejected batch is omitted conservatively; do not fan out retries during an outage.
+        for (const source of remote.slice(offset)) checked.set(JSON.stringify(source), false)
+        break
+      }
+    }
+    const analytical = eligible.filter(source => source.analytics?.length)
+    if (analytical.length) try {
+      signal.throwIfAborted()
+      if (!this.deps.analytics) throw new Error('Analytics unavailable')
+      await this.deps.analytics(owner, [...run.scope.files], 'verify', { sources: analytical.flatMap(source => source.analytics!) }, signal)
+    } catch { for (const source of analytical) checked.set(JSON.stringify(source), false) }
+    this.run(owner, id)
+    for (const request of requests) {
+      if (!request.evidence.every(source => checked.get(JSON.stringify(source)))) continue
+      for (const source of request.evidence) {
+        run.evidence.set(source.path, source.hash)
+        if (source.myAgent) run.myAgentSources = [...(run.myAgentSources ?? []).filter(v => !samePath(v.path, source.path)), source.myAgent]
+        for (const value of source.analytics ?? []) (run.analyticsEvidence ??= new Map()).set(value.datasetId, value)
+      }
+      accepted.push(request.id)
+    }
+    return accepted
+  }
+  async readFile(owner: number, id: string, path: string, offset = 0, maxChars = 12000): Promise<DirectoryRead> {
+    const run = this.run(owner, id)
+    if (typeof path !== 'string' || !run.scope.files.some(value => samePath(value, path))) throw new Error('Select the individual file before reading.')
+    if (!Number.isInteger(offset) || offset < 0 || !Number.isInteger(maxChars) || maxChars < 1 || maxChars > 12000) throw new Error('Invalid read range.')
+    await regularFile(await this.deps.roots(), path)
+    const sourceHash = await hashFile(path)
+    const extracted = this.deps.readText ? await this.deps.readText(path, maxChars, offset) : undefined
+    if (extracted && !extracted.ok) throw new Error(extracted.error || 'Text extraction failed.')
+    const text = extracted ? extracted.text ?? '' : await this.deps.extract(path)
+    this.run(owner, id)
+    await regularFile(await this.deps.roots(), path)
+    if (await hashFile(path) !== sourceHash) throw new Error('The file changed while reading. Read it again in a new request.')
+    const previous = run.evidence.get(path)
+    if (previous && previous !== sourceHash) throw new Error('Evidence revisions changed. Start a new request.')
+    run.evidence.set(path, sourceHash)
+    const value = extracted ? text : text.slice(offset, offset + maxChars), end = offset + value.length
+    const total = extracted?.totalChars ?? text.length
+    return { path, sourceHash, start: offset, end, total, nextOffset: end < total ? end : null, untrustedDocumentText: value }
   }
   async analyticsData(owner: number, id: string, action: AnalyticsReadAction, payload: unknown): Promise<unknown> {
     const run = this.run(owner, id)
@@ -390,7 +501,7 @@ export class DirectoryActionManager {
     if (action === 'execute' && (!payload || typeof payload !== 'object' || !run.myAgentTools?.has((payload as { tool: string }).tool)))
       throw new Error('Discover the MyAgent tool and its argument schema before calling it.')
     const metadataOnly = action === 'catalog' && (payload as { scope?: unknown } | null)?.scope !== 'selected'
-    if (action === 'execute') await this.verifySources(owner, id)
+    // Each execution validates its target snapshots; all used sources are checked at the final boundary.
     const result = await this.deps.myAgentTools(metadataOnly ? [] : [...run.scope.files], id, action, payload, run.abort.signal)
     this.run(owner, id)
     if (action === 'catalog' && result.sources.length) throw new Error('Tool metadata must not contain file evidence.')
@@ -405,7 +516,7 @@ export class DirectoryActionManager {
       if (previousHash && previousHash !== source.contentHash || [...(run.analyticsEvidence?.values() ?? [])].some(v => samePath(v.path, source.path) && v.hash !== source.contentHash))
         throw new Error('MyAgent and Nawa evidence use different source revisions. Start a new request.')
       await regularFile(await this.deps.roots(), source.path)
-      if (await hashFile(source.path) !== source.contentHash) throw new Error('MyAgent source changed during tool execution.')
+      if (!result.localSourcesVerified && await hashFile(source.path) !== source.contentHash) throw new Error('MyAgent source changed during tool execution.')
     }
     this.run(owner, id)
     if (result.sources.length) {
@@ -419,20 +530,24 @@ export class DirectoryActionManager {
     }
     return result
   }
-  async searchContents(owner: number, id: string, query: string): Promise<FileSearchResult> {
+  async searchContents(owner: number, id: string, query: string, targets?: string[]): Promise<FileSearchResult> {
     const run = this.run(owner, id)
     if (typeof query !== 'string' || !query.trim() || query.length > 256) throw new Error('Use a search query of 1–256 characters.')
     if (!this.deps.search) throw new Error('Content search is unavailable. Rebuild Nawa.')
-    const result = await this.deps.search(owner, [...run.scope.files], query, run.abort.signal)
+    if (targets !== undefined && (!Array.isArray(targets) || !targets.length || targets.some(path => typeof path !== 'string' || !run.scope.files.some(selected => samePath(selected, path))))) throw new Error('Search targets must be individually selected files.')
+    const paths = targets ? run.scope.files.filter(path => targets.some(target => samePath(path, target))) : [...run.scope.files]
+    const result = await this.deps.search(owner, paths, query, run.abort.signal)
     this.run(owner, id)
     const roots = await this.deps.roots()
     for (const hit of result.hits) {
-      if (!run.scope.files.some(path => samePath(path, hit.path))) throw new Error('Search returned an unselected file; results rejected.')
+      if (!paths.some(path => samePath(path, hit.path))) throw new Error('Search returned an unselected file; results rejected.')
       await regularFile(roots, hit.path)
-      if (await hashFile(hit.path) !== hit.sourceHash) throw new Error('Search source changed; results rejected.')
+      if (!result.localSourcesVerified && await hashFile(hit.path) !== hit.sourceHash) throw new Error('Search source changed; results rejected.')
+      if (run.evidence.has(hit.path) && run.evidence.get(hit.path) !== hit.sourceHash) throw new Error('Search evidence revisions changed. Start a new request.')
+      // The retrieval service checks returned source bytes; retain the version for final validation.
       run.evidence.set(hit.path, hit.sourceHash)
     }
-    return result
+    return { ...result, coverage: { selected: run.scope.files.length, requested: paths, covered: [...new Set(result.hits.map(hit => hit.path))], completeSelection: false } }
   }
   async validateFile(owner: number, id: string, path: string): Promise<DirectoryQuality> {
     const run = this.run(owner, id)

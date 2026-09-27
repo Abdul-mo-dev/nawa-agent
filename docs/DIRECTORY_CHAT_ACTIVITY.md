@@ -1,0 +1,50 @@
+# Directory chat activity and debugging
+
+Directory chat follows the opened-file chat layout: a neutral user bubble, plain assistant text, and the shared auto-growing input with compact send/stop controls. Model and timestamp information remains available on message hover instead of repeated author headers.
+
+Every new directory request keeps a quiet, expandable activity row, separate from the assistant answer. During preparation it shows the shared thinking indicator. Once a tool runs, or the request finishes, it shows a compact status, step count and elapsed time. The timeline and all diagnostic details stay collapsed until explicitly opened, including for stopped or failed requests. Failed steps remain counted even when the assistant recovers and completes its answer. Saved activity-only records use this layout too.
+
+The timeline includes optional tool preparation, model requests, actual MyAgent tool names, native editor calls, preparation/save decisions, final source validation and the final history checkpoint. Native editing and its approvals are indented beneath the parent action. **Review action** opens the existing review dialog while input is needed. The preparation/save approval rules have not changed. Whole-directory change checks now run only through **Check again**, independently of answering a question.
+
+MyAgent preparation records actual availability, loaded-tool count and warnings. A failed catalog request is shown as **MyAgent tools unavailable**, even if basic search or native inspection still succeeds. Search results identify the backend (`myagent`, `local-rag`, or `local-text`), and the activity summary reports candidate files: semantic hits can be related passages rather than exact matches. Simple name/phrase lookups are directed to content search before analytical dataset discovery. MyAgent passage citation IDs include a local path identity as well as the content hash, so identical file copies retain distinct citations.
+
+Ordinary workbook counts are directed to scoped MyAgent catalog/SQL calls; dataset description is needed only when the catalog leaves definitions unclear. Explicitly reviewed calculations and exact decimal accounting still use Nawa's reviewed tools. Directory inspection replaces the live editor's worksheet-size shortcut with a bounds-only explanation: last-row numbers cannot establish employee, non-empty or distinct counts. When native inspection is needed, inspect the header and aggregate the relevant column. This is model guidance, not a general semantic proof of the assistant's final answer. Source and selection checks still run independently.
+
+The Search connection test checks both shared roots and the document-tool catalog. An empty HTTP 404 from `/api/v1/rag/tools/catalog` means the configured endpoint lacks that route; verify the URL and rebuild/restart the actual MyAgent server payload. A healthy basic RAG search endpoint alone does not prove that the newer tool API is installed. MyAgent Server Settings runs the bundled `server` payload next to its UI executable, which must be staged from the new build too.
+
+Expand a step to inspect its status, elapsed time, target paths, bounded arguments and result. Model steps record time to the first stream event, tool-call count, advertised-tool count and stop/error information. They do not store prompts, settings or model reasoning. These measurements describe elapsed time, not token use or provider billing.
+
+**Debug details → Copy diagnostics** copies the request ID, model label, timing and retained steps as JSON. Credential-shaped fields, bearer tokens, URL credentials and inline binary data are redacted on capture. Tool output may contain other private document content; inspect the copied data before sharing it. Redaction is best effort, not a guarantee that arbitrary source text contains no sensitive information.
+
+Activity is local and unencrypted, like the existing transcript. It is excluded from restored model context. Opening a saved conversation converts unfinished steps to stopped, rather than displaying stale spinners. History schema version 3 retains activity and adds request outcomes, source receipts, bounded workbook metadata and citations without removing prior messages, drafts or fingerprints; older application versions reject this newer schema. Only completed user/final-answer pairs with currently valid source receipts return as factual model context. Failed/intermediate, incomplete and legacy unversioned answers remain visible without being trusted as current evidence.
+
+Output-limit and tool-limit answers are marked **Incomplete** and offer **Continue answer**. Continuation starts a new explicit request and rechecks sources. Registered citation links open a compact source viewer with the returned location/excerpt and an **Open file** action. The viewer checks the saved file hash and marks changed or unavailable sources. It does not promise automatic navigation to a worksheet cell or page. Unregistered model-generated links are not actionable.
+
+## Efficiency and bounds
+
+- Streamed prose is published at most once per animation frame and flushed at tool/turn boundaries. Unchanged message rows and completed activity rows are memoized.
+- History checkpoints send changed messages and explicit deletions; SQLite upserts only changed rows. The final checkpoint records duration and changed-message/payload counts. The currently changing message's bounded activity is included in its update.
+- Simple directory listings advertise four metadata tools and skip MyAgent preparation. Content lookups, ordinary table queries, reviewed analytics and editing start with different capability sets. `discover_file_tools` activates another set when needed, without changing file permissions. Intent detection is a routing hint, not an authorization decision.
+- A named or sole-workbook table request prepares its bounded dataset catalog before the first model turn. Verified follow-up context can reuse that metadata. SQL remains necessary for actual counts; worksheet extents are not employee counts.
+- Selected-file schema discovery makes one metadata request, with a five-second deadline, and no source-byte hashing or document-by-document HTTP calls. Mappings are marked `unchecked`; actual execution validates its targets. Dataset metadata calls have an eight-second deadline. Optional historical source restoration batches server checks within a 7.5-second network deadline and omits unverified context on failure.
+- A selection may contain up to 256 files; a MyAgent operation can target up to 100 of them. `_nawaFiles`/`paths` narrows the operation before that limit is checked. Larger tasks must explicitly batch and retain coverage information. Content search also accepts a selected subset.
+- The main process records versioned evidence, including paginated plain-text reads. A hard final validation runs after semantic correction and at finalization/empty-answer boundaries. MyAgent operations check their target before/after execution; final validation batches retained server revisions through the existing scoped catalog API and checks local bytes. It does not revalidate all earlier sources before each unrelated tool.
+- Only independent metadata reads opt into parallel execution, capped at four. Native sessions, approvals, discovery, evidence-changing reads and mutations remain serial. Repeated identical reads and consecutive tool failures stop earlier; task-specific root budgets replace the uniform 100-turn limit.
+- Identical MyAgent catalog requests share a request-local cache, including concurrent requests. Failed/unavailable catalogs can retry. Execution and source verification are never cached. Cancellation clears the cache, and successful file commits invalidate it.
+- A cached catalog is advisory metadata. Actual operations still recheck the targeted files and revisions. Cached responses include `cacheHit: true` in their diagnostic result.
+- Each request retains the latest 100 activity steps, with an omitted count. Captured arguments and outputs are limited to approximately 1,200 and 2,400 characters per step. Compact typed facts retain HTTP counts, cache use, coverage, source revisions, SQL truncation and result IDs before raw-output truncation. History applies a further detail budget and counts diagnostics toward the existing transcript storage limit. Nested durations overlap; do not sum parent and child times.
+- File action outcomes are structured (`committed`, `declined`, `discarded`, `failed`). Declined actions cannot retry the same target/operation in that request. Commit receipts back completion reporting. The English explicit-action claim detector catches unsupported target/operation claims; it is deliberately conservative and is not general semantic or multilingual proof.
+
+## Validation
+
+```powershell
+npm run test -w @genoffice/shell -- tests/directory-activity.test.ts tests/directory-activity-history.test.ts tests/history-cancellation.test.ts tests/myagent-directory.test.ts tests/myagent-skill.test.ts
+npm run test -w @genoffice/shell -- tests/directory-review-fixes.test.ts tests/myagent-rag.test.ts tests/directory-inspection-evidence.test.ts
+npm run test -w @genoffice/agent-core
+node tools/sidebar-review/activity-test.mjs
+node tools/sidebar-review/test.mjs
+npm run typecheck -w @genoffice/shell
+npm run build -w @genoffice/shell
+```
+
+The browser fixture uses real directory-chat components with synthetic file, model and tool responses. It exercises request completion, capability routing, prepared and reused workbook metadata, catalog caching, persisted activity/citations, copied diagnostics, stale citation sources, incomplete-answer continuation, failed-history exclusion, failed/stopped operations, native editing, approval decisions and narrow/RTL layouts. It does not send prompts to a provider or edit real documents. Screenshots are written under `.task/directory-chat-review/`. See [implementation and validation](reviews/directory-chat-fixes.md) for the local server check and remaining limits.

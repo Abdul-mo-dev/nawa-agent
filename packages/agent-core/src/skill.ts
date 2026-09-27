@@ -28,6 +28,8 @@ export interface AgentSkill {
    * their loops and stop promptly.
    */
   executeTool(call: AgentToolCall, signal?: AbortSignal): ToolExecution | Promise<ToolExecution>
+  /** Opt in only independent, read-only calls with no shared mutable session state. */
+  canExecuteParallel?(call: AgentToolCall): boolean
   /**
    * Claimed-action guard: inspect the run's final assistant text against the
    * tools that actually executed during the run. Return a corrective
@@ -76,6 +78,7 @@ export function composeSkills(id: string, intro: string, skills: AgentSkill[]): 
       }
       return skill.executeTool(call, signal)
     },
+    canExecuteParallel: call => ownerOf(call.name)?.canExecuteParallel?.(call) === true,
     verifyResponse: (finalText, executed) => {
       for (const skill of skills) {
         const correction = skill.verifyResponse?.(finalText, executed)

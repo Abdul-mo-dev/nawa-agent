@@ -10,6 +10,7 @@ export function PanelDialog({
   children,
   footer,
   closeDisabled = false,
+  className = '',
   onClose,
 }: {
   open: boolean
@@ -17,6 +18,7 @@ export function PanelDialog({
   children: ReactNode
   footer?: ReactNode
   closeDisabled?: boolean
+  className?: string
   onClose(): void
 }) {
   const visible = useContext(PanelVisibility)
@@ -39,7 +41,7 @@ export function PanelDialog({
   return createPortal(
     <dialog
       ref={ref}
-      className="nawa-panel-dialog nawa-panel-theme"
+      className={`nawa-panel-dialog nawa-panel-theme ${className}`}
       dir={dir}
       aria-labelledby={id}
       onCancel={(event) => {

@@ -181,7 +181,7 @@ export class RagService {
   }
   async searchSelected(_owner: number, paths: string[], query: string, signal: AbortSignal, fallback: () => Promise<FileSearchResult>): Promise<FileSearchResult> {
     const saved = await this.load()
-    if (!saved.settings.enabled) return fallback()
+    if (!saved.settings.enabled) return { ...await fallback(), backend: 'local-text' }
     if (paths.length > 256) throw new Error('Select at most 256 files for one retrieval request.')
     const roots = await this.options.roots()
     for (const path of paths) await regularFile(roots, path)
@@ -196,13 +196,13 @@ export class RagService {
       await regularFile(currentRoots, hit.path)
       if (await hashFile(hit.path) !== hit.sourceHash) throw new Error('Retrieved source changed; request fresh evidence.')
     }
-    return result
+    return { ...result, localSourcesVerified: true, backend: saved.settings.backend === 'myagent' ? 'myagent' : 'local-rag' }
   }
   async toolsSelected(paths: string[], sessionId: string, action: MyAgentToolAction, payload: unknown, signal: AbortSignal): Promise<MyAgentToolResponse> {
     const saved = await this.load()
     if (!saved.settings.enabled || saved.settings.backend !== 'myagent') {
       if (action !== 'catalog') throw new Error('Enable the MyAgent backend in File search settings to use its document tools.')
-      return { available: false, tools: [], total: 0, nextOffset: null, sources: [], warnings: ['Enable the MyAgent backend in File search settings. Nawa native inspection and reviewed-table tools remain available.'] }
+      return { available: false, disabled: true, tools: [], total: 0, nextOffset: null, sources: [], warnings: ['Enable the MyAgent backend in File search settings. Nawa native inspection and reviewed-table tools remain available.'] }
     }
     const result = await this.myAgent().tools(saved.settings, await this.key(saved.settings), paths, sessionId, action, payload, signal)
     const current = (await this.load()).settings

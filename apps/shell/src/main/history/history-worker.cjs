@@ -47,6 +47,79 @@ function normalizeScope(input) {
   }
   return { opened: folderValue(input.opened), files: unique(input.files), directories: unique(input.directories) }
 }
+function normalizeActivity(value, interrupted = false, checkpoint = Date.now()) {
+  if (value == null) return undefined
+  if (!value || typeof value !== 'object' || !Array.isArray(value.steps)) throw new Error('Invalid request activity.')
+  const statuses = new Set(['running', 'waiting', 'completed', 'failed', 'cancelled', 'incomplete', 'skipped'])
+  const status = state => {
+    if (!statuses.has(state)) throw new Error('Invalid activity status.')
+    return interrupted && ['running', 'waiting'].includes(state) ? 'cancelled' : state
+  }
+  const text = (item, max) => typeof item === 'string' ? item.slice(0, max).replace(/\0/g, '')
+    .replace(/\b(Bearer\s+)\S+/gi, '$1[redacted]')
+    .replace(/((?:api[-_]?key|password|secret|access[-_]?token|authorization)["']?\s*[=:]\s*["']?)[^\s"'&,}]+/gi, '$1[redacted]') : ''
+  const time = value => Number.isFinite(value) ? Math.max(0, Math.min(value, Date.now() + 60000)) : 0
+  const ended = item => item.finishedAt != null ? time(item.finishedAt)
+    : interrupted && ['running', 'waiting'].includes(item.status) ? Math.max(time(item.startedAt), checkpoint) : undefined
+  const steps = value.steps.slice(-100).map(item => {
+    if (!item || typeof item !== 'object' || !['preparation', 'model', 'tool', 'native', 'approval', 'validation', 'storage'].includes(item.kind)) throw new Error('Invalid activity step.')
+    return { id: string(item.id, 'activity step ID', 200), parentId: text(item.parentId, 200) || undefined,
+      tool: text(item.tool, 160), kind: item.kind, status: status(item.status), startedAt: time(item.startedAt), finishedAt: ended(item),
+      summary: text(item.summary, 360), targets: Array.isArray(item.targets) ? item.targets.slice(0, 6).map(path => text(path, 320)) : [],
+      input: text(item.input, 1250) || undefined, output: text(item.output, 2450) || undefined,
+      facts: item.facts && typeof item.facts === 'object' && !Array.isArray(item.facts) && JSON.stringify(item.facts).length <= 16000 ? JSON.parse(text(JSON.stringify(item.facts), 16000)) : undefined }
+  })
+  if (new Set(steps.map(step => step.id)).size !== steps.length) throw new Error('Duplicate activity step ID.')
+  const activity = { id: string(value.id, 'activity ID', 100), model: text(value.model, 1000), selectedFiles: Math.max(0, Math.min(Number(value.selectedFiles) || 0, 512)),
+    startedAt: time(value.startedAt), finishedAt: ended(value), status: status(value.status), steps,
+    omitted: Math.max(0, Math.min(Number(value.omitted) || 0, 100000)) + Math.max(0, value.steps.length - 100) }
+  // Preserve statuses/timings even when older payload details exceed the storage budget.
+  let size = JSON.stringify(activity).length
+  for (const step of steps) {
+    if (size <= 320000) break
+    size -= (step.input?.length || 0) + (step.output?.length || 0)
+    step.input = undefined; step.output = '[Older details omitted to limit storage]'
+  }
+  return activity
+}
+function normalizeMetadata(item, interrupted = false) {
+  const request = item.request
+  let normalized
+  if (request != null) {
+    if (!request || !['user','intermediate','final','receipt'].includes(request.phase) || !['running','completed','failed','cancelled','incomplete'].includes(request.outcome)) throw new Error('Invalid request metadata.')
+    normalized = { id: string(request.id, 'request ID', 100), phase: request.phase,
+      outcome: interrupted && request.outcome === 'running' ? 'cancelled' : request.outcome }
+    if (request.evidence !== undefined) {
+      if (!Array.isArray(request.evidence) || request.evidence.length > 256 || JSON.stringify(request.evidence).length > 256000) throw new Error('Invalid evidence receipt.')
+      normalized.evidence = request.evidence.map(source => {
+        if (!source || !/^[a-f\d]{64}$/.test(source.hash)) throw new Error('Invalid evidence version.')
+        const value = { path: string(source.path, 'source path'), hash: source.hash }
+        if (source.myAgent) {
+          const m = source.myAgent
+          value.myAgent = { path: string(m.path, 'source path'), server: string(m.server, 'server', 2000),
+            documentId: string(m.documentId, 'document ID', 256), contentHash: string(m.contentHash, 'content hash', 64),
+            indexRevision: string(m.indexRevision, 'index revision', 500), datasetRevision: m.datasetRevision == null ? null : string(m.datasetRevision, 'dataset revision', 500) }
+        }
+        if (source.analytics) {
+          if (!Array.isArray(source.analytics) || source.analytics.length > 64) throw new Error('Invalid analytical evidence.')
+          value.analytics = source.analytics.map(a => ({ path: string(a.path, 'source path'), hash: string(a.hash, 'source hash', 64),
+            datasetId: string(a.datasetId, 'dataset ID', 256), generation: string(a.generation, 'dataset generation', 500) }))
+        }
+        return value
+      })
+    }
+    if (request.catalog) normalized.catalog = { path: string(request.catalog.path, 'catalog path'), content: string(request.catalog.content, 'catalog context', 12000, true) }
+  }
+  const citations = item.citations == null ? undefined : (() => {
+    if (!Array.isArray(item.citations) || item.citations.length > 80) throw new Error('Invalid citations.')
+    return item.citations.map(c => {
+      if (!c || !/^RAG:[a-z\d:_-]+$/i.test(c.id) || !/^[a-f\d]{64}$/.test(c.sourceHash)) throw new Error('Invalid citation.')
+      return { id: string(c.id, 'citation ID', 200), path: string(c.path, 'citation path'), sourceHash: c.sourceHash,
+        locator: string(c.locator, 'citation location', 500, true), excerpt: typeof c.excerpt === 'string' ? c.excerpt.slice(0, 1200) : undefined }
+    })
+  })()
+  return { request: normalized, citations }
+}
 function normalizeMessages(input, legacy = false) {
   if (!Array.isArray(input) || input.length > LIMITS.messages) throw new Error('Conversation message limit exceeded.')
   let chars = 0
@@ -57,7 +130,9 @@ function normalizeMessages(input, legacy = false) {
       if (legacy) continue
       throw new Error('Invalid conversation message.')
     }
-    chars += item.text.length
+    const activity = !legacy && item.role === 'assistant' ? normalizeActivity(item.activity) : undefined
+    const metadata = legacy ? {} : normalizeMetadata(item)
+    chars += item.text.length + (activity ? JSON.stringify(activity).length : 0) + JSON.stringify(metadata).length
     if (chars > LIMITS.transcriptChars) throw new Error('Conversation exceeds the 8 Mi-character storage limit. Start a new chat.')
     const id = legacy ? randomUUID() : string(item.id, 'message ID', 100)
     if (seen.has(id)) throw new Error('Duplicate message ID.')
@@ -69,6 +144,8 @@ function normalizeMessages(input, legacy = false) {
       contextKey: typeof item.contextKey === 'string' ? string(item.contextKey, 'context key', 1024 * 1024, true) : '',
       modelLabel: typeof item.modelLabel === 'string' ? string(item.modelLabel, 'model label', 1000, true) : '',
       snapshotHash: !legacy && /^[0-9a-f]{64}$/.test(item.snapshotHash || '') ? item.snapshotHash : '',
+      activity,
+      ...metadata,
     })
   }
   return result
@@ -83,7 +160,7 @@ class HistoryStore {
     this.databasePath = databasePath
     this.db = new DatabaseSync(databasePath)
     const version = this.db.prepare('PRAGMA user_version').get().user_version
-    if (version > 1) { this.db.close(); throw new Error('This history database was created by a newer Nawa version. It was not modified.') }
+    if (version > 3) { this.db.close(); throw new Error('This history database was created by a newer Nawa version. It was not modified.') }
     this.db.exec('PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;')
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS conversations (
@@ -116,8 +193,14 @@ class HistoryStore {
       CREATE TABLE IF NOT EXISTS legacy_imports (
         source_key TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, imported_at INTEGER NOT NULL
       ) STRICT;
-      PRAGMA user_version=1;
     `)
+    this.transaction(() => {
+      if (!this.db.prepare('PRAGMA table_info(messages)').all().some(column => column.name === 'activity_json'))
+        this.db.exec("ALTER TABLE messages ADD COLUMN activity_json TEXT NOT NULL DEFAULT ''")
+      if (!this.db.prepare('PRAGMA table_info(messages)').all().some(column => column.name === 'metadata_json'))
+        this.db.exec("ALTER TABLE messages ADD COLUMN metadata_json TEXT NOT NULL DEFAULT ''")
+      this.db.exec('PRAGMA user_version=3')
+    })
   }
   transaction(callback) {
     const outer = !this.transactionDepth
@@ -150,6 +233,8 @@ class HistoryStore {
       id: message.id, role: message.role, text: message.text || (message.streaming ? 'Interrupted before the response finished.' : ''),
       createdAt: message.created_at, streaming: false, error: Boolean(message.error || message.streaming),
       contextKey: message.context_key, modelLabel: message.model_label, snapshotHash: message.snapshot_hash || undefined,
+      activity: message.activity_json ? normalizeActivity(JSON.parse(message.activity_json), true, row.updated_at) : undefined,
+      ...(message.metadata_json ? normalizeMetadata(JSON.parse(message.metadata_json), true) : {}),
     }))
     return { ...this.summary(row), revision: row.revision, draft: row.draft, messages,
       baselineId: row.baseline_id, lastChatAt: row.last_chat_at }
@@ -175,12 +260,25 @@ class HistoryStore {
     return this.get(id)
   }
   save(input) {
-    const messages = normalizeMessages(input.messages)
+    let messages = normalizeMessages(input.messages)
     const draft = string(input.draft, 'draft', 1024 * 1024, true), model = string(input.modelId, 'model', 200, true)
     if (!Number.isInteger(input.revision) || input.revision < 0) throw new Error('Invalid conversation revision.')
     return this.transaction(() => {
       const row = this.row(input.id)
       if (row.revision !== input.revision) throw new Error('This chat was changed in another window. Your unsaved text is still here; reopen History before editing further.')
+      const oldRows = this.db.prepare('SELECT * FROM messages WHERE conversation_id=? ORDER BY ordinal').all(row.id)
+      if (input.delta === true) {
+        const removedIds = input.removedIds ?? []
+        if (!Array.isArray(removedIds) || removedIds.length > LIMITS.messages || removedIds.some(id => typeof id !== 'string' || id.length > 100)) throw new Error('Invalid removed message IDs.')
+        const removed = new Set(removedIds), updates = new Map(messages.map(message => [message.id, message]))
+        const combined = oldRows.filter(old => !removed.has(old.id)).map(old => {
+          const update = updates.get(old.id); updates.delete(old.id)
+          return update ?? { id: old.id, role: old.role, text: old.text, createdAt: old.created_at, streaming: !!old.streaming, error: !!old.error,
+            contextKey: old.context_key, modelLabel: old.model_label, snapshotHash: old.snapshot_hash,
+            activity: old.activity_json ? JSON.parse(old.activity_json) : undefined, ...(old.metadata_json ? JSON.parse(old.metadata_json) : {}) }
+        })
+        messages = normalizeMessages([...combined, ...updates.values()])
+      }
       const baselineId = input.baselineId == null ? null : string(input.baselineId, 'snapshot ID', 100)
       if (baselineId && !this.db.prepare('SELECT 1 FROM snapshots WHERE id=? AND conversation_id=?').get(baselineId, row.id)) {
         throw new Error('The requested fingerprint does not belong to this conversation.')
@@ -191,10 +289,20 @@ class HistoryStore {
       const title = row.title === 'New conversation' && first ? first.text.trim().replace(/\s+/g, ' ').slice(0, 100) : row.title
       this.db.prepare(`UPDATE conversations SET draft=?,model_id=?,title=?,updated_at=?,revision=revision+1,
         baseline_id=?,last_chat_at=? WHERE id=?`).run(draft, model, title, now, baselineId, lastChatAt, row.id)
-      this.db.prepare('DELETE FROM messages WHERE conversation_id=?').run(row.id)
-      const insert = this.db.prepare(`INSERT INTO messages VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
-      messages.forEach((message, ordinal) => insert.run(row.id, message.id, ordinal, message.role, message.text,
-        message.createdAt, Number(message.streaming), Number(message.error), message.contextKey, message.modelLabel, message.snapshotHash))
+      const ordinals = new Map(messages.map((message, i) => [message.id, i])), previous = new Map(oldRows.map(old => [old.id, old]))
+      for (const old of oldRows) {
+        if (!ordinals.has(old.id)) this.db.prepare('DELETE FROM messages WHERE conversation_id=? AND id=?').run(row.id, old.id)
+        else if (ordinals.get(old.id) !== old.ordinal) this.db.prepare('UPDATE messages SET ordinal=? WHERE conversation_id=? AND id=?').run(-old.ordinal - 1, row.id, old.id)
+      }
+      const fields = ['ordinal','role','text','created_at','streaming','error','context_key','model_label','snapshot_hash','activity_json','metadata_json']
+      const insert = this.db.prepare(`INSERT INTO messages(conversation_id,id,${fields.join(',')}) VALUES(${Array(13).fill('?').join(',')})
+        ON CONFLICT(conversation_id,id) DO UPDATE SET ${fields.map(field => `${field}=excluded.${field}`).join(',')}`)
+      messages.forEach((message, ordinal) => {
+        const values = [ordinal, message.role, message.text, message.createdAt, Number(message.streaming), Number(message.error), message.contextKey, message.modelLabel,
+          message.snapshotHash, message.activity ? JSON.stringify(message.activity) : '', message.request || message.citations ? JSON.stringify({ request: message.request, citations: message.citations }) : '']
+        const old = previous.get(message.id)
+        if (!old || fields.some((field, i) => old[field] !== values[i])) insert.run(row.id, message.id, ...values)
+      })
       // Keep the baseline plus recent pending captures; drafts never silently replace the baseline.
       this.db.prepare(`DELETE FROM snapshots WHERE conversation_id=? AND id<>coalesce(?, '') AND id NOT IN
         (SELECT id FROM snapshots WHERE conversation_id=? ORDER BY started_at DESC LIMIT 4)`).run(row.id, baselineId, row.id)

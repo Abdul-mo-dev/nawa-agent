@@ -1,3 +1,5 @@
+import type { DirectoryActivity } from './directory-activity'
+import type { DirectoryCitation, HistoryRequest } from './directory-evidence'
 /** Narrow, typed IPC surface. No renderer SQL, database paths, or filesystem handles. */
 export const CONVERSATION_CHANNEL = 'nawa:conversation-history:v1'
 
@@ -23,6 +25,10 @@ export interface HistoryMessage {
   modelLabel?: string
   /** A complete, server-computed content fingerprint; absent for legacy/partial scans. */
   snapshotHash?: string
+  /** Bounded local activity; excluded from model history. */
+  activity?: DirectoryActivity
+  request?: HistoryRequest
+  citations?: DirectoryCitation[]
 }
 
 export interface ConversationSummary {
@@ -78,6 +84,9 @@ export interface HistorySave {
   draft: string
   modelId: string
   messages: HistoryMessage[]
+  /** Incremental checkpoint: supplied messages are upserts, not the whole transcript. */
+  delta?: boolean
+  removedIds?: string[]
   /** Update the baseline only when a user message is actually committed. */
   baselineId: string | null
   lastChatAt: number | null

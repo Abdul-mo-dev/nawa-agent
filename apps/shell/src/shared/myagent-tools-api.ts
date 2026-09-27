@@ -10,7 +10,7 @@ export interface MyAgentSource {
 export interface MyAgentToolDefinition { name: string; description: string; inputSchema: Record<string, unknown> }
 export interface MyAgentFileReadiness {
   path: string
-  status: 'ready' | 'needs-index' | 'unavailable'
+  status: 'ready' | 'unchecked' | 'needs-index' | 'unavailable'
   documentId?: string
   reason?: string
 }
@@ -22,6 +22,8 @@ export interface MyAgentToolCoverage {
 }
 export interface MyAgentToolCatalog {
   available: boolean
+  /** Local request-scoped metadata cache; execution is never cached. */
+  cacheHit?: boolean
   tools: MyAgentToolDefinition[]
   names?: string[] | null
   /** False for server metadata; this does not claim any selected file is ready. */
@@ -34,6 +36,10 @@ export interface MyAgentToolCatalog {
   nextOffset: number | null
   sources: MyAgentSource[]
   warnings: string[]
+  disabled?: boolean
+  diagnostics?: { httpRequests: number; durationMs: number }
+  /** Set only by the local adapter after checking returned source bytes. */
+  localSourcesVerified?: boolean
 }
 export interface MyAgentToolResult {
   tool: string
@@ -43,6 +49,8 @@ export interface MyAgentToolResult {
   sources: MyAgentSource[]
   warnings: string[]
   coverage?: MyAgentToolCoverage
+  diagnostics?: { httpRequests: number; durationMs: number }
+  localSourcesVerified?: boolean
 }
 export type MyAgentToolAction = 'catalog' | 'execute' | 'verify'
 export type MyAgentToolResponse = MyAgentToolCatalog | MyAgentToolResult

@@ -57,7 +57,7 @@ it('retires obsolete MyAgent evidence after an approved file change so the succe
   bridge.mockClear()
   await manager.verifySources(1, run)
   expect(bridge).not.toHaveBeenCalled()
-  await expect(manager.myAgentTools(1, run, 'execute', { tool: 'text_read_lines', arguments: {} })).rejects.toThrow('Discover')
+  await expect(manager.myAgentTools(1, run, 'execute', { tool: 'text_read_lines', arguments: {} })).rejects.toThrow('ENOENT')
 })
 it('metadata discovery passes no file scope, adds no file evidence and names alone do not enable invocation', async () => {
   await rm(file)

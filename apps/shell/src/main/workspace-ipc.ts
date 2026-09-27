@@ -79,6 +79,7 @@ export function registerWorkspaceIpc(options: WorkspaceIpcOptions): {
   registerDirectoryActionsIpc({
     roots: async () => (await getStore().list()).map(root => root.path),
     isHomeSender: options.isHomeSender,
+    readText: options.readFile,
     extract: async path => {
       const result = await options.readFile(path, 12000, 0)
       if (!result.ok) throw new Error(result.error || 'Text extraction failed.')

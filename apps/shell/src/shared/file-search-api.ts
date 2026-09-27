@@ -7,12 +7,17 @@ export interface FileSearchHit {
         hit: boolean;
     }[] | null;
     excerpt?: string;
+    chunks?: { citation: string; locator: string; text: string; truncated?: boolean; [key: string]: unknown }[];
 }
 export interface FileSearchResult {
+    backend?: 'myagent' | 'local-rag' | 'local-text';
     hits: FileSearchHit[];
     total: number;
     warnings: string[];
     reranked?: boolean;
+    coverage?: { selected: number; requested: string[]; covered: string[]; completeSelection: boolean };
+    diagnostics?: { httpRequests: number; durationMs: number };
+    localSourcesVerified?: boolean;
 }
 export interface FileSearchProgress {
     running: boolean;

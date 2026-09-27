@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { copyFile, lstat, mkdir, readdir, rm } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { parseFileToRag } from '@genoffice/file-parse'
@@ -177,11 +177,12 @@ export class RagEngine {
         expanded.push({ ...n, score: chunk.score, neighbor: true }); used.add(n.id)
       }
     }
-    const groups = new Map<string, { path: string; name: string; sourceHash: string; snippet: { text: string; hit: boolean }[]; excerpt: string; chunks: unknown[] }>()
+    const groups = new Map<string, { path: string; name: string; sourceHash: string; snippet: { text: string; hit: boolean }[]; excerpt: string; chunks: NonNullable<FileSearchResult['hits'][number]['chunks']> }>()
     let budget = job.settings.contextChars
     for (const chunk of expanded) {
       if (budget < 300) break
-      const citation = `RAG:${chunk.sourceHash.slice(0, 12)}:${chunk.ordinal}`
+      const pathId = createHash('sha256').update(chunk.path.replaceAll('\\', '/').toLowerCase()).digest('hex').slice(0, 12)
+      const citation = `RAG:${pathId}:${chunk.sourceHash.slice(0, 12)}:${chunk.ordinal}`
       const heading = `[${citation}] ${basename(chunk.path)} — ${chunk.locator}\n${chunk.metadata.headings.join(' > ')}\n`
       const text = chunk.text.slice(0, Math.max(0, budget - heading.length)), excerpt = heading + text
       if (!text) continue

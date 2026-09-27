@@ -120,6 +120,7 @@ try {
   await page.getByRole('button', { name: 'Manage history', exact: true }).click()
   const history = page.getByRole('dialog', { name: 'Manage history', exact: true })
   await history.waitFor()
+  await history.getByRole('button', { name: 'Delete', exact: true }).waitFor()
   check(
     'History delete and database buttons are visible',
     (await visible(history.getByRole('button', { name: 'Delete', exact: true }))) &&

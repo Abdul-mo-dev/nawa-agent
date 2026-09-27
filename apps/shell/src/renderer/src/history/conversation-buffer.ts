@@ -8,8 +8,10 @@ export class ConversationBuffer {
   private pending: Promise<void> | null = null
   private listeners = new Set<() => void>()
   private failure: string | null = null
+  private savedMessages: Map<string, ConversationRecord['messages'][number]>
+  lastSave?: { durationMs: number; changedMessages: number; removedMessages: number; payloadChars: number }
 
-  constructor(record: ConversationRecord, private readonly api: ConversationHistoryApi) { this.record = record }
+  constructor(record: ConversationRecord, private readonly api: ConversationHistoryApi) { this.record = record; this.savedMessages = new Map(record.messages.map(message => [message.id, message])) }
   getSnapshot = (): ConversationRecord => this.record
   subscribe = (callback: () => void): (() => void) => {
     this.listeners.add(callback)
@@ -32,12 +34,17 @@ export class ConversationBuffer {
     if (!this.dirty) return Promise.resolve()
     const generation = this.generation
     const record = this.record
+    const started = Date.now(), ids = new Set(record.messages.map(message => message.id))
     const payload: HistorySave = {
       id: record.id, revision: record.revision, draft: record.draft, modelId: record.modelId,
-      messages: record.messages, baselineId: record.baselineId, lastChatAt: record.lastChatAt,
+      messages: record.messages.filter(message => this.savedMessages.get(message.id) !== message),
+      delta: true, removedIds: [...this.savedMessages.keys()].filter(id => !ids.has(id)),
+      baselineId: record.baselineId, lastChatAt: record.lastChatAt,
     }
     this.pending = this.api.save(payload).then(result => {
+      this.lastSave = { durationMs: Date.now() - started, changedMessages: payload.messages.length, removedMessages: payload.removedIds?.length ?? 0, payloadChars: JSON.stringify(payload).length }
       this.savedGeneration = generation
+      this.savedMessages = new Map(record.messages.map(message => [message.id, message]))
       this.failure = null
       this.record = { ...this.record, revision: result.revision, updatedAt: result.updatedAt, title: result.title }
       this.emit()

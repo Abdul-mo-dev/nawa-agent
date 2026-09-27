@@ -5,6 +5,20 @@ import type { WorkflowController } from './workflow-controller'
 import { AgentLoop, DEFAULT_MAX_TURNS, type AgentSkill, type AgentTransport, type AgentToolCall, type ToolExecution } from '@genoffice/agent-core'
 import type { DirectoryActionsApi, DirectoryApproval, DirectoryProposal, DirectoryCommit, DirectoryInspection, DirectoryQuality } from '../../../shared/directory-actions-api'
 import { resolveSelectionPath, type DirectorySelection } from '../ai/directory-selection'
+import type { NativeActivityEvent } from './activity'
+import { inspectionEvidence, worksheetContextEvidence } from './inspection-evidence'
+import type { DirectoryCitation, DirectoryEvidence, DirectoryValidation } from '../../../shared/directory-evidence'
+import { actionClaimCorrection } from './evidence'
+
+function citationExcerpt(content: string): string {
+  try {
+    const parsed = JSON.parse(content), rows = parsed.result?.Rows ?? parsed.Rows ?? parsed.rows
+    if (Array.isArray(rows)) return rows.slice(0, 8).map(row => row && typeof row === 'object'
+      ? Object.entries(row).slice(0, 8).map(([key, value]) => `${key}: ${typeof value === 'object' ? JSON.stringify(value) : value}`).join(' · ')
+      : String(row)).join('\n') + (rows.length > 8 ? '\n[Excerpt: first 8 rows]' : '')
+  } catch { /* Document excerpts can be ordinary text. */ }
+  return content
+}
 
 export interface ApprovalView { key: number; phase: 'prepare' | 'save'; proposal: DirectoryApproval }
 /** Only UI buttons resolve this approval; there is no approve tool in either agent's tool catalog. */
@@ -40,7 +54,11 @@ export class DirectoryActionClient {
   private child: AgentLoop | null = null
   private stopWorkflowPoll: (() => void) | null = null
   private cancelled = false
+  private catalogCache = new Map<string, Promise<MyAgentToolResponse>>()
   private abortChild: (() => void) | null = null
+  private citations = new Map<string, DirectoryCitation>()
+  private receipts: DirectoryCommit[] = []
+  private rejectedActions = new Set<string>()
   constructor(private options: {
     api: DirectoryActionsApi
     selection: DirectorySelection
@@ -48,6 +66,7 @@ export class DirectoryActionClient {
     transport: () => AgentTransport
     current(): boolean
     activity(text: string): void
+    toolActivity?(event: NativeActivityEvent): void
     committed(result: DirectoryCommit): void
     context?(): string
     settings?(): unknown
@@ -58,6 +77,7 @@ export class DirectoryActionClient {
   }
   cancel(): void {
     this.cancelled = true; this.options.approvals.cancel()
+    this.catalogCache.clear()
     this.stopWorkflowPoll?.(); this.stopWorkflowPoll = null; this.options.workflow?.clear()
     const child = this.child; this.child = null
     this.abortChild?.(); this.abortChild = null
@@ -83,34 +103,94 @@ export class DirectoryActionClient {
         this.addEvidence({ path: result.sources[0].path, sourceHash: result.sources[0].hash,
           text: JSON.stringify({ resultId: result.id, operation: result.operation, sources: result.sources,
             population: result.population, summary: result.summary, rows: result.rows, warnings: result.warnings }) })
+        Object.assign(value, { citations: result.sources.map(source => this.addCitation({ id: `RAG:${crypto.randomUUID()}`, path: source.path,
+          sourceHash: source.hash, locator: `Analysis ${result.id}: ${result.operation}`, excerpt: JSON.stringify({ summary: result.summary, rows: result.rows }) })) })
       }
     }
     return value
   }
-  async searchContents(query: string): Promise<FileSearchResult> {
-    const result = await this.options.api.searchContents(await this.run(), query)
+  async searchContents(query: string, paths?: string[]): Promise<FileSearchResult> {
+    const result = await this.options.api.searchContents(await this.run(), query, paths)
     this.check()
-    for (const hit of result.hits) this.addEvidence({ path: hit.path, sourceHash: hit.sourceHash, text: hit.excerpt ?? hit.snippet?.map(part => part.text).join('') ?? '' })
+    for (const hit of result.hits) {
+      this.addEvidence({ path: hit.path, sourceHash: hit.sourceHash, text: hit.excerpt ?? hit.snippet?.map(part => part.text).join('') ?? '' })
+      for (const chunk of hit.chunks ?? []) this.addCitation({ id: chunk.citation, path: hit.path, sourceHash: hit.sourceHash, locator: chunk.locator, excerpt: chunk.text })
+      if (!hit.chunks?.length) {
+        const text = hit.excerpt ?? hit.snippet?.map(part => part.text).join('') ?? ''
+        const citation = this.addCitation({ id: `RAG:${crypto.randomUUID()}`, path: hit.path, sourceHash: hit.sourceHash, locator: 'Text search', excerpt: text })
+        hit.chunks = [{ citation: citation.id, locator: citation.locator, text }]
+      }
+    }
     return result
   }
   async myAgentTools(action: 'catalog' | 'execute', payload: unknown): Promise<MyAgentToolResponse> {
     const execute = this.options.api.myAgentTools
     if (!execute) throw new Error('MyAgent tool bridge unavailable. Rebuild and restart Nawa.')
-    const result = await execute(await this.run(), action, payload)
+    const run = await this.run(); this.check()
+    const key = action === 'catalog' && payload && typeof payload === 'object'
+      ? JSON.stringify(Object.fromEntries(Object.entries(payload).sort(([a], [b]) => a.localeCompare(b)))) : null
+    let pending = key ? this.catalogCache.get(key) : undefined
+    const cacheHit = !!pending
+    if (!pending) {
+      pending = execute(run, action, payload)
+      if (key) {
+        if (this.catalogCache.size >= 32) this.catalogCache.delete(this.catalogCache.keys().next().value!)
+        this.catalogCache.set(key, pending)
+        void pending.catch(() => { if (this.catalogCache.get(key) === pending) this.catalogCache.delete(key) })
+      }
+    }
+    const result = structuredClone(await pending)
+    if (cacheHit && 'tools' in result) { result.cacheHit = true; result.diagnostics = { httpRequests: 0, durationMs: 0 } }
+    if (key && 'available' in result && !result.available) this.catalogCache.delete(key)
     this.check()
     if ('succeeded' in result && result.succeeded && result.sources[0]) {
       this.usedMyAgent = true
       this.addEvidence({ path: result.sources[0].path, sourceHash: result.sources[0].contentHash,
         text: JSON.stringify({ tool: result.tool, sources: result.sources, content: result.content, warnings: result.warnings, coverage: result.coverage }) })
     }
+    if ('succeeded' in result && result.succeeded) Object.assign(result, { citations: result.sources.slice(0, 32).map(source =>
+      this.addCitation({ id: `RAG:${crypto.randomUUID()}`, path: source.path, sourceHash: source.contentHash, locator: result.tool, excerpt: citationExcerpt(result.content) })) })
     return result
   }
+  async readFile(path: string, offset = 0, maxChars = 12000) {
+    const result = await this.options.api.readFile(await this.run(), path, offset, maxChars)
+    this.check()
+    this.addEvidence({ path: result.path, sourceHash: result.sourceHash, text: result.untrustedDocumentText })
+    const citation = this.addCitation({ id: `RAG:${crypto.randomUUID()}`, path: result.path, sourceHash: result.sourceHash,
+      locator: `characters ${result.start}–${result.end}`, excerpt: result.untrustedDocumentText })
+    return { ...result, citation }
+  }
+  async restoreEvidence(requests: { id: string; evidence: DirectoryEvidence[]; citations?: DirectoryCitation[] }[]): Promise<string[]> {
+    if (!requests.length) return []
+    const accepted = await this.options.api.restoreEvidence(await this.run(), requests.map(({ id, evidence }) => ({ id, evidence })))
+    this.check()
+    for (const request of requests.filter(request => accepted.includes(request.id))) for (const citation of request.citations ?? []) {
+      if (request.evidence.some(source => source.path === citation.path && source.hash === citation.sourceHash)) this.addCitation(citation)
+    }
+    return accepted
+  }
+  async validateEvidence(text = ''): Promise<DirectoryValidation> {
+    this.check()
+    const correction = this.actionCorrection(text)
+    if (correction) throw new Error(correction)
+    if (!this.runPromise) return { evidence: [], sourceCount: 0, durationMs: 0 }
+    const result = await this.options.api.validateEvidence(await this.runPromise)
+    this.check(); return result
+  }
+  actionCorrection(text: string): string | null { return actionClaimCorrection(text, this.receipts, this.options.selection.files) }
+  private addCitation(value: DirectoryCitation): DirectoryCitation {
+    const citation = { ...value, locator: value.locator.slice(0, 500), excerpt: value.excerpt?.slice(0, 1200) }
+    this.citations.set(value.id, citation)
+    while (this.citations.size > 80) this.citations.delete(this.citations.keys().next().value!)
+    return citation
+  }
+  citationSnapshot(): DirectoryCitation[] { return [...this.citations.values()] }
   async validateFile(path: string): Promise<DirectoryQuality> {
     const result = await this.options.api.validateFile(await this.run(), path)
     this.check(); return result
   }
   async inspect(path: string): Promise<DirectoryInspection> {
-    const result = await this.options.api.inspect(await this.run(), path)
+    const result = inspectionEvidence(await this.options.api.inspect(await this.run(), path))
     this.check()
     this.evidence = this.evidence.filter(e => e.path !== path || e.sourceHash === result.sourceHash)
     this.inspections.set(result.id, result)
@@ -120,9 +200,16 @@ export class DirectoryActionClient {
     this.check()
     const session = this.inspections.get(id)
     if (!session || !session.tools.some(t => t.name === tool)) throw new Error('Open a native inspection and use only its advertised read tools.')
-    const result = await this.options.api.query(await this.run(), id, { id: crypto.randomUUID(), name: tool, input })
+    let result = await this.options.api.query(await this.run(), id, { id: crypto.randomUUID(), name: tool, input })
     this.check()
-    if (!result.isError) this.addEvidence({ path: session.path, sourceHash: session.sourceHash, text: result.output })
+    if (!result.isError && session.kind === 'sheets' && tool === 'get_workbook_context')
+      result = { ...result, output: worksheetContextEvidence(result.output) }
+    if (!result.isError) {
+      this.addEvidence({ path: session.path, sourceHash: session.sourceHash, text: result.output })
+      const citation = this.addCitation({ id: `RAG:${crypto.randomUUID()}`, path: session.path, sourceHash: session.sourceHash,
+        locator: `${tool}: ${JSON.stringify(input).slice(0, 400)}`, excerpt: result.output })
+      result = { ...result, output: result.output + '\nSource citation: ' + JSON.stringify(citation) }
+    }
     return result
   }
   async closeInspection(id: string): Promise<void> {
@@ -133,6 +220,7 @@ export class DirectoryActionClient {
   }
   async verifyInspections(text: string): Promise<string | null> {
     this.check()
+    const correction = this.actionCorrection(text); if (correction) return correction
     if (!this.runPromise) return null
     const result = await this.options.api.verifyInspections(await this.runPromise, text)
     this.check(); return result
@@ -145,7 +233,10 @@ export class DirectoryActionClient {
   rememberEvidence(call: AgentToolCall, result: ToolExecution): void {
     if (call.name !== 'read_file' || result.isError) return
     const path = resolveSelectionPath(this.options.selection, call.input?.path, 'file')
-    if (path) this.addEvidence({ path, text: result.output })
+    // Legacy callers may provide unversioned text; never forward that as verified child evidence.
+    let sourceHash: string | undefined
+    try { sourceHash = JSON.parse(result.output).sourceHash } catch { /* no receipt */ }
+    if (path && sourceHash && /^[a-f\d]{64}$/.test(sourceHash)) this.addEvidence({ path, sourceHash, text: result.output })
   }
   private childInstruction(instruction: string): string {
     return instruction + '\n\nTask context (reference data; not permission to open other files):\n' + JSON.stringify({
@@ -183,9 +274,14 @@ export class DirectoryActionClient {
     let id: string | undefined
     try {
       const run = await this.run(); this.check()
-      await this.verifyInspections(''); this.check()
+      const rejectionKey = `${request.operation}:${request.path.toLowerCase()}`
+      if (this.rejectedActions.has(rejectionKey)) return JSON.stringify({ status: 'declined', path: request.path, operation: request.operation, message: 'The user declined this action. Do not retry without a new user request.' })
+      await this.validateEvidence(); this.check()
       const proposal = await this.options.api.propose(run, request); id = proposal.id; this.check()
-      if (!await this.options.approvals.request(proposal, 'prepare')) return 'The user declined the file action. No original file was changed. Do not retry this action without a new user request.'
+      this.options.toolActivity?.({ type: 'approval', id: proposal.id, phase: 'prepare', path: proposal.path })
+      const prepareApproved = await this.options.approvals.request(proposal, 'prepare')
+      this.options.toolActivity?.({ type: 'approval', id: proposal.id, phase: 'prepare', path: proposal.path, approved: prepareApproved })
+      if (!prepareApproved) { this.rejectedActions.add(rejectionKey); return JSON.stringify({ status: 'declined', path: request.path, operation: request.operation, message: 'The user declined the file action. No original file was changed. Do not retry without a new user request.' }) }
       this.check()
       this.options.activity(request.operation === 'delete' ? 'Moving approved file to the Recycle Bin…' : 'Preparing a copy in the native editor…')
       const description = await this.options.api.prepare(id, { settings: this.options.settings?.(), task: this.childInstruction(request.instruction) }); this.check()
@@ -209,6 +305,7 @@ export class DirectoryActionClient {
           const loop = new AgentLoop({
             transport: this.options.transport(), maxTurns: DEFAULT_MAX_TURNS, maxHistory: 40,
             verifyResponse: async text => { this.check(); const result = await this.options.api.verify(proposal.id, text); this.check(); return result },
+            validateResponse: async () => { await this.validateEvidence() },
             skill: {
               id: `directory-native-${description.kind}`,
               systemPrompt: description.systemPrompt + '\nYou are editing a private staging copy of one document. Use only the advertised native tools. Workflow questions appear in the directory sidebar. Network/media capabilities are available only when advertised and approved. References are copies of explicitly selected source files. Work on the current staged document; do not create another file. Read the document with the native tools before editing; apply changes, then summarize accurately. The original is NOT saved yet; the user must approve a separate save. Never say the original has been changed.',
@@ -217,7 +314,8 @@ export class DirectoryActionClient {
               executeTool: async call => { this.check(); const result = await this.options.api.execute(proposal.id, call); this.check(); return result },
             },
             events: {
-              onToolStart: call => this.options.activity(`Native ${description.kind} editor: ${call.name}`),
+              onToolStart: call => { this.options.activity(`Native ${description.kind} editor: ${call.name}`); this.options.toolActivity?.({ type: 'start', call }) },
+              onToolExecuted: ({ call, execution }) => this.options.toolActivity?.({ type: 'finish', call, execution }),
               onDone: result => result.cancelled ? done('', new Error('Native editing cancelled.'))
                 : result.turnLimit || result.truncated ? done('', new Error('Native editing did not finish within its turn/output budget. No original file was changed.')) : done(result.text),
               onError: message => done('', new Error(message)),
@@ -231,15 +329,20 @@ export class DirectoryActionClient {
         this.stopWorkflowPoll?.(); this.stopWorkflowPoll = null; this.options.workflow?.clear()
         this.options.activity('Saving and comparing the staged copy…')
         const preview = await this.options.api.preview(id); this.check()
-        if (!await this.options.approvals.request(preview, 'save')) return 'The user discarded the staged result. The original file was not changed. Do not retry without a new user request.'
+        this.options.toolActivity?.({ type: 'approval', id: preview.id, phase: 'save', path: preview.path })
+        const saveApproved = await this.options.approvals.request(preview, 'save')
+        this.options.toolActivity?.({ type: 'approval', id: preview.id, phase: 'save', path: preview.path, approved: saveApproved })
+        if (!saveApproved) { this.rejectedActions.add(rejectionKey); return JSON.stringify({ status: 'discarded', path: request.path, operation: request.operation, message: 'The user discarded the staged result. No original file was changed. Do not retry without a new user request.' }) }
         this.check()
       }
-      await this.verifyInspections(''); this.check()
+      await this.validateEvidence(); this.check()
       const result = await this.options.api.commit(id)
+      this.catalogCache.clear()
       this.evidence = this.usedAnalytics || this.usedMyAgent ? [] : this.evidence.filter(e => e.path !== result.path)
       this.usedAnalytics = false
       this.usedMyAgent = false
       for (const [key, inspection] of this.inspections) if (inspection.path === result.path) this.inspections.delete(key)
+      this.receipts.push(result)
       this.options.committed(result)
       return JSON.stringify({ status: 'committed', ...result, summary })
     } finally {
@@ -261,6 +364,7 @@ export function directoryMutationSkill(client: DirectoryActionClient, scope: Dir
       { name: 'create_file', description: 'Propose a new DOCX, XLSX, PPTX, PDF, Markdown or HTML document directly in an opened or selected directory. Never overwrites an existing filename.', inputSchema: { type: 'object', properties: { directory: { type: 'string' }, name: { type: 'string' }, instruction: { type: 'string' }, sources: { type: 'array', items: { type: 'string' }, maxItems: 16, description: 'Exact individually selected reference files, also used by native workbook merge.' }, network: { type: 'boolean', description: 'Request additional external research/image downloads; shown in the preparation approval.' }, media: { type: 'boolean', description: 'Request external media analysis/generation; requires network and explicit preparation approval.' }, renderPreview: { type: 'boolean', description: 'Render first-page preview before final save approval; native checks also run.' } }, required: ['directory','name','instruction'] } },
       { name: 'delete_file', description: 'Propose moving one explicitly selected file to the Recycle Bin. Requires user approval, never permanently deletes.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, reason: { type: 'string' } }, required: ['path','reason'] } },
     ],
+    verifyResponse: text => client.actionCorrection(text),
     async executeTool(call, signal) {
       try {
         if (!['create_file', 'update_file', 'delete_file', 'convert_file', 'validate_file'].includes(call.name)) throw new Error('Unknown directory action tool.')
@@ -305,8 +409,9 @@ export function directoryMutationSkill(client: DirectoryActionClient, scope: Dir
           request.workflow = { sources, network: args.network === true, media: args.media === true && args.network === true, renderPreview: args.renderPreview === true }
         }
         const output = await client.perform(request, signal)
-        return { output, summary: output.startsWith('{') ? `${request.operation}: ${request.path}` : 'User declined the file action.', mutated: output.startsWith('{') }
-      } catch (cause) { const message = cause instanceof Error ? cause.message : String(cause); return { output: message, summary: message, isError: true, mutated: false } }
+        const outcome = JSON.parse(output) as { status: string }
+        return { output, summary: outcome.status === 'committed' ? `${request.operation}: ${request.path}` : `File action ${outcome.status}.`, mutated: outcome.status === 'committed' }
+      } catch (cause) { const message = cause instanceof Error ? cause.message : String(cause); return { output: JSON.stringify({ status: 'failed', tool: call.name, error: message }), summary: message, isError: true, mutated: false } }
     },
   }
 }

@@ -6,7 +6,11 @@ export function installDirectoryActionsApi(): void {
   const api: DirectoryActionsApi = {
     myAgentTools: (run, action, payload) => invoke('myAgentTools', run, action, payload),
     analytics: (run, action, payload) => invoke('analytics', run, action, payload),
-    searchContents: (run, query) => invoke('searchContents', run, query),
+    searchContents: (run, query, paths) => invoke('searchContents', run, query, paths),
+    readFile: (run, path, offset, maxChars) => invoke('readFile', run, path, offset, maxChars),
+    validateEvidence: run => invoke('validateEvidence', run),
+    restoreEvidence: (run, requests) => invoke('restoreEvidence', run, requests),
+    checkCitation: (path, sourceHash) => invoke('checkCitation', path, sourceHash),
     validateFile: (run, path) => invoke('validateFile', run, path),
     inspect: (run, path) => invoke('inspect', run, path),
     query: (run, id, call) => invoke('query', run, id, call),

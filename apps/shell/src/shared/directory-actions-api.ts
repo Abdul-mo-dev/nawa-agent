@@ -1,4 +1,5 @@
 import type { FileSearchResult } from './file-search-api'
+import type { DirectoryEvidence, DirectoryRead, DirectoryValidation } from './directory-evidence'
 import type { AnalyticsReadAction } from './analytics-api'
 import type { AgentToolCall, ToolExecution, DirectoryEditorDescription, DirectoryWorkflowOptions, DirectoryWorkflowStatus, DirectoryInteractionReply } from '@genoffice/agent-core'
 
@@ -51,7 +52,11 @@ export interface DirectoryCommit { path: string; operation: DirectoryOperation; 
 export interface DirectoryActionsApi {
   myAgentTools?(run: string, action: 'catalog' | 'execute', payload: unknown): Promise<import('./myagent-tools-api').MyAgentToolResponse>
   analytics?(run: string, action: AnalyticsReadAction, payload: unknown): Promise<unknown>
-  searchContents(run: string, query: string): Promise<FileSearchResult>
+  searchContents(run: string, query: string, paths?: string[]): Promise<FileSearchResult>
+  readFile(run: string, path: string, offset?: number, maxChars?: number): Promise<DirectoryRead>
+  validateEvidence(run: string): Promise<DirectoryValidation>
+  restoreEvidence(run: string, requests: { id: string; evidence: DirectoryEvidence[] }[]): Promise<string[]>
+  checkCitation(path: string, sourceHash: string): Promise<boolean>
   validateFile(run: string, path: string): Promise<DirectoryQuality>
   inspect(run: string, path: string): Promise<DirectoryInspection>
   query(run: string, id: string, call: AgentToolCall): Promise<ToolExecution>

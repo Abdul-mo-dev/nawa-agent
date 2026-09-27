@@ -8,6 +8,7 @@ import { MyAgentRag } from '../src/main/rag/myagent'
 import { credentialScope, myAgentUrl, validateSettings } from '../src/main/rag/config'
 import { hashFile } from '../src/main/directory-actions/file-safety'
 import { randomUUID } from 'node:crypto'
+import { DirectoryActionManager } from '../src/main/directory-actions/manager'
 
 let directory: string, root: string, file: string, mapping: string, server: Server, settings: RagSettings, client: MyAgentRag
 let revision: string, contentHash: string, selectedRoots: string[], running: boolean
@@ -81,6 +82,29 @@ describe('MyAgent shared-file adapter', () => {
     expect((await client.search(settings, '', [file], 'refunds', signal())).hits).toEqual([])
     expect(calls).toEqual([])
   })
+  it('assigns separate citation IDs to identical files and retains each source path', async () => {
+    await index()
+    const copy = join(root, 'report-copy.txt'); await writeFile(copy, 'Annual refund policy')
+    const mappings = JSON.parse(await readFile(mapping, 'utf8'))
+    mappings.entries.push({ ...mappings.entries[0], path: copy, documentId: 'doc-2' })
+    await writeFile(mapping, JSON.stringify(mappings))
+    const fake: typeof fetch = async input => {
+      const url = String(input)
+      const documentId = url.includes('/doc-2') ? 'doc-2' : 'doc-1'
+      const chunk = { documentId, contentHash, indexRevision: revision, chunkId: 'chunk-0', chunkIndex: 0, text: 'Annual refund policy', score: 1, citation: { pageNumber: 1 } }
+      const result = url.endsWith('/search') ? { results: [chunk, { ...chunk, documentId: 'doc-2' }] }
+        : url.includes('/chunks/') ? { documentId, contentHash, indexRevision: revision, chunks: [chunk] }
+        : { id: documentId, contentHash, indexRevision: revision, fullyEmbedded: true, chunkCount: 1, updatedAt: new Date().toISOString() }
+      return new Response(JSON.stringify(result))
+    }
+    const duplicateClient = new MyAgentRag(mapping, async () => selectedRoots, fake)
+    const found = await duplicateClient.search(settings, '', [file, copy], 'refund policy', signal())
+    expect(found.hits.map(hit => hit.path)).toEqual([file, copy])
+    expect(found.hits[0].sourceHash).toBe(found.hits[1].sourceHash)
+    const citations = found.hits.map(hit => hit.excerpt?.match(/\[(RAG:[^\]]+)\]/)?.[1])
+    expect(citations.every(Boolean)).toBe(true)
+    expect(new Set(citations).size).toBe(2)
+  })
   it('detects edits even when file size and mtime are restored', async () => {
     await index(); const before = await stat(file)
     await writeFile(file, 'Annual cancel policy'); await utimes(file, before.atime, before.mtime)
@@ -131,11 +155,66 @@ describe('MyAgent shared-file adapter', () => {
 })
 
 describe('MyAgent knowledge tool adapter', () => {
+  it('prepares metadata without document probes and makes one attempt during an outage', async () => {
+    await index(); await writeFile(file, 'Changed since indexing'); calls = []
+    expect(await client.tools(settings, '', [file], 'session', 'catalog', { scope: 'selected' }, signal())).toMatchObject({
+      files: [{ status: 'unchecked' }], diagnostics: { httpRequests: 1 }, sources: [],
+    })
+    expect(calls.map(call => call.route)).toEqual(['tools/catalog'])
+    let attempts = 0
+    const offline = new MyAgentRag(mapping, async () => selectedRoots, async () => { attempts++; throw new Error('offline') })
+    await expect(offline.tools(settings, '', [file, ...Array.from({ length: 100 }, (_, i) => join(root, `missing-${i}.txt`))], 'session', 'catalog', { scope: 'selected' }, signal())).rejects.toThrow('offline')
+    expect(attempts).toBe(1)
+  })
+  it('allows one target within 101 selected paths and rejects an unbatched full-scope execution', async () => {
+    await index(); calls = []
+    const selection = [file, ...Array.from({ length: 100 }, (_, i) => join(root, `unindexed-${i}.txt`))]
+    const catalog = await client.tools(settings, '', selection, 'session', 'catalog', { scope: 'selected' }, signal())
+    expect('files' in catalog && catalog.files?.length).toBe(101)
+    expect(await client.tools(settings, '', selection, 'session', 'execute', { tool: 'text_read_lines', paths: [file], arguments: {} }, signal()))
+      .toMatchObject({ succeeded: true, coverage: { selected: 101, requested: [file], covered: [file], completeSelection: false } })
+    await expect(client.tools(settings, '', selection, 'session', 'execute', { tool: 'text_read_lines', arguments: {} }, signal())).rejects.toThrow('Target at most 100')
+  })
+  it('uses four HTTP requests for discovery, two tools and final validation through the manager', async () => {
+    await index(); calls = []
+    const manager = new DirectoryActionManager({ stateDirectory: directory, roots: async () => selectedRoots,
+      myAgentTools: (paths, session, action, payload, signal) => client.tools(settings, '', paths, session, action, payload, signal),
+      extract: async () => '', blank: async () => {}, open: async () => { throw new Error('unused') }, assertClosed: async () => {}, trash: async () => {}, changed: () => {},
+    })
+    const session = await manager.begin(1, { opened: root, files: [file], directories: [] })
+    try {
+      await manager.myAgentTools(1, session, 'catalog', { scope: 'selected' })
+      for (let i = 0; i < 2; i++) await manager.myAgentTools(1, session, 'execute', { tool: 'text_read_lines', paths: [file], arguments: { startLine: i } })
+      expect(await manager.validateEvidence(1, session)).toMatchObject({ sourceCount: 1, httpRequests: 1 })
+      expect(calls.map(call => call.route)).toEqual(['tools/catalog', 'tools/execute', 'tools/execute', 'tools/catalog'])
+    } finally { await manager.cancel(1, session) }
+  })
+  it('reports a missing tools endpoint clearly and checks it during connection testing', async () => {
+    const oldServer: typeof fetch = async (input, init) => String(input).includes('/tools/')
+      ? new Response(null, { status: 404 }) : fetch(input, init)
+    const oldClient = new MyAgentRag(mapping, async () => selectedRoots, oldServer)
+    await expect(oldClient.test(settings, 'fixture-key')).rejects.toThrow('Rebuild and restart the MyAgent server')
+    expect(calls.map(call => call.route)).toEqual(['roots'])
+    await expect(oldClient.tools(settings, 'fixture-key', [], 'session', 'catalog', { scope: 'server' }, signal()))
+      .rejects.toThrow('HTTP 404 at /api/v1/rag/tools/catalog')
+  })
+  it('does not mistake a structured missing-source response for a missing endpoint', async () => {
+    const missingSource = new MyAgentRag(mapping, async () => selectedRoots, async () =>
+      new Response(JSON.stringify({ code: 'rag_tool_source_missing', message: 'Source no longer exists' }), { status: 404 }))
+    await expect(missingSource.tools(settings, '', [], 'session', 'catalog', { scope: 'server' }, signal()))
+      .rejects.toThrow('MyAgent HTTP 404: Source no longer exists')
+  })
+  it('checks document-tool metadata without reading files in connection tests', async () => {
+    expect(await client.test(settings, 'fixture-key')).toMatchObject({ message: expect.stringContaining('RAG and document tools') })
+    expect(calls.map(call => call.route)).toEqual(['roots', 'tools/catalog'])
+    expect(calls[1].body).toMatchObject({ namesOnly: true })
+    expect(calls[1].body.scope).toBeUndefined()
+  })
   const discover = () => client.tools(settings, 'fixture-key', [file], randomUUID(), 'catalog', { query: 'text', scope: 'selected' }, signal())
   it('resolves selected local paths to server IDs and returns exact schemas and provenance', async () => {
     await index()
     const catalog = await discover()
-    expect(catalog).toMatchObject({ available: true, tools: [{ name: 'text_read_lines' }], sources: [], files: [{ path: file, documentId: 'doc-1', status: 'ready' }] })
+    expect(catalog).toMatchObject({ available: true, tools: [{ name: 'text_read_lines' }], sources: [], files: [{ path: file, documentId: 'doc-1', status: 'unchecked' }] })
     expect(calls.find(v => v.route === 'tools/catalog')?.body).toMatchObject({ extensions: ['.txt'], documentIds: ['doc-1'] })
     expect(calls.find(v => v.route === 'tools/catalog')?.body.scope).toBeUndefined()
     const result = await client.tools(settings, 'fixture-key', [file], randomUUID(), 'execute', { tool: 'text_read_lines', arguments: { documentId: 'doc-1' } }, signal())
@@ -197,7 +276,7 @@ describe('MyAgent knowledge tool adapter', () => {
   it('reads a ready target while other selected files need indexing, and reports partial coverage', async () => {
     await index(); const other = join(root, 'unindexed.xlsx'); await writeFile(other, 'not indexed')
     const catalog = await client.tools(settings, '', [file, other], randomUUID(), 'catalog', { scope: 'selected', initial: true }, signal())
-    expect(catalog).toMatchObject({ sources: [], files: [{ path: file, status: 'ready' }, { path: other, status: 'needs-index' }] })
+    expect(catalog).toMatchObject({ sources: [], files: [{ path: file, status: 'unchecked' }, { path: other, status: 'needs-index' }] })
     expect(calls.find(call => call.route === 'tools/catalog')?.body.extensions).toEqual(['.txt', '.xlsx'])
     for (const target of [{ paths: [file], arguments: {} }, { arguments: { documentId: 'doc-1' } }]) {
       const result = await client.tools(settings, '', [file, other], randomUUID(), 'execute', { tool: 'text_read_lines', ...target }, signal())
