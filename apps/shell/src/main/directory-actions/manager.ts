@@ -1,5 +1,6 @@
 import type { LinkedImage } from '../../shared/directory-actions-api'
 import type { FileSearchResult } from '../../shared/file-search-api'
+import type { AnalyticsReadAction, AnalyticsEnvelope, SourceRef } from '../../shared/analytics-api'
 import { conversionSupported } from '../../../../../packages/cli/src/conversion-routes'
 import { directoryToolAllowed, DIRECTORY_PROTOCOL_VERSION } from '@genoffice/agent-core'
 import { DirectoryInspectionManager } from './inspection-manager'
@@ -22,6 +23,7 @@ export interface NativeStage {
 }
 export interface ActionDependencies {
   search?(owner: number, paths: string[], query: string, signal: AbortSignal): Promise<FileSearchResult>
+  analytics?(owner: number, paths: string[], action: AnalyticsReadAction, payload: unknown, signal: AbortSignal): Promise<AnalyticsEnvelope>
   linkedImages?(file: string, roots: string[]): Promise<LinkedImage[]>
   stageImages?(original: string, copy: string, images: readonly LinkedImage[]): Promise<void>
   finalizeAssets?(file: string, network: boolean): Promise<string[]>
@@ -37,7 +39,7 @@ export interface ActionDependencies {
   convert?(source: string, target: string, conversion: DirectoryConversion, signal: AbortSignal, network?: boolean): Promise<string[]>
   quality?(path: string, images: boolean, signal: AbortSignal): Promise<DirectoryQuality>
 }
-interface Run { owner: number; scope: DirectoryActionScope; expires: number; cancelled: boolean; abort: AbortController; evidence: Map<string, string> }
+interface Run { owner: number; scope: DirectoryActionScope; expires: number; cancelled: boolean; abort: AbortController; evidence: Map<string, string>; analyticsEvidence?: Map<string, SourceRef> }
 interface Pending extends DirectoryApproval {
   run: string
   stagePath?: string
@@ -307,6 +309,7 @@ export class DirectoryActionManager {
         // Once the filesystem commit completes, cancellation cannot undo it.
         item.phase = 'done'
         this.runs.get(item.run)?.evidence.delete(item.path)
+        this.runs.get(item.run)?.analyticsEvidence?.clear()
         try { await this.inspections.invalidatePath(owner, item.run, item.path) } catch (cause) { console.warn('Nawa: inspection cleanup after commit failed.', cause) }
         try { this.deps.changed(item.path) } catch (cause) { console.warn('Nawa: refresh notification failed after file commit.', cause) }
         await this.cleanup(item)
@@ -341,11 +344,32 @@ export class DirectoryActionManager {
   }
   async verifySources(owner: number, id: string): Promise<void> {
     const run = this.run(owner, id), roots = await this.deps.roots()
+    if (run.analyticsEvidence?.size) {
+      if (!this.deps.analytics) throw new Error('Analytical evidence verification is unavailable.')
+      await this.deps.analytics(owner, [...run.scope.files], 'verify', { sources: [...run.analyticsEvidence.values()] }, run.abort.signal)
+      this.run(owner, id)
+    }
     for (const [path, hash] of run.evidence) {
       await regularFile(roots, path)
       if (!run.scope.files.some(p => samePath(p, path)) || await hashFile(path) !== hash) throw new Error('A searched source changed; read it again in a new request.')
     }
     this.run(owner, id)
+  }
+  async analyticsData(owner: number, id: string, action: AnalyticsReadAction, payload: unknown): Promise<unknown> {
+    const run = this.run(owner, id)
+    if (!this.deps.analytics) throw new Error('Structured analysis is unavailable. Rebuild Nawa.')
+    const result = await this.deps.analytics(owner, [...run.scope.files], action, payload, run.abort.signal)
+    this.run(owner, id)
+    const evidence = run.analyticsEvidence ??= new Map<string, SourceRef>()
+    for (const source of result.sources) {
+      if (!run.scope.files.some(path => samePath(path, source.path))) throw new Error('Analysis returned an unselected source; result rejected.')
+      const previous = evidence.get(source.datasetId)
+      if (previous && (previous.hash !== source.hash || previous.generation !== source.generation)) throw new Error('Analytical revisions changed within this request. Start a fresh analysis.')
+      const textHash = run.evidence.get(source.path)
+      if (textHash && textHash !== source.hash) throw new Error('RAG and SQL source revisions differ. Start a fresh request.')
+      evidence.set(source.datasetId, source)
+    }
+    return result.value
   }
   async searchContents(owner: number, id: string, query: string): Promise<FileSearchResult> {
     const run = this.run(owner, id)

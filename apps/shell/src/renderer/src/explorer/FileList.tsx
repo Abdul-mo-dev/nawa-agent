@@ -3,6 +3,7 @@ import type { KeyboardEvent, MouseEvent } from 'react'
 import type { Item, Preferences, SortKey } from './model'
 import { sizeLabel } from './model'
 import { RagBadge, useRagStatuses } from '../rag/RagStatus'
+import { AnalyticsBadge, useAnalyticsStatuses } from '../analytics/AnalyticsStatus'
 import { DocumentIcon, FolderGlyph, Icon } from './Icons'
 import type { ExplorerString } from './strings'
 interface Props {
@@ -27,13 +28,14 @@ export function FileList({ items, selected, cutPaths, preferences: p, locale, te
   const [viewport, setViewport] = useState({ height: 600, width: 800, top: 0 })
   const [focused, setFocused] = useState<string | null>(null)
   const typeahead = useRef({ text: '', time: 0 })
-  const tile = p.view === 'tiles', rowHeight = tile ? 146 : p.compact ? 32 : 42
+  const tile = p.view === 'tiles', rowHeight = tile ? 190 : p.compact ? 32 : 42
   const columns = tile ? Math.max(1, Math.floor((viewport.width - 24) / 156)) : 1
   const rows = Math.ceil(items.length / columns)
   const firstRow = Math.max(0, Math.floor(viewport.top / rowHeight) - 4)
   const lastRow = Math.min(rows, Math.ceil((viewport.top + viewport.height) / rowHeight) + 4)
   const first = firstRow * columns, last = Math.min(items.length, lastRow * columns)
   const { statuses: ragStatuses, error: ragStatusError } = useRagStatuses(items.slice(first, last).filter(item => item.kind === 'file'))
+  const { statuses: analyticsStatuses, error: analyticsStatusError } = useAnalyticsStatuses(items.slice(first, last).filter(item => item.kind === 'file'))
   useEffect(() => {
     const el = scroll.current
     if (!el) return
@@ -106,11 +108,11 @@ export function FileList({ items, selected, cutPaths, preferences: p, locale, te
       <div className={tile ? 'ex-tile-grid' : ''} style={tile ? { gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` } : undefined}>
         {items.slice(first, last).map((item, offset) => <div role="row" id={`ex-item-${first + offset}`} aria-rowindex={first + offset + (tile ? 1 : 2)} aria-selected={selected.has(item.path)}
           key={item.path} data-path={item.path} className={`${tile ? 'ex-tile' : 'ex-file-row ex-row-layout'}${selected.has(item.path) ? ' is-selected' : ''}${focused === item.path ? ' is-focused' : ''}${cutPaths.has(item.path) ? ' is-cut' : ''}`}
-          style={{ height: tile ? 134 : rowHeight }} title={`${item.name}\n${item.path}`}
+          style={{ height: tile ? 178 : rowHeight }} title={`${item.name}\n${item.path}`}
           onClick={e => { setFocused(item.path); host.current?.focus({ preventScroll: true }); onSelect(item.path, { toggle: e.ctrlKey || e.metaKey, range: e.shiftKey, additive: e.ctrlKey || e.metaKey }) }}
           onDoubleClick={() => onOpen(item)} onContextMenu={e => { setFocused(item.path); onContext(e, item) }}>
           <div role="gridcell" className="ex-check-cell"><input type="checkbox" tabIndex={-1} aria-label={`${t('checked')}: ${item.name}`} checked={selected.has(item.path)} onClick={e => e.stopPropagation()} onChange={() => { setFocused(item.path); onSelect(item.path, { toggle: true }) }} /></div>
-          <div role="gridcell" className="ex-file-name"><span className="ex-file-symbol">{item.kind === 'folder' ? <FolderGlyph size={tile ? 70 : 24} /> : <DocumentIcon ext={item.ext} size={tile ? 66 : 26} />}</span><span className="ex-file-label" dir="auto">{item.name}</span>{item.kind === 'file' && <RagBadge value={ragStatuses[item.path]} error={ragStatusError} />}{item.starred && <Icon name="star" size={12} className="ex-starred-mark" />}{item.missing && <span className="ex-error">{t('unavailable')}</span>}</div>
+          <div role="gridcell" className="ex-file-name"><span className="ex-file-symbol">{item.kind === 'folder' ? <FolderGlyph size={tile ? 70 : 24} /> : <DocumentIcon ext={item.ext} size={tile ? 66 : 26} />}</span><span className="ex-file-label" dir="auto">{item.name}</span>{item.kind === 'file' && <RagBadge value={ragStatuses[item.path]} error={ragStatusError} />}{item.kind === 'file' && <AnalyticsBadge value={analyticsStatuses[item.path]} error={analyticsStatusError} />}{item.starred && <Icon name="star" size={12} className="ex-starred-mark" />}{item.missing && <span className="ex-error">{t('unavailable')}</span>}</div>
           {!tile && <><div role="gridcell" className="ex-column-modified">{date(item.mtimeMs)}</div><div role="gridcell" className="ex-column-type">{type(item)}</div><div role="gridcell" className="ex-column-size">{item.kind === 'file' ? sizeLabel(item.sizeBytes, locale) : '—'}</div></>}
           {tile && <span className="ex-tile-meta">{item.kind === 'folder' ? t('folder') : sizeLabel(item.sizeBytes, locale)}</span>}
         </div>)}

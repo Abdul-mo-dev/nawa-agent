@@ -1,0 +1,38 @@
+/* Reuse Explorer theme variables; keep the four labels readable at 300px pane width. */
+.nawa-workspace-inspector { display:flex; flex-direction:column; min-height:0; min-width:0; overflow:hidden; }
+.nawa-inspector-header { display:grid; grid-template-columns:minmax(0,1fr) 32px; align-items:start; gap:4px; flex:none; padding:6px 6px 0; border-bottom:1px solid var(--ex-line); }
+.ex-inspector-tabs.nawa-inspector-tablist { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); min-width:0; width:100%; height:auto; padding:0; border:0; gap:3px; }
+.ex-inspector-tabs.nawa-inspector-tablist > button[role='tab'] { display:flex; justify-content:flex-start; align-items:center; gap:6px; min-width:0; min-height:40px; height:auto; padding:8px 7px; margin:0; border:0; border-bottom:2px solid transparent; border-radius:5px 5px 0 0; background:transparent; font-size:12px; line-height:1.3; text-align:start; white-space:normal; color:var(--ex-muted); }
+.nawa-inspector-tablist > button > svg { flex:none; }
+.nawa-inspector-tablist > button > span { min-width:0; overflow-wrap:anywhere; }
+.ex-inspector-tabs.nawa-inspector-tablist > button:hover { background:var(--ex-hover); }
+.ex-inspector-tabs.nawa-inspector-tablist > button[aria-selected='true'] { color:var(--ex-accent); background:var(--ex-accent-soft); border-bottom-color:var(--ex-accent); font-weight:650; }
+.ex-inspector-tabs.nawa-inspector-tablist > button:focus-visible { outline:2px solid var(--ex-accent); outline-offset:-2px; }
+.nawa-inspector-close { margin-top:4px; }
+.nawa-inspector-body { flex:1 1 auto; min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
+.nawa-inspector-panel { flex:1 1 auto; min-width:0; min-height:0; display:flex; flex-direction:column; overflow:auto; }
+.nawa-workspace-inspector .nawa-inspector-panel[hidden] { display:none !important; }
+.nawa-inspector-panel.is-ai { overflow:hidden; }
+.nawa-inspector-panel.is-ai > .workspace-chat-main { flex:1 1 auto; min-height:0; height:100%; width:100%; max-width:none; }
+.nawa-inspector-panel.is-rag, .nawa-inspector-panel.is-analytics { padding:12px; }
+.nawa-inspector-context { flex:none; padding:8px 12px; border-bottom:1px solid var(--ex-line); display:flex; flex-direction:column; gap:4px; overflow:hidden; }
+.nawa-inspector-context > span { font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; direction:ltr; text-align:start; }
+.nawa-inspector-context > small { color:var(--ex-muted); font-size:10px; line-height:1.4; }
+.nawa-inspector-empty { margin:auto 0; padding:24px 12px; text-align:center; }
+.nawa-inspector-empty > svg { width:28px; height:28px; color:var(--ex-accent); }
+.nawa-inspector-empty h2 { font-size:15px; margin:10px 0; }
+.nawa-inspector-empty p { color:var(--ex-muted); font-size:12px; line-height:1.55; }
+/* Only the outer disclosure is redundant inside a selected tab; nested controls stay intact. */
+.nawa-inspector-panel .nawa-rag-toolbar, .nawa-inspector-panel .nawa-data-toolbar { padding:0; border:0; max-height:none; overflow:visible; min-width:0; width:100%; flex:none; }
+.nawa-inspector-panel .nawa-rag-toolbar > details > summary,
+.nawa-inspector-panel .nawa-data-toolbar > details > summary { display:none; }
+.nawa-inspector-panel .nawa-rag-actions, .nawa-inspector-panel .nawa-data-actions { display:flex; flex-direction:column; align-items:stretch; gap:8px; }
+.nawa-inspector-panel .set-btn { height:auto; min-height:32px; white-space:normal; overflow-wrap:anywhere; }
+.nawa-inspector-panel .nawa-data-catalog-heading { align-items:flex-start; flex-direction:column; }
+.nawa-inspector-panel .nawa-rag-running, .nawa-inspector-panel .nawa-data-running { flex-wrap:wrap; align-items:flex-start; }
+.nawa-inspector-panel .nawa-data-settings-grid { grid-template-columns:minmax(0,1fr); }
+.nawa-inspector-panel .nawa-data-table-scroll { max-width:100%; overflow:auto; }
+.nawa-inspector-panel .nawa-data-json { min-width:0; max-width:100%; }
+
+/* Retain the optional hotfix toolbar heading layout after removing its global shortcut row. */
+.nawa-inspector-panel .nawa-indexing-panel-heading { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }

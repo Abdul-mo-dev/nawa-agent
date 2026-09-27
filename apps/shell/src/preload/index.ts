@@ -1,5 +1,6 @@
 import './conversation-history'
 import './rag'
+import './analytics'
 import { contextBridge, ipcRenderer } from 'electron'
 import { installDirectoryActionsApi } from './directory-actions'
 import type { IpcRendererEvent } from 'electron'

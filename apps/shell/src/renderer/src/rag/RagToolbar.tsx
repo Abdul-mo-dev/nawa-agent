@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { RagProgress, RagSettingsView } from '../../../shared/rag-api'
 import './rag.css'
-export function RagToolbar({ folder }: { folder: string | null }) {
+export function RagToolbar({ folder , inSidebar = false }: { folder: string | null ; inSidebar?: boolean }) {
   const [settings, setSettings] = useState<RagSettingsView | null>(null), [progress, setProgress] = useState<RagProgress | null>(null)
   const [recursive, setRecursive] = useState(true), [consent, setConsent] = useState(false), [busy, setBusy] = useState(false), [clear, setClear] = useState(false), [error, setError] = useState('')
   useEffect(() => {
@@ -34,7 +34,7 @@ export function RagToolbar({ folder }: { folder: string | null }) {
   if (!folder) return null
   const running = progress?.running === true
   return <section className="nawa-rag-toolbar" aria-label="Directory RAG indexing" onContextMenu={e => e.stopPropagation()}>
-    <details><summary>Directory RAG · {settings?.settings.enabled ? settings.settings.model : 'not configured'}</summary>
+    <details open={inSidebar || undefined}><summary>Directory RAG · {settings?.settings.enabled ? settings.settings.model : 'not configured'}</summary>
       <p>Index the opened directory using <code>{settings?.settings.baseUrl ?? 'the configured embedding endpoint'}</code>. Configure it in Settings → Embeddings &amp; RAG.</p>
       <label className="nawa-rag-check"><input type="checkbox" disabled={running || busy} checked={recursive} onChange={e => setRecursive(e.target.checked)}/> Include subdirectories (hidden entries, links and node_modules are excluded)</label>
       <label className="nawa-rag-check"><input type="checkbox" disabled={running || busy} checked={consent} onChange={e => setConsent(e.target.checked)}/> I allow text from this directory to be sent to the configured embedding server and stored in Nawa’s unencrypted local RAG index.</label>

@@ -1,4 +1,5 @@
 import type { FileSearchResult } from '../../../shared/file-search-api'
+import type { AnalyticsReadAction, AnalyticsResult } from '../../../shared/analytics-api'
 import type { WorkflowController } from './workflow-controller'
 import { AgentLoop, DEFAULT_MAX_TURNS, type AgentSkill, type AgentTransport, type AgentToolCall, type ToolExecution } from '@genoffice/agent-core'
 import type { DirectoryActionsApi, DirectoryApproval, DirectoryProposal, DirectoryCommit, DirectoryInspection, DirectoryQuality } from '../../../shared/directory-actions-api'
@@ -31,6 +32,7 @@ export class ApprovalController {
 export class DirectoryActionClient {
   private inspections = new Map<string, DirectoryInspection>()
   private evidenceOmitted = 0
+  private usedAnalytics = false
   private evidence: { path: string; sourceHash?: string; text: string }[] = []
   private runPromise: Promise<string> | null = null
   private child: AgentLoop | null = null
@@ -66,6 +68,22 @@ export class DirectoryActionClient {
       opened: this.options.selection.opened,
       files: [...this.options.selection.files], directories: [...this.options.selection.directories],
     })
+  }
+  async analytics(action: AnalyticsReadAction, payload: unknown): Promise<unknown> {
+    const execute = this.options.api.analytics
+    if (!execute) throw new Error('Structured analysis bridge unavailable. Rebuild and restart the shell.')
+    const value = await execute(await this.run(), action, payload)
+    this.check()
+    if (value && typeof value === 'object') {
+      const result = value as Partial<AnalyticsResult>
+      if (result.id && Array.isArray(result.sources) && result.sources[0]) {
+        this.usedAnalytics = true
+        this.addEvidence({ path: result.sources[0].path, sourceHash: result.sources[0].hash,
+          text: JSON.stringify({ resultId: result.id, operation: result.operation, sources: result.sources,
+            population: result.population, summary: result.summary, rows: result.rows, warnings: result.warnings }) })
+      }
+    }
+    return value
   }
   async searchContents(query: string): Promise<FileSearchResult> {
     const result = await this.options.api.searchContents(await this.run(), query)
@@ -204,7 +222,8 @@ export class DirectoryActionClient {
       }
       await this.verifyInspections(''); this.check()
       const result = await this.options.api.commit(id)
-      this.evidence = this.evidence.filter(e => e.path !== result.path)
+      this.evidence = this.usedAnalytics ? [] : this.evidence.filter(e => e.path !== result.path)
+      this.usedAnalytics = false
       for (const [key, inspection] of this.inspections) if (inspection.path === result.path) this.inspections.delete(key)
       this.options.committed(result)
       return JSON.stringify({ status: 'committed', ...result, summary })

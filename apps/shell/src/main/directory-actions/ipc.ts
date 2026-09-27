@@ -1,6 +1,8 @@
 import { discoverLinkedImages, stageLinkedImages, finalizeWorkflowAssets } from './assets'
 import { DirectorySearchService } from '../file-index/service'
 import { registerRagIpc } from '../rag/service'
+import { registerAnalyticsIpc } from '../analytics/service'
+import type { AnalyticsReadAction } from '../../shared/analytics-api'
 import { FILE_SEARCH_CHANNEL } from '../../shared/file-search-api'
 import { convertWorkflowFile, reviewWorkflowFile } from './workflow-cli'
 import { reviewFileChanges } from '@genoffice/file-parse'
@@ -21,6 +23,7 @@ export function registerDirectoryActionsIpc(options: {
 }): void {
   const search = new DirectorySearchService({ stateDirectory: app.getPath('userData'), roots: options.roots })
   const rag = registerRagIpc(options)
+  const analytics = registerAnalyticsIpc(options)
   let manager: DirectoryActionManager | undefined
   const owners = new Set<number>()
   const getManager = () => manager ??= new DirectoryActionManager({
@@ -29,6 +32,7 @@ export function registerDirectoryActionsIpc(options: {
     trash: path => shell.trashItem(path), extract: options.extract,
     linkedImages: discoverLinkedImages, stageImages: stageLinkedImages, finalizeAssets: finalizeWorkflowAssets,
     search: (owner, paths, query, signal) => rag.searchSelected(owner, paths, query, signal, () => search.selected(owner, paths, query, signal)),
+    analytics: (owner, paths, action, payload, signal) => analytics.selected(owner, paths, action, payload, signal),
     review: reviewFileChanges, convert: convertWorkflowFile, quality: reviewWorkflowFile,
     changed: path => options.changed([dirname(path)]),
   })
@@ -65,6 +69,10 @@ export function registerDirectoryActionsIpc(options: {
     const m = getManager()
     const id = () => { if (typeof args[0] !== 'string' || args[0].length > 100) throw new Error('Invalid action identifier.'); return args[0] }
     switch (action) {
+      case 'analytics': {
+        if (typeof args[1] !== 'string') throw new Error('Invalid analytical action.')
+        return m.analyticsData(owner, id(), args[1] as AnalyticsReadAction, args[2])
+      }
       case 'searchContents': {
         if (typeof args[1] !== 'string') throw new Error('Invalid search query.')
         return m.searchContents(owner, id(), args[1])

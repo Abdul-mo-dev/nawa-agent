@@ -1,4 +1,5 @@
 import type { FileSearchResult } from './file-search-api'
+import type { AnalyticsReadAction } from './analytics-api'
 import type { AgentToolCall, ToolExecution, DirectoryEditorDescription, DirectoryWorkflowOptions, DirectoryWorkflowStatus, DirectoryInteractionReply } from '@genoffice/agent-core'
 
 export interface DirectoryReviewEntry {
@@ -48,6 +49,7 @@ export interface DirectoryApproval {
 }
 export interface DirectoryCommit { path: string; operation: DirectoryOperation; backupPath?: string }
 export interface DirectoryActionsApi {
+  analytics?(run: string, action: AnalyticsReadAction, payload: unknown): Promise<unknown>
   searchContents(run: string, query: string): Promise<FileSearchResult>
   validateFile(run: string, path: string): Promise<DirectoryQuality>
   inspect(run: string, path: string): Promise<DirectoryInspection>

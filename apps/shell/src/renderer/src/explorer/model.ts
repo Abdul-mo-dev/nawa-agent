@@ -16,7 +16,7 @@ export interface Preferences {
   navigationWidth: number
   inspectorWidth: number
   navigationVisible: boolean
-  pane: 'ai' | 'details' | 'none'
+  pane: 'ai' | 'details' | 'rag' | 'analytics' | 'none'
   view: ViewMode
   compact: boolean
   sort: SortKey
@@ -41,7 +41,7 @@ export function parsePreferences(raw: string | null): Preferences {
       navigationWidth: typeof p.navigationWidth === 'number' && Number.isFinite(p.navigationWidth) ? clamp(p.navigationWidth, 180, 380) : d.navigationWidth,
       inspectorWidth: typeof p.inspectorWidth === 'number' && Number.isFinite(p.inspectorWidth) ? clamp(p.inspectorWidth, 300, 560) : d.inspectorWidth,
       navigationVisible: typeof p.navigationVisible === 'boolean' ? p.navigationVisible : d.navigationVisible,
-      pane: p.pane === 'ai' || p.pane === 'details' || p.pane === 'none' ? p.pane : d.pane,
+      pane: p.pane === 'ai' || p.pane === 'details' || p.pane === 'rag' || p.pane === 'analytics' || p.pane === 'none' ? p.pane : d.pane,
       view: p.view === 'tiles' ? 'tiles' : 'details',
       compact: typeof p.compact === 'boolean' ? p.compact : d.compact,
       sort: p.sort === 'name' || p.sort === 'modified' || p.sort === 'type' || p.sort === 'size' ? p.sort : d.sort,

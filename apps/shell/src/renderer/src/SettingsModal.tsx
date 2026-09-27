@@ -1,5 +1,6 @@
 import { ChatModelsEditor } from './ChatModelsEditor'
 import { RagSettings } from './rag/RagSettings'
+import { AnalyticsSettings } from './analytics/AnalyticsSettings'
 import { validateChatModels } from '@genoffice/ai-provider/browser'
 import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
@@ -133,12 +134,13 @@ function CustomFontSizeInput({
   )
 }
 
-type SectionId = 'account' | 'aiModel' | 'aiMedia' | 'general' | 'integrations' | 'about' | 'rag'
+type SectionId = 'account' | 'aiModel' | 'aiMedia' | 'general' | 'integrations' | 'about' | 'rag' | 'analytics'
 
 const SECTIONS: readonly { id: SectionId; labelKey: StringKey }[] = [
   { id: 'account', labelKey: 'setSecAccount' },
   { id: 'aiModel', labelKey: 'setSecAiModel' },
   { id: 'rag', labelKey: 'setSecAiModel' },
+  { id: 'analytics', labelKey: 'setSecAiModel' },
   { id: 'aiMedia', labelKey: 'setSecAiMedia' },
   { id: 'general', labelKey: 'setSecGeneral' },
   { id: 'integrations', labelKey: 'setSecIntegrations' },
@@ -1110,7 +1112,7 @@ export function SettingsModal({
                 onClick={() => setSection(s.id)}
               >
                 <SectionIcon id={s.id} />
-                {s.id === 'rag' ? 'Embeddings & RAG' : t(s.labelKey)}
+                {s.id === 'rag' ? 'Embeddings & RAG' : s.id === 'analytics' ? 'Structured Data Analysis' : t(s.labelKey)}
                 {s.id === 'integrations' && updateDue && (
                   <span className="set-nav-dot" role="img" aria-label={t('intgUpdateDue')} />
                 )}
@@ -1168,6 +1170,7 @@ export function SettingsModal({
             )}
             {section === 'aiModel' && <AiModelPane t={t} />}
             {section === 'rag' && <RagSettings />}
+            {section === 'analytics' && <AnalyticsSettings />}
             {section === 'aiMedia' && <AiMediaPane t={t} />}
             {section === 'general' && (
               <>

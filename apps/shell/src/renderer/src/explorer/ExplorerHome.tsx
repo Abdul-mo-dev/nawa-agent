@@ -1,3 +1,4 @@
+import { WorkspaceInspector } from './WorkspaceInspector'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, MouseEvent, ReactNode } from 'react'
 import type { FolderRoot, HomeApi, RecentPage } from '../../../shared/home-api'
@@ -9,6 +10,7 @@ import '../workspace.css'
 import { DirectoryTree } from './Tree'
 import { FileList } from './FileList'
 import { RagToolbar } from '../rag/RagToolbar'
+import { AnalyticsToolbar } from '../analytics/AnalyticsToolbar'
 import { DocumentIcon, FolderGlyph, Icon, NawaIcon } from './Icons'
 import { Dialog, Menu, Splitter, ToolButton, useEditorSlot } from './Controls'
 import type { MenuAction } from './Controls'
@@ -286,6 +288,8 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
     { label: t('navigation'), icon: 'pane', checked: prefs.navigationVisible, action: () => changePrefs({ navigationVisible: !prefs.navigationVisible }) },
     { label: t('assistant'), icon: 'sparkles', checked: prefs.pane === 'ai', disabled: editorActive, action: () => changePrefs({ pane: prefs.pane === 'ai' ? 'none' : 'ai' }) },
     { label: t('details'), icon: 'info', checked: prefs.pane === 'details', disabled: editorActive, action: () => changePrefs({ pane: prefs.pane === 'details' ? 'none' : 'details' }) },
+    { label: 'Directory RAG', icon: 'search', checked: prefs.pane === 'rag', disabled: editorActive || windowWidth < 900, action: () => changePrefs({ pane: 'rag' }) },
+    { label: 'Structured Data Analysis', icon: 'list', checked: prefs.pane === 'analytics', disabled: editorActive || windowWidth < 900, action: () => changePrefs({ pane: 'analytics' }) },
     { label: t('resetLayout'), divider: true, action: () => setPrefs({ ...DEFAULT_PREFERENCES }) },
     { label: 'Original home', icon: 'home', divider: true, action: onOpenLegacy },
   ]
@@ -425,16 +429,26 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
           ] })
         }}>
         {editorActive ? <div className="ex-editor-placeholder" aria-hidden="true"><Icon name="open" size={28} /><span>{editorTab?.title}</span></div> : <>
-          <RagToolbar folder={folder} />
+          
+          
           <div className="ex-content-heading"><span className="ex-heading-icon">{headerIcon}</span><div><h1 dir="auto">{title}</h1><p>{loading ? t('loading') : `${itemCount.toLocaleString(dateLocale)} ${t('items')}`}{selectedItems.length > 0 && ` · ${selectedItems.length} ${t('selected')}`}</p></div><span className="ex-toolbar-spacer" />{folder && <button className="ex-text-button" title={t('ask')} onClick={() => { changePrefs({ pane: 'ai' }) }}><Icon name="sparkles" size={15} /><span>{t('folderScope')}</span></button>}</div>
           {notice && <div className={`ex-notice${notice.error ? ' is-error' : ''}`} role={notice.error ? 'alert' : 'status'}><span>{notice.text}</span><button aria-label={t('close')} onClick={() => setNotice(null)}><Icon name="close" size={14} /></button></div>}
           {listError ? <div className="ex-empty"><Icon name="info" size={40} /><h2>{t('unavailable')}</h2><p>{listError}</p><button className="ex-primary" onClick={refresh}>{t('retry')}</button></div> : loading && !items.length ? <div className="ex-empty" role="status"><span className="ex-spinner" /><p>{t('loading')}</p></div> : !items.length ? <div className="ex-empty"><FolderGlyph size={86} /><h2>{search ? t('noResults') : !roots.length && location.kind === 'home' ? t('welcome') : t('empty')}</h2><p>{search ? t('noResultsHelp') : !roots.length && location.kind === 'home' ? t('welcomeHelp') : t('emptyHelp')}</p>{search ? <button className="ex-secondary" onClick={() => setSearch('')}>{t('clearSearch')}</button> : <div className="ex-empty-actions"><button className="ex-primary" onClick={() => { void addRoot() }}><Icon name="plus" size={16} />{t('add')}</button><button className="ex-secondary" onClick={() => { void act(() => window.aiOffice.browse()) }}>{t('openFile')}</button></div>}</div> : <FileList key={folder ?? location.kind} items={items} selected={selected} cutPaths={cutPaths} preferences={prefs} locale={dateLocale} text={t} onSelect={choose} onSelectAll={selectAll} onOpen={openItem} onContext={(event, item) => showItemMenu(event, item)} onRename={() => requestRename()} onDelete={() => requestDelete()} onSort={sort} />}
           {!folder && page.entries.length < page.total && <div className="ex-pagination"><span>{page.entries.length.toLocaleString(dateLocale)} / {page.total.toLocaleString(dateLocale)}</span><button disabled={pageLoading} onClick={() => { void loadMore() }}>{pageLoading ? t('loading') : t('loadMore')}</button></div>}
         </>}
       </main>
-      {inspectorVisible && <><Splitter label={prefs.pane === 'ai' ? t('assistant') : t('details')} value={effectiveInspectorWidth} min={300} max={Math.min(560, Math.max(300, windowWidth - (navigationVisible ? prefs.navigationWidth : 0) - 380))} reverse onChange={inspectorWidth => changePrefs({ inspectorWidth })} /><aside className="ex-inspector" aria-label={prefs.pane === 'ai' ? t('assistant') : t('details')}><div className="ex-inspector-tabs" role="tablist" aria-label="Inspector"><button role="tab" aria-selected={prefs.pane === 'ai'} onClick={() => changePrefs({ pane: 'ai' })}><Icon name="sparkles" size={17} />{t('assistant')}</button><button role="tab" aria-selected={prefs.pane === 'details'} onClick={() => changePrefs({ pane: 'details' })}><Icon name="info" size={16} />{t('details')}</button><ToolButton icon="close" label={t('close')} onClick={() => changePrefs({ pane: 'none' })} /></div>
-        {prefs.pane === 'details' ? detailsPane() : (folder && currentRootPath) || selectedItems.length > 0 ? <WorkspaceChat folder={folder} folderName={folder ? basename(folder) : 'Selected items'} scopePaths={selectedItems.filter(item => item.kind === 'file').map(item => item.path)} scopeDirs={selectedItems.filter(item => item.kind === 'folder').map(item => item.path)} onOpenFile={openFile} onClose={() => changePrefs({ pane: 'none' })} /> : <div className="ex-pane-empty"><span className="ex-ai-orb"><Icon name="sparkles" size={32} /></span><h2>{t('chooseFolder')}</h2><p>{t('chooseFolderHelp')}</p><button className="ex-secondary" onClick={() => { void addRoot() }}><Icon name="plus" size={15} />{t('add')}</button><div className="ex-readonly"><Icon name="check" size={13} />{t('readOnly')}</div></div>}
-      </aside></>}
+      {inspectorVisible && <><Splitter label={prefs.pane === 'rag' ? 'Directory RAG' : prefs.pane === 'analytics' ? 'Structured Data Analysis' : prefs.pane === 'ai' ? t('assistant') : t('details')} value={effectiveInspectorWidth} min={300} max={Math.min(560, Math.max(300, windowWidth - (navigationVisible ? prefs.navigationWidth : 0) - 380))} reverse onChange={inspectorWidth => changePrefs({ inspectorWidth })} />
+        <WorkspaceInspector active={prefs.pane === 'none' ? 'ai' : prefs.pane}
+          assistantLabel={t('assistant')} detailsLabel={t('details')} closeLabel={t('close')}
+          folder={folder && currentRootPath ? folder : null}
+          onChange={pane => changePrefs({ pane })} onClose={() => changePrefs({ pane: 'none' })}
+          onAddFolder={() => { void addRoot() }}
+          assistant={(folder && currentRootPath) || selectedItems.length > 0 ? <WorkspaceChat folder={folder} folderName={folder ? basename(folder) : 'Selected items'} scopePaths={selectedItems.filter(item => item.kind === 'file').map(item => item.path)} scopeDirs={selectedItems.filter(item => item.kind === 'folder').map(item => item.path)} onOpenFile={openFile} onClose={() => changePrefs({ pane: 'none' })} /> : <div className="ex-pane-empty"><span className="ex-ai-orb"><Icon name="sparkles" size={32} /></span><h2>{t('chooseFolder')}</h2><p>{t('chooseFolderHelp')}</p><button className="ex-secondary" onClick={() => { void addRoot() }}><Icon name="plus" size={15} />{t('add')}</button><div className="ex-readonly"><Icon name="check" size={13} />{t('readOnly')}</div></div>}
+          details={detailsPane()}
+          rag={<RagToolbar folder={folder} key={folder ?? "no-directory"} inSidebar />}
+          analytics={<AnalyticsToolbar folder={folder} key={folder ?? "no-directory"} inSidebar />}
+        />
+      </>}
     </div>
     <footer className="ex-status"><span>{editorActive ? editorTab?.title : `${items.length.toLocaleString(dateLocale)} ${t('items')}`}</span>{!editorActive && selectedItems.length > 0 && <><span className="ex-status-divider" /><span>{selectedItems.length} {t('selected')}</span><span>{sizeLabel(selectedItems.filter(item => item.kind === 'file').reduce((sum, item) => sum + item.sizeBytes, 0), dateLocale)}</span></>}<span className="ex-toolbar-spacer" /><span className="ex-status-scope">{editorActive ? t('editor') : t('local')}</span><ToolButton icon="list" label={t('details')} disabled={editorActive} pressed={prefs.view === 'details'} onClick={() => changePrefs({ view: 'details' })} /><ToolButton icon="grid" label={t('tiles')} disabled={editorActive} pressed={prefs.view === 'tiles'} onClick={() => changePrefs({ view: 'tiles' })} /></footer>
     {menu && <Menu {...menu} onClose={closeMenu} />}
