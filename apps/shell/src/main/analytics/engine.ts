@@ -2,7 +2,7 @@ import { mkdir, opendir, lstat, rm } from 'node:fs/promises'
 import { dirname, join, extname } from 'node:path'
 import type { AnalyticsEnvelope, AnalyticsSettings, AnalyticsProgress, AnalyticsFileStatus, SourceRef, AnalyticsResult, Dataset } from '../../shared/analytics-api'
 import { authorizePath, regularFile, hashFile, samePath, within } from '../directory-actions/file-safety'
-import { AnalyticsStore } from './store'
+import { AnalyticsStore, type StoreOptions } from './store'
 import { approveDataset, importFile } from './importer'
 import { TABLE_EXTENSIONS } from './readers'
 import { QuerySession } from './query'
@@ -12,7 +12,7 @@ export interface AnalyticsJob { action:string; folder?:string; paths?:string[]; 
 export const emptyProgress=():AnalyticsProgress=>({running:false,folder:'',current:'',scanned:0,imported:0,unchanged:0,failed:0,rows:0,message:'',incomplete:false})
 export class AnalyticsEngine {
   readonly store:AnalyticsStore
-  constructor(readonly databasePath:string,readonly roots:string[],readonly settings:AnalyticsSettings,readonly check:()=>void,readonly progress:(p:AnalyticsProgress)=>void=()=>{}){this.store=new AnalyticsStore(databasePath)}
+  constructor(readonly databasePath:string,readonly roots:string[],readonly settings:AnalyticsSettings,readonly check:()=>void,readonly progress:(p:AnalyticsProgress)=>void=()=>{},storeOptions:StoreOptions={}){this.store=new AnalyticsStore(databasePath,storeOptions)}
   close():void{this.store.close()}
   private selected(paths:string[],path:string):boolean{return paths.some(p=>samePath(p,path))}
   async verify(sources:SourceRef[],paths:string[]):Promise<void>{

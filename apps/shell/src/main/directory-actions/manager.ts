@@ -14,6 +14,8 @@ import { basename, dirname, extname, join } from 'node:path'
 import type { AgentToolCall, ToolExecution, DirectoryEditorDescription, DirectoryWorkflowOptions, DirectoryWorkflowStatus, DirectoryInteractionReply } from '@genoffice/agent-core'
 import type { DirectoryActionScope, DirectoryApproval, DirectoryCommit, DirectoryProposal, DirectoryReview, DirectoryPrepareContext, DirectoryConversion, DirectoryQuality } from '../../shared/directory-actions-api'
 import { authorizePath, exists, hashFile, publishFile, regularFile, safeName, samePath, validAbsolute, within } from './file-safety'
+import { filesystemOperations, isFilesystemOperation } from '../../shared/directory-actions-api'
+import { prepareFilesystemAction, validateFilesystemAction, commitFilesystemAction, type FilesystemSnapshot } from './filesystem-actions'
 
 export interface NativeStage {
   describe(mode?: 'read' | 'edit', workflow?: DirectoryWorkflowOptions): Promise<DirectoryEditorDescription>
@@ -46,6 +48,7 @@ export interface ActionDependencies {
 }
 interface Run { owner: number; scope: DirectoryActionScope; expires: number; cancelled: boolean; abort: AbortController; evidence: Map<string, string>; analyticsEvidence?: Map<string, SourceRef>; myAgentSources?: MyAgentSource[]; myAgentTools?: Set<string> }
 interface Pending extends DirectoryApproval {
+  filesystem?: FilesystemSnapshot
   run: string
   stagePath?: string
   abort?: AbortController
@@ -100,11 +103,20 @@ export class DirectoryActionManager {
     this.run(owner, item.run); return item
   }
   private view(item: Pending): DirectoryApproval {
-    const { id, operation, path, instruction, beforeHash, afterHash, beforeText, afterText, bytes, review, workflow, linkedImages } = item
-    return { id, operation, path, instruction, beforeHash, afterHash, beforeText, afterText, bytes, review, workflow, linkedImages }
+    const { id, operation, path, instruction, beforeHash, afterHash, beforeText, afterText, bytes, review, workflow, linkedImages, destination, permanent, inventory } = item
+    return { id, operation, path, instruction, beforeHash, afterHash, beforeText, afterText, bytes, review, workflow, linkedImages, destination, permanent, inventory }
+  }
+  private async filesystemContext(owner: number, item: Pending) {
+    return { roots: await this.deps.roots(), scope: this.run(owner, item.run).scope,
+      assertClosed: (path: string) => this.deps.assertClosed(path), check: () => { this.item(owner, item.id) } }
   }
   private async validate(owner: number, item: Pending): Promise<void> {
     const run = this.run(owner, item.run), roots = await this.deps.roots()
+    if (item.filesystem) {
+      await validateFilesystemAction(item, item.filesystem, await this.filesystemContext(owner, item))
+      await this.verifySources(owner, item.run)
+      this.item(owner, item.id); return
+    }
     if (item.operation === 'create') {
       if (![run.scope.opened, ...run.scope.directories].some(p => p && samePath(p, dirname(item.path)))) throw new Error('Creation is limited to the opened or explicitly selected folder.')
       await authorizePath(roots, dirname(item.path))
@@ -130,9 +142,22 @@ export class DirectoryActionManager {
   }
   async propose(owner: number, runId: string, raw: DirectoryProposal): Promise<DirectoryApproval> {
     const run = this.run(owner, runId)
-    if (!raw || !['create','update','delete'].includes(raw.operation) || typeof raw.instruction !== 'string' || raw.instruction.length > 16000) throw new Error('Invalid file action.')
+    if (!raw || !['create','update','delete', ...filesystemOperations].includes(raw.operation) || typeof raw.instruction !== 'string' || !raw.instruction.trim() || raw.instruction.length > 16000) throw new Error('Invalid file action.')
     validAbsolute(raw.path)
     if ([...this.pending.values()].some(p => p.run === runId && !['done','discarded'].includes(p.phase))) throw new Error('Finish or discard the current file proposal first.')
+    if (isFilesystemOperation(raw.operation)) {
+      const item: Pending = { operation: raw.operation, path: raw.path, instruction: raw.instruction, destination: raw.destination, permanent: raw.permanent,
+        id: randomUUID(), run: runId, beforeHash: null, phase: 'proposed', locked: false, tools: new Set(), operations: [] }
+      // Reserve the proposal while the inventory is built; concurrent proposals must not race it.
+      this.pending.set(item.id, item)
+      try {
+        item.filesystem = await prepareFilesystemAction(raw, await this.filesystemContext(owner, item))
+        item.beforeHash = item.filesystem.digest || null; item.inventory = item.filesystem.inventory
+        await this.verifySources(owner, runId); this.item(owner, item.id)
+        return this.view(item)
+      } catch (cause) { this.pending.delete(item.id); throw cause }
+    }
+    if (raw.destination !== undefined || raw.permanent !== undefined) throw new Error('Unexpected filesystem action options.')
     if (raw.operation !== 'delete' && !raw.workflow?.conversion && !FORMATS.has(extname(raw.path).toLowerCase())) throw new Error('Staged editing supports DOCX, XLSX, PPTX, PDF, Markdown and HTML. Legacy spreadsheet formats must first be saved as XLSX.')
     if (raw.operation !== 'create' && !run.scope.files.some(p => samePath(p, raw.path))) throw new Error('The target file is not explicitly selected.')
     const item: Pending = { operation: raw.operation, path: raw.path, instruction: raw.instruction, id: randomUUID(), run: runId, beforeHash: null, phase: 'proposed', locked: false, tools: new Set(), operations: [] }
@@ -184,7 +209,7 @@ export class DirectoryActionManager {
     return this.locked(owner, id, async item => {
       if (item.phase !== 'proposed') throw new Error('This proposal was already approved.')
       await this.validate(owner, item)
-      if (item.operation === 'delete') { item.phase = 'preview'; return null }
+      if (item.operation === 'delete' || item.filesystem) { item.phase = 'preview'; return null }
       const directory = join(this.deps.stateDirectory, 'directory-staging', item.id)
       await mkdir(directory, { recursive: true })
       item.stagePath = join(directory, basename(item.path))
@@ -294,14 +319,17 @@ export class DirectoryActionManager {
       return this.view(item)
     })
   }
-  async commit(owner: number, id: string): Promise<DirectoryCommit> {
+  async commit(owner: number, id: string, confirmation?: unknown): Promise<DirectoryCommit> {
     return this.locked(owner, id, async item => {
       if (item.phase !== 'preview') throw new Error('Review the staged result before approving the save.')
       await this.validate(owner, item)
       item.phase = 'committing'
       let backupPath: string | undefined
       try {
-        if (item.operation === 'delete') {
+        let filesystemResult: DirectoryCommit | undefined
+        if (item.filesystem) {
+          filesystemResult = await commitFilesystemAction(item, item.filesystem, await this.filesystemContext(owner, item), path => this.deps.trash(path), confirmation)
+        } else if (item.operation === 'delete') {
           this.item(owner, id)
           await this.deps.trash(item.path)
         } else {
@@ -317,16 +345,21 @@ export class DirectoryActionManager {
         }
         // Once the filesystem commit completes, cancellation cannot undo it.
         item.phase = 'done'
-        this.runs.get(item.run)?.evidence.delete(item.path)
-        this.runs.get(item.run)?.analyticsEvidence?.clear()
         const run = this.runs.get(item.run)
-        if (run?.myAgentSources?.some(source => samePath(source.path, item.path))) {
-          run.myAgentSources = run.myAgentSources.filter(source => !samePath(source.path, item.path))
+        // Folder actions invalidate receipts for descendants without granting access to them.
+        const affected = (path: string) => samePath(path, item.path) || item.operation === 'delete-folder' && within(item.path, path)
+        if (run) {
+          for (const path of run.evidence.keys()) if (affected(path)) run.evidence.delete(path)
+          run.analyticsEvidence?.clear()
+          run.myAgentSources = run.myAgentSources?.filter(source => !affected(source.path))
         }
-        try { await this.inspections.invalidatePath(owner, item.run, item.path) } catch (cause) { console.warn('Nawa: inspection cleanup after commit failed.', cause) }
+        for (const path of new Set([item.path, ...(item.filesystem?.entries.filter(e => !e.directory).map(e => e.path) ?? [])])) {
+          try { await this.inspections.invalidatePath(owner, item.run, path) } catch (cause) { console.warn('Nawa: inspection cleanup after commit failed.', cause) }
+        }
         try { this.deps.changed(item.path) } catch (cause) { console.warn('Nawa: refresh notification failed after file commit.', cause) }
+        if (item.destination) try { this.deps.changed(item.destination) } catch (cause) { console.warn('Nawa: destination refresh failed.', cause) }
         await this.cleanup(item)
-        return { path: item.path, operation: item.operation, ...(backupPath ? { backupPath } : {}) }
+        return filesystemResult ?? { path: item.path, operation: item.operation, ...(backupPath ? { backupPath } : {}) }
       } catch (cause) { if (!['discarded', 'done'].includes(item.phase)) item.phase = 'preview'; throw cause }
     })
   }

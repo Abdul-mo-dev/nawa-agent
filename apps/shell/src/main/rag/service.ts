@@ -8,7 +8,7 @@ import workerPath from './worker?modulePath'
 import { RAG_CHANNEL, RAG_CHANGED, DEFAULT_RAG_SETTINGS, type RagProgress, type RagSettings, type RagSettingsView, type RagFileStatus } from '../../shared/rag-api'
 import type { FileSearchResult } from '../../shared/file-search-api'
 import type { RagJob } from './engine'
-import { authorizePath, regularFile, hashFile } from '../directory-actions/file-safety'
+import { authorizePath, regularFile, hashFile, validAbsolute, within } from '../directory-actions/file-safety'
 import { validateSettings, credentialScope, profileId } from './config'
 import { MyAgentRag } from './myagent'
 interface Options { roots(): Promise<string[]>; isHomeSender(sender: WebContents): boolean }
@@ -63,6 +63,12 @@ export class RagService {
     return safeStorage.decryptString(Buffer.from(current.encryptedKey, 'base64'))
   }
   async settings(): Promise<RagSettingsView> { const saved = await this.load(); return { settings: saved.settings, hasKey: !!saved.encryptedKey, databasePath: saved.settings.backend === 'myagent' ? this.mappingPath : this.databasePath } }
+  /** Main-process administration shares the protected connection used by RAG. */
+  async myAgentConnection(): Promise<{ serverUrl: string; apiKey: string; timeoutMs: number }> {
+    const { settings } = await this.load()
+    if (settings.backend !== 'myagent') throw new Error('Save the MyAgent connection before managing its server.')
+    return { serverUrl: settings.serverUrl, apiKey: await this.key(settings), timeoutMs: settings.timeoutMs }
+  }
   async save(raw: unknown, replacement?: string): Promise<RagSettingsView> {
     const run = async () => {
       if (this.indexing) throw new Error('Stop indexing before changing embedding settings.')
@@ -143,20 +149,29 @@ export class RagService {
     if (!settings.model) throw new Error('Enter the embedding model ID/alias first.')
     return await this.request(this.reader, { action: 'test', roots: [], settings, apiKey: await this.key(settings, replacement) }) as { dimensions: number; message: string }
   }
-  async index(owner: number, folder: string, recursive: boolean, consent: boolean): Promise<RagProgress> {
+  async indexSelected(owner: number, folder: string, paths: string[], consent: boolean): Promise<RagProgress> {
+    validAbsolute(folder)
+    if (!Array.isArray(paths) || !paths.length || paths.length > 256) throw new Error('Select 1–256 individual files to refresh.')
+    for (const path of paths) { validAbsolute(path); if (!within(folder, path)) throw new Error('Selected files must be inside the opened directory.') }
+    return this.index(owner, folder, false, consent, [...paths])
+  }
+  async index(owner: number, folder: string, recursive: boolean, consent: boolean, paths?: string[]): Promise<RagProgress> {
     if (!consent) throw new Error('Confirm that the configured RAG backend may index and store this directory’s contents.')
     if (this.indexing || this.settingsBusy) throw new Error('An indexing or settings operation is already running.')
     const saved = await this.load()
+    if (paths && saved.settings.backend !== 'myagent') throw new Error('Selected-file refresh requires the MyAgent backend. Use directory indexing for local embeddings.')
     if (!saved.settings.enabled || (saved.settings.backend === 'local' && !saved.settings.model)) throw new Error('Configure and enable the RAG backend in Search settings first.')
     await authorizePath(await this.options.roots(), folder)
+    if (paths) for (const path of paths) await authorizePath(await this.options.roots(), dirname(path))
     const apiKey = await this.key(saved.settings), abort = new AbortController(), id = randomUUID()
     // No await between the second check and reserving the slot.
     if (this.indexing || this.settingsBusy) throw new Error('Indexing is already running.')
     if (this.saved !== saved) throw new Error('Embedding settings changed while indexing was starting. Review the current endpoint and retry.')
-    this.state = { ...blankProgress(), folder, running: true, message: 'Starting directory indexing…' }
+    this.state = { ...blankProgress(), folder, running: true, message: paths ? 'Starting selected-file refresh…' : 'Starting directory indexing…',
+      ...(paths ? { scope: 'selected' as const, files: paths.map(path => ({ path, status: 'pending' as const })) } : {}) }
     const report = (p: RagProgress) => { this.state = p; this.changed() }
     const done = saved.settings.backend === 'myagent'
-      ? this.myAgent().index(saved.settings, apiKey, folder, recursive, abort.signal, report)
+      ? paths ? this.myAgent().indexSelected(saved.settings, apiKey, folder, paths, abort.signal, report) : this.myAgent().index(saved.settings, apiKey, folder, recursive, abort.signal, report)
       : this.request(this.indexer, { action: 'index', folder, recursive, roots: [], settings: saved.settings, apiKey }, abort.signal, report, id)
     this.indexing = { owner, id, abort, done }
     void done.then(result => { this.state = result as RagProgress }, async e => { this.state = { ...this.state, running: false, incomplete: true, message: e instanceof Error ? e.message : String(e) }; if (saved.settings.backend === 'local') await this.request(this.reader, { action: 'recover', roots: [], settings: saved.settings, apiKey: '' }).catch(() => undefined) }).finally(() => { if (this.indexing?.id === id) this.indexing = null; this.changed() })
@@ -170,7 +185,7 @@ export class RagService {
   }
   async statuses(paths: string[], verify = false): Promise<RagFileStatus[]> {
     const settings = (await this.load()).settings
-    if (settings.backend === 'myagent') return this.myAgent().statuses(settings, paths)
+    if (settings.backend === 'myagent') return this.myAgent().statuses(settings, paths, verify ? await this.key(settings) : '', verify)
     return await this.request(this.reader, { action: 'statuses', roots: [], settings, apiKey: '', paths, verify }) as RagFileStatus[]
   }
   async clear(folder: string): Promise<void> {
@@ -223,6 +238,7 @@ export function registerRagIpc(options: Options): RagService {
       case 'save': return service.save(args[0], args[1] as string | undefined)
       case 'test': return service.test(args[0], args[1] as string | undefined)
       case 'index': return service.index(event.sender.id, folder(), args[1] === true, args[2] === true)
+      case 'indexSelected': return service.indexSelected(event.sender.id, folder(), args[1] as string[], args[2] === true)
       case 'progress': return service.progress()
       case 'cancel': return service.cancel(event.sender.id)
       case 'clear': return service.clear(folder())

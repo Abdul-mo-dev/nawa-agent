@@ -72,13 +72,18 @@
 .nawa-panel-theme details > summary { cursor:pointer; min-height:32px; padding-block:5px; }
 .nawa-panel-state { padding:20px 12px; }
 .nawa-panel-error { color:var(--ex-danger); overflow-wrap:anywhere; }
-.nawa-knowledge-card { border:1px solid var(--ex-line); border-radius:var(--panel-radius); padding:12px; margin-bottom:12px; min-width:0; }
-.nawa-knowledge-card > summary { display:flex; flex-wrap:wrap; align-items:center; gap:8px; list-style:none; font-size:15px; font-weight:600; }
-.nawa-knowledge-card > summary::before { content:'›'; color:var(--ex-accent); }
-.nawa-knowledge-card[open] > summary::before { content:'⌄'; }
+.nawa-knowledge-nav { position:sticky; top:0; z-index:1; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:4px; padding:4px; margin-bottom:16px; border:1px solid var(--ex-line); border-radius:var(--panel-radius); background:var(--ex-nav); }
+.nawa-knowledge-nav button { min-width:0; min-height:36px; padding:6px; border:0; border-radius:6px; color:var(--ex-muted); background:transparent; font:inherit; overflow-wrap:anywhere; }
+.nawa-knowledge-nav button[aria-current='page'] { color:var(--ex-accent); background:var(--ex-accent-soft); font-weight:650; }
+.nawa-knowledge-nav button:hover { background:var(--ex-hover); }
+.nawa-knowledge-view[hidden], .nawa-rag-analytics-panel [hidden] { display:none !important; }
+.nawa-knowledge-heading { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.nawa-knowledge-heading h3 { margin:0; font-size:15px; }
+.nawa-knowledge-help { margin:8px 0 16px; color:var(--ex-muted); overflow-wrap:anywhere; }
+.nawa-knowledge-notice { width:100%; min-height:36px; margin-bottom:12px; padding:8px; border:1px solid var(--ex-line); border-radius:6px; color:var(--ex-accent); background:var(--ex-accent-soft); font:inherit; text-align:start; overflow-wrap:anywhere; }
+.nawa-knowledge-notice.is-error { color:var(--ex-danger); background:var(--ex-danger-soft); }
+.nawa-knowledge-back { margin-top:16px; }
 .nawa-capability-status { margin-inline-start:auto; font-size:12px; color:var(--ex-muted); font-weight:400; }
-.nawa-inline-settings { margin-top:12px; border-top:1px solid var(--ex-line); padding-top:8px; }
-.nawa-inline-settings > summary { color:var(--ex-accent); font-weight:600; }
 .nawa-panel-theme .nawa-rag-toolbar, .nawa-panel-theme .nawa-data-toolbar { padding:0; border:0; max-height:none; overflow:visible; width:100%; font-size:13px; }
 .nawa-panel-theme .nawa-rag-actions, .nawa-panel-theme .nawa-data-actions { display:flex; flex-direction:column; align-items:stretch; gap:8px; }
 .nawa-panel-theme .nawa-data-catalog-heading { align-items:flex-start; flex-direction:column; }
@@ -87,6 +92,7 @@
 .nawa-panel-theme .nawa-data-table-scroll { max-width:100%; overflow:auto; }
 .nawa-panel-theme .nawa-data-json { min-width:0; max-width:100%; }
 .nawa-panel-theme .nawa-rag-settings, .nawa-panel-theme .nawa-data-settings { min-width:0; }
+.nawa-panel-theme .is-compact :is(.nawa-rag-field>small,.nawa-data-field>small) { display:none; }
 .nawa-panel-dialog { border:1px solid var(--ex-line); border-radius:12px; padding:0; width:min(1040px,calc(100vw - 32px)); max-width:calc(100vw - 32px); height:min(850px,calc(100dvh - 32px)); max-height:calc(100dvh - 32px); background:var(--ex-surface); box-shadow:var(--ex-shadow); }
 .nawa-panel-dialog[open] { display:flex; flex-direction:column; }
 .nawa-panel-dialog::backdrop { background:var(--ex-dim); }

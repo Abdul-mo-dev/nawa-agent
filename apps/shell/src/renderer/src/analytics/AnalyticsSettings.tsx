@@ -12,7 +12,7 @@ const fields:Array<{key:keyof Settings;label:string;min:number;max:number;help:s
   {key:'resultRows',label:'Maximum displayed result rows',min:1,max:500,help:'Only output is limited; aggregates still process the full approved filtered population.'},
   {key:'retainedResults',label:'Retained analysis receipts',min:10,max:10000,help:'Receipts contain SQL, parameters, results and source versions. Older receipts expire beyond this count.'},
 ]
-export function AnalyticsSettings(){
+export function AnalyticsSettings({compact=false}:{compact?:boolean}={}){
   const { s } = useSidebarText()
   const [baseline,setBaseline]=useState<Settings|null>(null),[retry,setRetry]=useState(0)
   const [value,setValue]=useState<Settings>({...DEFAULT_ANALYTICS_SETTINGS}),[database,setDatabase]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[saved,setSaved]=useState(false),[loading,setLoading]=useState(true)
@@ -21,8 +21,8 @@ export function AnalyticsSettings(){
   useEffect(()=>{let live=true;setError('');setLoading(true);if(!window.nawaAnalytics){setError('Analytics bridge unavailable. Rebuild and restart.');setLoading(false);return}void window.nawaAnalytics.settings().then(r=>{if(live){setValue(r.settings);setBaseline(r.settings);setDatabase(r.databasePath)}}).catch(e=>{if(live)setError(String(e))}).finally(()=>{if(live)setLoading(false)});return()=>{live=false}},[retry])
   const save=async()=>{setBusy(true);setError('');setSaved(false);try{await window.nawaAnalytics.saveSettings(value);setBaseline(value);setSaved(true)}catch(e){setError(e instanceof Error?e.message:String(e))}finally{setBusy(false)}}
   if(!baseline)return <div><p role={error?'alert':'status'}>{error||s('Loading…')}</p>{error&&<button type="button" className="set-btn" onClick={()=>setRetry(value=>value+1)}>{s('Retry')}</button>}</div>
-  return <div className="nawa-data-settings"><h3 className="set-pane-title">{s("Structured Data Analysis")}</h3>
-    <p>{s('Set limits for local table imports and analysis. Review each imported table before the assistant can query it.')}</p>
+  return <div className={`nawa-data-settings${compact?' is-compact':''}`}><h3 className="set-pane-title">{s("Structured Data Analysis")}</h3>
+    <p hidden={compact}>{s('Set limits for local table imports and analysis. Review each imported table before the assistant can query it.')}</p>
     <div className="nawa-data-settings-grid">{fields.map(f=><label className="nawa-data-field" key={f.key}><span>{s(f.label)}</span><input className="set-input" type="number" min={f.min} max={f.max} step={1} disabled={busy||loading} value={Number.isNaN(value[f.key])?'':value[f.key]} onChange={e=>{setSaved(false);setValue(v=>({...v,[f.key]:Number(e.target.value)}))}}/><small>{s(f.help)}</small></label>)}</div>
     <details><summary>{s('Storage details')}</summary><p>{s('Source snapshots, tables and analysis results are stored locally without encryption. Clearing analysis data keeps source files, conversations and search indexes.')}</p><p className="nawa-data-path">{s('Database')}: <code>{database}</code></p></details>
     <div className="nawa-settings-footer">{dirty&&<p role="status">{s('Unsaved changes')}</p>}

@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WebContents } from 'electron'
 
-const mocks = vi.hoisted(() => ({ readFile: vi.fn(), authorizePath: vi.fn() }))
+const mocks = vi.hoisted(() => ({ readFile: vi.fn(), authorizePath: vi.fn(), autoReady: true }))
 vi.mock('electron', () => ({ app: { getPath: () => 'analytics-test' }, ipcMain: {} }))
 vi.mock('node:fs/promises', () => ({
   ...mocks,
@@ -15,12 +15,15 @@ vi.mock('../src/main/directory-actions/file-safety', () => ({ authorizePath: moc
 vi.mock('../src/main/analytics/worker?modulePath', () => ({ default: 'analytics-worker.js' }))
 vi.mock('node:worker_threads', () => ({
   Worker: class TestWorker extends EventEmitter {
-    static instances: Array<EventEmitter & { job: { action: string; payload?: unknown } }> = []
+    static instances: TestWorker[] = []
     job: { action: string; payload?: unknown }
-    constructor(_path: string, options: { workerData: { job: { action: string } } }) {
+    storeOptions: { readOnly: boolean; initialize: boolean }
+    constructor(_path: string, options: { workerData: { job: { action: string }; storeOptions: { readOnly: boolean; initialize: boolean } } }) {
       super()
       this.job = options.workerData.job
+      this.storeOptions = options.workerData.storeOptions
       TestWorker.instances.push(this)
+      if (mocks.autoReady) void Promise.resolve().then(() => this.emit('message', { ready: true }))
     }
     terminate() {
       this.emit('exit', 0)
@@ -35,7 +38,7 @@ import { AnalyticsService } from '../src/main/analytics/service'
 const workers = () =>
   (
     Worker as unknown as {
-      instances: Array<EventEmitter & { job: { action: string; payload?: unknown } }>
+      instances: Array<EventEmitter & { job: { action: string; payload?: unknown }; storeOptions: { readOnly: boolean; initialize: boolean } }>
     }
   ).instances
 const settle = async () => {
@@ -45,6 +48,7 @@ let service: AnalyticsService
 beforeEach(() => {
   vi.useFakeTimers()
   workers().length = 0
+  mocks.autoReady = true
   mocks.readFile.mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' }))
   mocks.authorizePath.mockResolvedValue(undefined)
   service = new AnalyticsService({ roots: async () => [], isHomeSender: () => true })
@@ -132,7 +136,7 @@ describe('analytics worker admission', () => {
     await settle()
     const waiting = Array.from({ length: 64 }, () => service.request(1, { action: 'statuses' }))
     const failures = waiting.map((request) =>
-      expect(request).rejects.toThrow('waiting for an available reader'),
+      expect(request).rejects.toThrow('waiting for an available worker'),
     )
     await settle()
     await expect(service.request(1, { action: 'statuses' })).rejects.toThrow('Too many queued')
@@ -151,5 +155,92 @@ describe('analytics worker admission', () => {
     expect((await results).every((result) => result.status === 'rejected')).toBe(true)
     expect(workers()).toHaveLength(2)
     await expect(service.request(1, { action: 'statuses' })).rejects.toThrow('cancelled')
+  })
+
+  it('bootstraps the database alone, then opens metadata workers read-only', async () => {
+    mocks.autoReady = false
+    const first = service.request(1, { action: 'statuses' })
+    const second = service.request(1, { action: 'catalog' })
+    await settle()
+    expect(workers()).toHaveLength(1)
+    expect(workers()[0].storeOptions).toEqual({ readOnly: false, initialize: true })
+    workers()[0].emit('message', { ready: true })
+    await settle()
+    expect(workers()).toHaveLength(2)
+    expect(workers()[1].storeOptions).toEqual({ readOnly: true, initialize: false })
+    for (const worker of workers()) worker.emit('message', { result: [] })
+    await Promise.all([first, second])
+  })
+
+  it('retries bootstrap after initialization fails and releases its write slot', async () => {
+    mocks.autoReady = false
+    const first = service.request(1, { action: 'statuses' })
+    const failure = expect(first).rejects.toThrow('initialization failed')
+    const next = service.request(1, { action: 'statuses' })
+    await settle()
+    workers()[0].emit('message', { error: 'initialization failed' })
+    await failure
+    await settle()
+    expect(workers()).toHaveLength(2)
+    expect(workers()[1].storeOptions).toEqual({ readOnly: false, initialize: true })
+    workers()[1].emit('message', { ready: true })
+    workers()[1].emit('message', { result: [] })
+    await next
+  })
+
+  it('serializes queries, statistical analyses and drill-down result writes', async () => {
+    const requests = ['query', 'analyze', 'drill'].map(action => service.request(1, { action }))
+    const metadata = service.request(1, { action: 'statuses' })
+    await settle()
+    expect(workers().map(w => w.job.action)).toEqual(['query', 'statuses'])
+    expect(workers()[1].storeOptions.readOnly).toBe(true)
+    workers()[0].emit('message', { result: 'query' })
+    await requests[0]
+    await settle()
+    expect(workers().map(w => w.job.action)).toEqual(['query', 'statuses', 'analyze'])
+    expect(workers()[2].storeOptions).toEqual({ readOnly: false, initialize: false })
+    workers()[2].emit('message', { result: 'analyze' })
+    await requests[1]
+    await settle()
+    workers()[3].emit('message', { result: 'drill' })
+    workers()[1].emit('message', { result: [] })
+    await Promise.all([...requests, metadata])
+  })
+
+  it('keeps status reads available during imports while receipt writers wait', async () => {
+    const imported = service.request(1, { action: 'import' })
+    const query = service.request(1, { action: 'query' })
+    const statuses = service.request(1, { action: 'statuses' })
+    await settle()
+    expect(workers().map(w => w.job.action)).toEqual(['import', 'statuses'])
+    expect(workers()[1].storeOptions.readOnly).toBe(true)
+    workers()[1].emit('message', { result: [] })
+    await statuses
+    expect(workers()).toHaveLength(2)
+    workers()[0].emit('message', { result: [] })
+    await imported
+    await settle()
+    expect(workers()[2].job.action).toBe('query')
+    workers()[2].emit('message', { result: [] })
+    await query
+  })
+
+  it('cancels a queued user writer without releasing an active receipt writer', async () => {
+    const query = service.request(1, { action: 'query' })
+    await settle()
+    const imported = service.request(2, { action: 'import' })
+    const failure = expect(imported).rejects.toThrow('cancelled')
+    await settle()
+    service.cancel(2)
+    await failure
+    const next = service.request(2, { action: 'clear' })
+    await settle()
+    expect(workers()).toHaveLength(1)
+    workers()[0].emit('message', { result: [] })
+    await query
+    await settle()
+    expect(workers()[1].job.action).toBe('clear')
+    workers()[1].emit('message', { result: [] })
+    await next
   })
 })

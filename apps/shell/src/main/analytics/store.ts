@@ -4,18 +4,24 @@ import type { Dataset, AnalyticsResult, SourceRef } from '../../shared/analytics
 const { DatabaseSync } = createRequire(import.meta.url)('node:' + 'sqlite') as typeof import('node:sqlite')
 export interface FileRecord { path:string; hash:string; size:number; mtime:number; ctime:number; state:string; error:string; imported:number }
 export interface StoredDataset { data:Dataset; rawTable:string; typedTable:string|null; tableKey:string }
+export interface StoreOptions { readOnly?:boolean; initialize?:boolean }
 export const tableName=(prefix:'ar'|'at')=>`${prefix}_${randomUUID().replaceAll('-','')}`
 export function quotedTable(name:string):string {if(!/^(ar|at)_[a-f0-9]{32}$/.test(name))throw new Error('Invalid internal table identifier.');return `"${name}"`}
 export class AnalyticsStore {
   readonly db:import('node:sqlite').DatabaseSync
-  constructor(readonly path:string){
-    this.db=new DatabaseSync(path,{allowExtension:false,enableDoubleQuotedStringLiterals:false})
-    this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA temp_store=FILE; PRAGMA cache_size=-16384;
+  constructor(readonly path:string,options:StoreOptions={}){
+    this.db=new DatabaseSync(path,{readOnly:options.readOnly===true,allowExtension:false,enableDoubleQuotedStringLiterals:false})
+    try{
+      // Configure lock handling before any operation that can acquire a database lock.
+      this.db.exec('PRAGMA busy_timeout=5000; PRAGMA temp_store=FILE; PRAGMA cache_size=-16384;')
+      if(options.readOnly)this.db.exec('PRAGMA query_only=ON')
+      else if(options.initialize!==false)this.db.exec(`PRAGMA journal_mode=WAL;
       CREATE TABLE IF NOT EXISTS analytics_files(path TEXT PRIMARY KEY,hash TEXT NOT NULL,size INTEGER NOT NULL,mtime REAL NOT NULL,ctime REAL NOT NULL,state TEXT NOT NULL,error TEXT NOT NULL,imported REAL NOT NULL) STRICT;
       CREATE TABLE IF NOT EXISTS analytics_datasets(id TEXT PRIMARY KEY,path TEXT NOT NULL,table_key TEXT NOT NULL,raw_table TEXT NOT NULL,typed_table TEXT,data TEXT NOT NULL) STRICT;
       CREATE INDEX IF NOT EXISTS analytics_dataset_path ON analytics_datasets(path);
       CREATE TABLE IF NOT EXISTS analytics_results(id TEXT PRIMARY KEY,created REAL NOT NULL,sources TEXT NOT NULL,body TEXT NOT NULL) STRICT;
       CREATE TABLE IF NOT EXISTS analytics_settings(key TEXT PRIMARY KEY,value TEXT NOT NULL) STRICT;`)
+    }catch(e){this.db.close();throw e}
   }
   file(path:string):FileRecord|undefined{return this.db.prepare('SELECT * FROM analytics_files WHERE path=?').get(path) as unknown as FileRecord|undefined}
   files():FileRecord[]{return this.db.prepare('SELECT * FROM analytics_files').all() as unknown as FileRecord[]}
@@ -47,8 +53,12 @@ export class AnalyticsStore {
   result(id:string):AnalyticsResult|undefined{const r=this.db.prepare('SELECT body FROM analytics_results WHERE id=?').get(id) as {body:string}|undefined;return r?JSON.parse(r.body):undefined}
   saveResult(result:AnalyticsResult,keep:number):void{
     const body=JSON.stringify(result);if(Buffer.byteLength(body)>4*1024*1024)throw new Error('Result receipt is too large. Narrow the query or output.')
-    this.db.prepare('INSERT INTO analytics_results VALUES(?,?,?,?)').run(result.id,result.createdAt,JSON.stringify(result.sources),body)
-    this.db.prepare('DELETE FROM analytics_results WHERE id IN (SELECT id FROM analytics_results ORDER BY created DESC LIMIT -1 OFFSET ?)').run(keep)
+    this.db.exec('BEGIN IMMEDIATE')
+    try{
+      this.db.prepare('INSERT INTO analytics_results VALUES(?,?,?,?)').run(result.id,result.createdAt,JSON.stringify(result.sources),body)
+      this.db.prepare('DELETE FROM analytics_results WHERE id IN (SELECT id FROM analytics_results ORDER BY created DESC LIMIT -1 OFFSET ?)').run(keep)
+      this.db.exec('COMMIT')
+    }catch(e){this.db.exec('ROLLBACK');throw e}
   }
   recover():void{
     // Only the single writer calls this, before starting a new import/review/clear job.

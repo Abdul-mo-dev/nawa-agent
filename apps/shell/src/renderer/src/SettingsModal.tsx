@@ -32,6 +32,7 @@ import type { StringKey, TFunc } from './locale'
 import type { AccountStatus, AiCatalogEntry, UiTheme } from '../../shared/home-api'
 import { ProviderLogo } from './provider-logos'
 import { IntegrationsPane, skillUpdateDue } from './IntegrationsPane'
+import { MyAgentSettings } from './myagent/MyAgentSettings'
 import './settings.css'
 
 // ── Settings modal (opened from the account menu) ─────────
@@ -134,12 +135,13 @@ function CustomFontSizeInput({
   )
 }
 
-type SectionId = 'account' | 'aiModel' | 'aiMedia' | 'general' | 'integrations' | 'about'
+type SectionId = 'account' | 'aiModel' | 'aiMedia' | 'myagent' | 'general' | 'integrations' | 'about'
 
 const SECTIONS: readonly { id: SectionId; labelKey: StringKey }[] = [
   { id: 'account', labelKey: 'setSecAccount' },
   { id: 'aiModel', labelKey: 'setSecAiModel' },
   { id: 'aiMedia', labelKey: 'setSecAiMedia' },
+  { id: 'myagent', labelKey: 'setSecIntegrations' },
   { id: 'general', labelKey: 'setSecGeneral' },
   { id: 'integrations', labelKey: 'setSecIntegrations' },
   { id: 'about', labelKey: 'setSecAbout' },
@@ -1034,6 +1036,7 @@ export function SettingsModal({
 }: SettingsModalProps) {
   const { lang, setLang, t } = useI18n()
   const [section, setSection] = useState<SectionId>('account')
+  const [myAgentVisited, setMyAgentVisited] = useState(false)
   const [theme, setTheme] = useState<UiTheme>('system')
   const [saveDir, setSaveDir] = useState('')
   const [analyticsOn, setAnalyticsOn] = useState(true)
@@ -1128,10 +1131,10 @@ export function SettingsModal({
                 key={s.id}
                 className={`set-nav-item${section === s.id ? ' active' : ''}`}
                 aria-current={section === s.id}
-                onClick={() => setSection(s.id)}
+                onClick={() => { setSection(s.id); if (s.id === 'myagent') setMyAgentVisited(true) }}
               >
                 <SectionIcon id={s.id} />
-                {t(s.labelKey)}
+                {s.id === 'myagent' ? 'MyAgent' : t(s.labelKey)}
                 {s.id === 'integrations' && updateDue && (
                   <span className="set-nav-dot" role="img" aria-label={t('intgUpdateDue')} />
                 )}
@@ -1189,6 +1192,7 @@ export function SettingsModal({
             )}
             {section === 'aiModel' && <AiModelPane t={t} />}
             {section === 'aiMedia' && <AiMediaPane t={t} />}
+            <div hidden={section !== 'myagent'}>{myAgentVisited && <MyAgentSettings />}</div>
             {section === 'general' && (
               <>
                 <h3 className="set-pane-title">{t('setSecGeneral')}</h3>

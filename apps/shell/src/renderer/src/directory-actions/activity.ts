@@ -99,7 +99,7 @@ export function finishActivity(activity: DirectoryActivity, status: ActivityStat
 export type NativeActivityEvent =
   | { type: 'start'; call: AgentToolCall }
   | { type: 'finish'; call: AgentToolCall; execution: ToolExecution }
-  | { type: 'approval'; id: string; phase: 'prepare' | 'save'; path: string; approved?: boolean }
+  | { type: 'approval'; id: string; phase: 'prepare' | 'save' | 'action'; path: string; approved?: boolean }
 
 /** Publish at most one text update per frame, and flush before turn boundaries. */
 export class TextFrameBuffer {

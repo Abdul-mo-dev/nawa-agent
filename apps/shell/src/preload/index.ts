@@ -1,5 +1,6 @@
 import './conversation-history'
 import './rag'
+import './myagent-settings'
 import './analytics'
 import { contextBridge, ipcRenderer } from 'electron'
 import { installDirectoryActionsApi } from './directory-actions'

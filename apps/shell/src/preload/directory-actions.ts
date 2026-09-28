@@ -20,7 +20,7 @@ export function installDirectoryActionsApi(): void {
     begin: scope => invoke('begin', scope), propose: (run, request) => invoke('propose', run, request),
     prepare: (id, context) => invoke('prepare', id, context),
     pollWorkflow: id => invoke('pollWorkflow', id), respondWorkflow: (id, reply) => invoke('respondWorkflow', id, reply), execute: (id, call) => invoke('execute', id, call),
-    preview: id => invoke('preview', id), commit: id => invoke('commit', id),
+    preview: id => invoke('preview', id), commit: (id, confirmation) => invoke('commit', id, confirmation),
     discard: id => invoke('discard', id), cancel: run => invoke('cancel', run),
     copyPaths: (paths, target) => invoke('copyPaths', paths, target),
   }

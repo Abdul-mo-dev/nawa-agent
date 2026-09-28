@@ -28,6 +28,10 @@ const embedding = createServer(async (req, res) => {
   let raw = ''; for await (const part of req) raw += part
   const body = JSON.parse(raw || '{}')
   res.setHeader('Content-Type', 'application/json')
+  if (req.url.endsWith('/models')) {
+    res.end(JSON.stringify({ object: 'list', data: [{ id: 'fixture', object: 'model' }] }))
+    return
+  }
   if (req.url.endsWith('/chat/completions')) {
     const payload = JSON.parse(body.messages.findLast(m => m.role === 'user').content)
     assert.ok(Array.isArray(payload.rows), 'Fixture expects supplied categories and actual row classification')
@@ -56,6 +60,8 @@ await fs.writeFile(path.join(state, 'appsettings.json'), JSON.stringify({
 }))
 await build({ entryPoints: ['apps/shell/src/main/rag/myagent.ts'], outfile: path.join(state, 'adapter.mjs'), bundle: true, platform: 'node', format: 'esm' })
 await build({ entryPoints: ['apps/shell/src/shared/rag-api.ts'], outfile: path.join(state, 'settings.mjs'), bundle: true, platform: 'node', format: 'esm' })
+await fs.writeFile(path.join(state, 'electron-settings-stub.mjs'), `export const app={getPath:()=>${JSON.stringify(state)}};export const ipcMain={handle(){}};export const BrowserWindow={};export const dialog={};`)
+await build({ entryPoints: ['apps/shell/src/main/myagent/service.ts'], outfile: path.join(state, 'admin.mjs'), bundle: true, platform: 'node', format: 'esm', alias: { electron: path.join(state, 'electron-settings-stub.mjs') } })
 const child = spawn('dotnet', [dll, '--contentRoot', state, '--urls', url], { cwd: state, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
 let log = ''; child.stdout.on('data', d => { log += d }); child.stderr.on('data', d => { log += d })
 try {
@@ -66,6 +72,52 @@ try {
     await new Promise(resolve => setTimeout(resolve, 250))
   }
   assert.ok(ready, `MyAgent did not start: ${log}`)
+  const { MyAgentSettingsService } = await import(pathToFileURL(path.join(state, 'admin.mjs')).href)
+  const administration = new MyAgentSettingsService({ connection: async () => ({ serverUrl: url, apiKey, timeoutMs: 10000 }), isHomeSender: () => true })
+  const originalServer = await administration.inspect()
+  assert.ok(originalServer.configuration, JSON.stringify(originalServer.warnings))
+  assert.ok(!JSON.stringify(originalServer).includes(apiKey), 'Stored service key must stay in the main process')
+  const diagnostics = await administration.diagnostics()
+  assert.equal(diagnostics.readiness.ready, true, JSON.stringify(diagnostics))
+  assert.equal(diagnostics.readiness.providerAvailable, true)
+  assert.ok(diagnostics.health.components.length > 0)
+  assert.ok(!JSON.stringify(diagnostics).includes(apiKey))
+  const toolCatalog = await administration.documentTools({ query: '', offset: 0 })
+  assert.ok(toolCatalog.tools.length > 0 && toolCatalog.tools.length <= 20)
+  assert.equal(toolCatalog.filtered, false)
+  if (toolCatalog.nextOffset != null) {
+    const nextCatalog = await administration.documentTools({ query: '', offset: toolCatalog.nextOffset })
+    assert.equal(nextCatalog.total, toolCatalog.total)
+    assert.equal(new Set([...toolCatalog.tools, ...nextCatalog.tools].map(tool => tool.name)).size, toolCatalog.tools.length + nextCatalog.tools.length)
+  }
+  const spreadsheetTools = await administration.documentTools({ query: 'spreadsheet', offset: 0, extensions: ['.xlsx'] })
+  assert.equal(spreadsheetTools.filtered, true)
+  assert.ok(spreadsheetTools.tools.some(tool => tool.name === 'spreadsheet_query_sql'))
+  const pdfTools = await administration.documentTools({ query: 'pdf_read_pages', offset: 0 })
+  assert.ok(pdfTools.tools.some(tool => tool.name === 'pdf_read_pages'), 'Tool metadata must be available before any files are indexed')
+  console.log('PASS document-tool catalog HTTP: definitions before indexing, authenticated metadata, extension filtering, search, and pagination.')
+  const { apiKeyConfigured: _configured, ...provider } = originalServer.configuration.provider
+  const originalPatch = { provider, rag: structuredClone(originalServer.configuration.rag) }
+  // MyAgent can normalize installation defaults on the first complete configuration save.
+  const normalized = await administration.saveConfiguration(url, originalServer.revision, originalPatch)
+  const edited = { ...originalPatch, provider: { ...provider, maximumConcurrentRequests: 2 } }
+  const applied = await administration.saveConfiguration(url, normalized.snapshot.revision, edited)
+  assert.equal(applied.applied, true, JSON.stringify(applied))
+  assert.equal(applied.snapshot.configuration.provider.maximumConcurrentRequests, 2)
+  assert.equal(applied.snapshot.configuration.rag.renderVisualPages, false, 'Unedited extraction policy is preserved')
+  await assert.rejects(() => administration.saveConfiguration(url, originalServer.revision, originalPatch), /changed elsewhere/)
+  const needingRestart = await administration.saveConfiguration(url, applied.snapshot.revision, { ...edited, rag: { ...originalPatch.rag, embeddingBatchSize: originalPatch.rag.embeddingBatchSize + 1 } })
+  assert.equal(needingRestart.restartRequired, true)
+  assert.ok(needingRestart.restartRequiredSettings.includes('MyAgent.Rag.Indexing'))
+  const extraction = await administration.saveConfiguration(url, needingRestart.snapshot.revision, { ...edited, rag: { ...originalPatch.rag, maxPages: 100, maxImagesPerFile: 5, visualExtractionTimeoutSeconds: 45, visualExtractionRetryCount: 2, tesseractPath: 'C:\\OCR\\tesseract.exe', libreOfficePath: 'C:\\Office\\soffice.exe' } })
+  assert.equal(extraction.snapshot.configuration.rag.maxPages, 100)
+  assert.equal(extraction.snapshot.configuration.rag.maxImagesPerFile, 5)
+  assert.equal(extraction.snapshot.configuration.rag.visualExtractionTimeoutSeconds, 45)
+  assert.equal(extraction.snapshot.configuration.rag.tesseractPath, 'C:\\OCR\\tesseract.exe')
+  assert.equal(extraction.snapshot.configuration.rag.libreOfficePath, 'C:\\Office\\soffice.exe')
+  assert.equal(extraction.restartRequired, true)
+  await administration.saveConfiguration(url, extraction.snapshot.revision, originalPatch)
+  console.log('PASS MyAgent settings HTTP: authenticated reads, readiness diagnostics, extraction controls, live configuration application, stale-draft rejection, preservation of extraction policy, and explicit restart requirements.')
   assert.equal((await fetch(url + '/api/v1/rag/roots')).status, 401)
   const { MyAgentRag } = await import(pathToFileURL(path.join(state, 'adapter.mjs')).href)
   const { DEFAULT_RAG_SETTINGS } = await import(pathToFileURL(path.join(state, 'settings.mjs')).href)
@@ -91,6 +143,20 @@ try {
   const indexed = await adapter.index(settings, apiKey, docs, true, signal, () => {})
   assert.equal(indexed.embedded, 3, JSON.stringify(indexed))
   assert.equal(indexed.failed, 0, JSON.stringify(indexed))
+  const mappedBeforeRefresh = JSON.parse(await fs.readFile(path.join(state, 'nawa-mappings.json'), 'utf8')).entries
+  const unselectedMappings = mappedBeforeRefresh.filter(entry => entry.path !== file)
+  const selectedRefresh = await adapter.indexSelected(settings, apiKey, docs, [file], signal, () => {})
+  assert.equal(selectedRefresh.scope, 'selected')
+  assert.equal(selectedRefresh.scanned, 1)
+  assert.equal(selectedRefresh.embedded, 1, JSON.stringify(selectedRefresh))
+  assert.equal(selectedRefresh.unchanged, 0, 'Manual refresh must re-extract unchanged selected files')
+  assert.deepEqual(selectedRefresh.files.map(entry => ({ path: entry.path, status: entry.status })), [{ path: file, status: 'embedded' }])
+  const mappedAfterRefresh = JSON.parse(await fs.readFile(path.join(state, 'nawa-mappings.json'), 'utf8')).entries
+  assert.deepEqual(mappedAfterRefresh.filter(entry => entry.path !== file), unselectedMappings)
+  assert.notEqual(mappedAfterRefresh.find(entry => entry.path === file).indexRevision, mappedBeforeRefresh.find(entry => entry.path === file).indexRevision, 'Refresh must produce a new indexed generation, not only reuse the old mapping')
+  const selectedStatuses = await adapter.statuses(settings, [file], apiKey, true)
+  assert.equal(selectedStatuses[0].verified, true, JSON.stringify(selectedStatuses))
+  console.log('PASS selected-file HTTP: explicit scope, unchanged-file re-extraction, preserved unselected mappings, and local/server snapshot verification.')
   const found = await adapter.search(settings, apiKey, [file], 'refund policy', signal)
   assert.equal(found.hits.length, 1, JSON.stringify(found))
   assert.equal(found.hits[0].path, file)
@@ -128,7 +194,7 @@ try {
   const unindexed = path.join(docs, 'unindexed.xlsx')
   await fs.writeFile(unindexed, 'not indexed')
   const mixed = await discover([file, unindexed], '')
-  assert.deepEqual(mixed.files.map(f => f.status), ['ready', 'needs-index'])
+  assert.deepEqual(mixed.files.map(f => f.status), ['unchecked', 'needs-index'])
   const narrow = await invoke([file, unindexed], 'text_read_lines', { documentId, startLine: 1 })
   assert.equal(narrow.succeeded, true); assert.equal(narrow.coverage.completeSelection, false)
   assert.deepEqual(narrow.coverage.covered, [file])

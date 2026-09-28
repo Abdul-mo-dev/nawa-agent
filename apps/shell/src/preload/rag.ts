@@ -5,6 +5,7 @@ const api: RagApi = {
   save: (settings, key) => ipcRenderer.invoke(RAG_CHANNEL, 'save', settings, key),
   test: (settings, key) => ipcRenderer.invoke(RAG_CHANNEL, 'test', settings, key),
   index: (folder, recursive, consent) => ipcRenderer.invoke(RAG_CHANNEL, 'index', folder, recursive, consent),
+  indexSelected: (folder, paths, consent) => ipcRenderer.invoke(RAG_CHANNEL, 'indexSelected', folder, paths, consent),
   progress: () => ipcRenderer.invoke(RAG_CHANNEL, 'progress'),
   cancel: () => ipcRenderer.invoke(RAG_CHANNEL, 'cancel'),
   statuses: (paths, verify) => ipcRenderer.invoke(RAG_CHANNEL, 'statuses', paths, verify),

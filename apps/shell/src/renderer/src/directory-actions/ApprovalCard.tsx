@@ -1,11 +1,37 @@
-import { useSyncExternalStore } from 'react'
-import type { ApprovalController } from './controller'
+import { useState, useSyncExternalStore } from 'react'
+import type { ApprovalController, ApprovalView } from './controller'
+import { actionName, isFilesystemOperation, isPermanentAction } from '../../../shared/directory-actions-api'
 import './approvals.css'
 
 export function ApprovalCard({ controller }: { controller: ApprovalController }) {
   const request = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot)
   if (!request) return null
+  return <ApprovalContent key={request.key} controller={controller} request={request} />
+}
+function ApprovalContent({ controller, request }: { controller: ApprovalController; request: ApprovalView }) {
+  const [confirmation, setConfirmation] = useState('')
   const { proposal, phase, key } = request
+  const filesystem = isFilesystemOperation(proposal.operation)
+  const permanent = isPermanentAction(proposal)
+  const targetName = proposal.path.replaceAll('\\', '/').split('/').pop()!
+  if (filesystem) return <section className="nawa-file-approval" role="region" aria-label="File action approval">
+    <h3>{permanent ? 'Permanently delete?' : actionName(proposal.operation)}</h3>
+    <strong className="nawa-approval-path">{proposal.path}</strong>
+    {proposal.destination && <><p>Destination</p><strong className="nawa-approval-path">{proposal.destination}</strong></>}
+    <p>{proposal.instruction}</p>
+    {proposal.inventory && proposal.operation === 'delete-folder' && <>
+      <p>{proposal.inventory.files} files · {proposal.inventory.folders} folders (including this folder) · {proposal.inventory.bytes.toLocaleString()} bytes</p>
+      <details><summary>Review affected contents</summary><pre>{proposal.inventory.entries.join('\n')}</pre></details>
+    </>}
+    {permanent ? <>
+      <p role="alert">This permanently removes the target{proposal.operation === 'delete-folder' ? ' and every listed child' : ''}. It bypasses the Recycle Bin and creates no backup. It cannot be undone by Nawa.</p>
+      <label>Type {targetName} to confirm<input aria-label="Confirm permanent deletion" autoComplete="off" value={confirmation} onChange={event => setConfirmation(event.target.value)} /></label>
+    </> : <p>{proposal.operation === 'delete-folder' ? 'The folder and all listed contents will move to the Recycle Bin.' : proposal.operation === 'copy' ? 'The original stays in place. An existing destination will never be overwritten.' : proposal.operation === 'create-folder' ? 'One empty folder will be created. Existing folders will never be replaced.' : 'File contents stay unchanged. An existing destination will never be overwritten.'}</p>}
+    <div className="nawa-approval-buttons">
+      <button type="button" className="ws-chat-close" onClick={() => controller.decide(key, false)}>Deny</button>
+      <button type="button" className="ws-chat-send" disabled={permanent && confirmation !== targetName} onClick={() => controller.decide(key, true, permanent ? confirmation : undefined)}>{permanent ? 'Permanently delete' : proposal.operation === 'delete-folder' ? 'Move to Recycle Bin' : 'Approve action'}</button>
+    </div>
+  </section>
   const deleting = proposal.operation === 'delete'
   return <section className="nawa-file-approval" role="region" aria-label="File action approval">
     <h3>{phase === 'save' ? 'Review before saving' : deleting ? 'Approve file deletion?' : 'Approve native editor task?'}</h3>

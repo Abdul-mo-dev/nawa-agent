@@ -2,6 +2,7 @@ import { discoverLinkedImages, stageLinkedImages, finalizeWorkflowAssets } from 
 import { DirectorySearchService } from '../file-index/service'
 import { registerRagIpc } from '../rag/service'
 import { registerAnalyticsIpc } from '../analytics/service'
+import { registerMyAgentSettingsIpc } from '../myagent/service'
 import type { AnalyticsReadAction } from '../../shared/analytics-api'
 import { FILE_SEARCH_CHANNEL } from '../../shared/file-search-api'
 import { convertWorkflowFile, reviewWorkflowFile } from './workflow-cli'
@@ -24,6 +25,7 @@ export function registerDirectoryActionsIpc(options: {
 }): void {
   const search = new DirectorySearchService({ stateDirectory: app.getPath('userData'), roots: options.roots })
   const rag = registerRagIpc(options)
+  registerMyAgentSettingsIpc({ isHomeSender: options.isHomeSender, connection: () => rag.myAgentConnection() })
   const analytics = registerAnalyticsIpc(options)
   let manager: DirectoryActionManager | undefined
   const owners = new Set<number>()
@@ -121,7 +123,7 @@ export function registerDirectoryActionsIpc(options: {
       case 'respondWorkflow': return m.respondWorkflow(owner, id(), args[1] as DirectoryInteractionReply)
       case 'execute': return m.execute(owner, id(), args[1] as AgentToolCall)
       case 'preview': return m.preview(owner, id())
-      case 'commit': return m.commit(owner, id())
+      case 'commit': return m.commit(owner, id(), args[1])
       case 'discard': return m.discard(owner, id())
       case 'cancel': return m.cancel(owner, id())
       case 'copyPaths': {

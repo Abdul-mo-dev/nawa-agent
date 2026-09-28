@@ -1,0 +1,11 @@
+.nawa-myagent-settings { min-width:0; }
+.nawa-myagent-settings h4 { margin:0; font-size:14px; }
+.nawa-myagent-heading { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; margin-top:18px; }
+.nawa-myagent-fields { margin:16px 0; padding:0; border:0; min-width:0; }
+.nawa-myagent-fields > legend { font-size:14px; font-weight:650; padding:0; }
+.nawa-myagent-root, .nawa-myagent-runtime { border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin:12px 0; min-width:0; }
+.nawa-myagent-components { margin:8px 0; padding-inline-start:20px; font-size:12px; overflow-wrap:anywhere; }
+.nawa-myagent-components span { display:block; color:var(--text-muted); }
+.nawa-myagent-warning { border-inline-start:3px solid var(--border); padding-inline-start:10px; overflow-wrap:anywhere; }
+.nawa-myagent-warning button { margin-inline-end:8px; }
+.nawa-myagent-settings .nawa-rag-grid { grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr)); }

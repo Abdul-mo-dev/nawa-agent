@@ -15,12 +15,14 @@ import type { DirectoryActivity } from '../../shared/directory-activity'
 import type { DirectoryCitation, DirectoryValidation } from '../../shared/directory-evidence'
 import { directoryRoute, routedDirectorySkill } from './directory-actions/routing'
 import { workbookOverviewMetadata } from './directory-actions/workbook-metadata'
+import { directoryCommitText } from '../../shared/directory-actions-api'
+import { isWithin, pathKey } from './explorer/model'
 import { historicalIntent, historyCandidates, restoreCompletedHistory } from './directory-actions/evidence'
 import { ActivityTimeline } from './directory-actions/ActivityTimeline'
 import { WORKSHEET_BOUNDS_GUIDANCE } from './directory-actions/inspection-evidence'
 import { activityTargets, activityToolName, diagnosticText, finishActivity, finishActivityStep, startActivityStep, TextFrameBuffer } from './directory-actions/activity'
 import { createDirectorySkill } from './ai/directory-skill'
-import { displayPath, selectionKey, selectionSnapshot } from './ai/directory-selection'
+import { displayPath, selectionKey, selectionSnapshot, type DirectorySelection } from './ai/directory-selection'
 import { createShellTransport } from './ai/transport'
 import { DocumentIcon, FolderGlyph, NawaIcon } from './explorer/Icons'
 import { ConversationBuffer, flushDetachedBuffers, initializeHistory, retainUntilSaved } from './history/conversation-buffer'
@@ -208,8 +210,9 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
   const [visibleMessages, setVisibleMessages] = useState(100)
   const selection = useMemo(() => selectionSnapshot(folder, scopePaths, scopeDirs), [folder, scopePaths, scopeDirs])
   const scopeKey = selectionKey(selection)
-  const scopeRef = useRef(scopeKey), modelRef = useRef(modelId)
-  scopeRef.current = scopeKey; modelRef.current = modelId
+  const [responseSelection, setResponseSelection] = useState<DirectorySelection | null>(null)
+  const modelRef = useRef(modelId)
+  modelRef.current = modelId
   const logRef = useRef<HTMLDivElement>(null), inputRef = useRef<HTMLTextAreaElement>(null)
   const loopRef = useRef<AgentLoop | null>(null)
   const approvals = useMemo(() => new ApprovalController(), [])
@@ -245,6 +248,7 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
     if (activityRecord.current && ['running', 'waiting'].includes(activityRecord.current.value.status))
       updateActivity(value => finishActivity(value, 'cancelled'))
     epoch.current++; active.current = null
+    if (alive.current) setResponseSelection(null)
     actionClient.current?.cancel(); actionClient.current = null
     approvals.cancel()
     const scan = activeScan.current; activeScan.current = null
@@ -300,8 +304,8 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
     }
   }, [buffer, controls, invalidateRun, cancelComparison, sealPartial])
   useEffect(() => {
-    if (active.current !== null) stop('Selection or model changed. Send again to use the current selection.')
-  }, [scopeKey, modelId, stop])
+    if (active.current !== null) stop('Model changed. Send again to use the current model.')
+  }, [modelId, stop])
   useEffect(() => {
     if (active.current === null || !activityRecord.current) return
     const waiting = !!approvalState || !!workflowState?.interaction
@@ -337,9 +341,11 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
     const selected = selectionSnapshot(selection.opened, selection.files, selection.directories)
     const route = directoryRoute(question, selected)
     const previousMessages = buffer.getSnapshot().messages
-    active.current = runId; setBusy(true); setNotice(null)
+    active.current = runId; setBusy(true); setResponseSelection(selected); setNotice(null)
+    // Selection is immutable for this request. Explorer changes (including a commit
+    // refresh removing a renamed/deleted item) belong to the next request.
     const current = () => alive.current && active.current === runId && epoch.current === runId &&
-      scopeRef.current === capturedScope && modelRef.current === capturedModel
+      modelRef.current === capturedModel
     const startedAt = Date.now(), userMessageId = crypto.randomUUID(), assistantMessageId = crypto.randomUUID()
     const trace: DirectoryActivity = { id: crypto.randomUUID(), model: capturedModel, selectedFiles: selected.files.length,
       startedAt, status: 'running', steps: [], omitted: 0 }
@@ -402,7 +408,7 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
               ...(final && !error && !incomplete ? { evidence: validation.evidence, catalog: preparedCatalog } : {}) } }
         }))
         actionClient.current?.cancel(); actionClient.current = null
-        active.current = null; loopRef.current = null; setBusy(false); persistFinished()
+        active.current = null; loopRef.current = null; setBusy(false); setResponseSelection(null); persistFinished()
       }
       const files = new DirectoryActionClient({
         api: window.nawaDirectory, selection: selected, approvals, current, workflow, settings: () => settings,
@@ -419,8 +425,8 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
           if (event.type === 'approval') {
             const id = `approval:${event.id}:${event.phase}`
             if (event.approved === undefined) updateActivity(value => startActivityStep({ ...value, status: 'waiting' }, {
-              id, parentId: parentTool.current, tool: event.phase === 'save' ? 'approve_save' : 'approve_preparation', kind: 'approval',
-              status: 'waiting', startedAt: Date.now(), summary: event.phase === 'save' ? 'Review changes before saving' : 'Approve preparation', targets: [event.path],
+              id, parentId: parentTool.current, tool: event.phase === 'save' ? 'approve_save' : event.phase === 'action' ? 'approve_file_action' : 'approve_preparation', kind: 'approval',
+              status: 'waiting', startedAt: Date.now(), summary: event.phase === 'save' ? 'Review changes before saving' : event.phase === 'action' ? 'Approve file action' : 'Approve preparation', targets: [event.path],
             }))
             else updateActivity(value => ({ ...finishActivityStep(value, id, event.approved ? 'completed' : 'cancelled',
               event.approved ? 'Approved' : 'Declined'), status: 'running' }))
@@ -431,12 +437,12 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
           else updateActivity(value => finishActivityStep(value, `native:${event.call.id}`, event.execution.isError ? 'failed' : 'completed', event.execution.summary, event.execution.output))
         },
         committed: result => {
-          if (preparedCatalog?.path === result.path) preparedCatalog = undefined
+          if (preparedCatalog && (pathKey(preparedCatalog.path) === pathKey(result.path) || result.operation === 'delete-folder' && isWithin(preparedCatalog.path, result.path))) preparedCatalog = undefined
           // Record the actual commit even if deleting a selected file triggers a listing refresh.
           const receipt: HistoryMessage = {
             id: crypto.randomUUID(), createdAt: Date.now(), role: 'assistant', modelLabel: 'Nawa file action',
             request: { id: trace.id, phase: 'receipt', outcome: 'running' },
-            text: `${result.operation === 'delete' ? 'Moved to Recycle Bin' : result.operation === 'create' ? 'Created' : 'Updated'}: ${result.path}${result.backupPath ? `\nOriginal backup: ${result.backupPath}` : ''}`,
+            text: directoryCommitText(result),
           }
           updateMessages(previous => previous.at(-1)?.streaming
             ? previous.at(-1)?.activity
@@ -584,8 +590,9 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
         <div className="nawa-selection-items">{selection.directories.map(path => <div key={path} className="nawa-selection-item" title={path}><FolderGlyph size={18} /><bdi>{displayPath(selection, path)}</bdi><small>{s('Names only')}</small></div>)}
           {selection.files.map(path => <div key={path} className="nawa-selection-item" title={path}><DocumentIcon ext={path.split('.').pop() || ''} size={18} /><button type="button" onClick={() => onOpenFile(path)}><bdi>{displayPath(selection, path)}</bdi></button><small>{s('Can read')}</small></div>)}</div>
         {folder && <div className="nawa-opened-folder" title={folder}><bdi>{folder}</bdi> · {s('Names only')}</div>}
-        <p className="workspace-scope-help">{s('Opening history does not reselect files. Selection changes stop the current response.')}</p>
+        <p className="workspace-scope-help">{s('Opening history does not reselect files. Each response uses the selection when sent. Selection changes apply to the next message.')}</p>
       </details>
+      {busy && responseSelection && selectionKey(responseSelection) !== scopeKey && <p className="workspace-scope-help" role="status">{s('This response continues with {files} files and {folders} folders selected when sent. Your new selection applies to the next message.', { files: responseSelection.files.length, folders: responseSelection.directories.length })}</p>}
       <div className="ws-chat-log" role="log" aria-live="polite">
         {messages.length > visibleMessages && <button type="button" className="ws-chat-close" onClick={() => setVisibleMessages(value => value + 100)}>{s('Show earlier messages ({count} more)', { count: messages.length - visibleMessages })}</button>}
         {!messages.length && <div className="ws-chat-empty"><h2>{s('Ask Nawa')}</h2><p>{s('Select files to ask questions or request changes. Every file change requires your approval.')}</p></div>}

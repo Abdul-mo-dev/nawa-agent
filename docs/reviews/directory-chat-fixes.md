@@ -60,3 +60,13 @@ Validation:
 - The read-only live MyAgent check selected all 23 sample files and targeted only `Survey data.xlsx`. Both indexed sheet names and all 67 column names survived compaction, from 6,581 to 3,219 characters. The three HTTP requests were schema discovery, catalog execution and final source validation; all returned HTTP 200. Artifact: `.task/directory-chat-fixes/survey-overview.json`. No source files were edited and no model-provider requests were made.
 
 The browser model is scripted: one model turn demonstrates the supported path, not a guarantee for every provider response. Restart Nawa to load the build; no MyAgent server update or restart is required.
+
+## Selection and approval cancellation follow-up — 2026-09-28
+
+The reported `Untitled.docx` → `test.docs` rename completed, but Explorer's refresh removed the old path from selection. The response validity predicate compared the live selection with the request's original selection, and a selection effect cancelled the response before its final model answer. The same mechanism interrupted ordinary selection changes and pending approval reviews.
+
+Directory responses now retain their immutable selection snapshot until completion, Stop, model/session changes or unmount. UI selection changes apply to the next message and cannot expand the active request's permissions. The current selection remains visible; a notice identifies when the response continues with its earlier selection. Approving, closing/reopening a review, and commit-driven listing refreshes no longer invalidate the response just because selection changed. Source and action validation remain mandatory.
+
+The real temporary-filesystem regression confirms that changing the original selection arrays cannot expand main-process run authority and that the next run uses the new scope. Browser regressions cover changes during streaming, next-message selection, changes while approval waits, and the exact reported rename followed by selection clearing.
+
+Validation: 108 focused shell tests passed. The browser harness passed the new selection/approval regressions and existing Stop, changed-source, file-operation and RTL scenarios. Shell type checking, the production build and `git diff --check` passed. Screenshot: `.task/directory-chat-review/rename-after-selection-refresh.png`. Restart Nawa to load the response-lifecycle change; no MyAgent update is needed.

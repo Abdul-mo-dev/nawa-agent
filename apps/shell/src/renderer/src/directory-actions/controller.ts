@@ -9,6 +9,9 @@ import type { NativeActivityEvent } from './activity'
 import { inspectionEvidence, worksheetContextEvidence } from './inspection-evidence'
 import type { DirectoryCitation, DirectoryEvidence, DirectoryValidation } from '../../../shared/directory-evidence'
 import { actionClaimCorrection } from './evidence'
+import { actionName, isFilesystemOperation, isPermanentAction } from '../../../shared/directory-actions-api'
+import { filesystemTools, filesystemProposal } from './filesystem-tools'
+import { isWithin, pathKey } from '../explorer/model'
 
 function citationExcerpt(content: string): string {
   try {
@@ -23,6 +26,7 @@ function citationExcerpt(content: string): string {
 export interface ApprovalView { key: number; phase: 'prepare' | 'save'; proposal: DirectoryApproval }
 /** Only UI buttons resolve this approval; there is no approve tool in either agent's tool catalog. */
 export class ApprovalController {
+  confirmation: string | undefined
   private state: ApprovalView | null = null
   private listeners = new Set<() => void>()
   private waiting: ((approved: boolean) => void) | null = null
@@ -31,13 +35,16 @@ export class ApprovalController {
   getSnapshot = () => this.state
   request(proposal: DirectoryApproval, phase: ApprovalView['phase']): Promise<boolean> {
     if (this.waiting) throw new Error('Another file approval is already pending.')
+    this.confirmation = undefined
     return new Promise(resolve => {
       this.waiting = resolve; this.state = { key: ++this.sequence, phase, proposal }
       this.listeners.forEach(listener => listener())
     })
   }
-  decide(key: number, approved: boolean): void {
+  decide(key: number, approved: boolean, confirmation?: string): void {
     if (this.state?.key !== key) return
+    if (approved && isPermanentAction(this.state.proposal) && confirmation !== this.state.proposal.path.replaceAll('\\', '/').split('/').pop()) return
+    this.confirmation = approved ? confirmation : undefined
     const done = this.waiting; this.waiting = null; this.state = null
     this.listeners.forEach(listener => listener()); done?.(approved)
   }
@@ -73,7 +80,7 @@ export class DirectoryActionClient {
     workflow?: WorkflowController
   }) {}
   private check(): void {
-    if (this.cancelled || !this.options.current()) throw new Error('File action cancelled because the chat, model, or selection changed.')
+    if (this.cancelled || !this.options.current()) throw new Error('File action cancelled because the response stopped or the chat/model changed.')
   }
   cancel(): void {
     this.cancelled = true; this.options.approvals.cancel()
@@ -177,7 +184,7 @@ export class DirectoryActionClient {
     const result = await this.options.api.validateEvidence(await this.runPromise)
     this.check(); return result
   }
-  actionCorrection(text: string): string | null { return actionClaimCorrection(text, this.receipts, this.options.selection.files) }
+  actionCorrection(text: string): string | null { return actionClaimCorrection(text, this.receipts, [...this.options.selection.files, ...this.options.selection.directories]) }
   private addCitation(value: DirectoryCitation): DirectoryCitation {
     const citation = { ...value, locator: value.locator.slice(0, 500), excerpt: value.excerpt?.slice(0, 1200) }
     this.citations.set(value.id, citation)
@@ -278,16 +285,18 @@ export class DirectoryActionClient {
       if (this.rejectedActions.has(rejectionKey)) return JSON.stringify({ status: 'declined', path: request.path, operation: request.operation, message: 'The user declined this action. Do not retry without a new user request.' })
       await this.validateEvidence(); this.check()
       const proposal = await this.options.api.propose(run, request); id = proposal.id; this.check()
-      this.options.toolActivity?.({ type: 'approval', id: proposal.id, phase: 'prepare', path: proposal.path })
+      const direct = isFilesystemOperation(request.operation)
+      const approvalPhase = direct || request.operation === 'delete' ? 'action' : 'prepare'
+      this.options.toolActivity?.({ type: 'approval', id: proposal.id, phase: approvalPhase, path: proposal.path })
       const prepareApproved = await this.options.approvals.request(proposal, 'prepare')
-      this.options.toolActivity?.({ type: 'approval', id: proposal.id, phase: 'prepare', path: proposal.path, approved: prepareApproved })
+      this.options.toolActivity?.({ type: 'approval', id: proposal.id, phase: approvalPhase, path: proposal.path, approved: prepareApproved })
       if (!prepareApproved) { this.rejectedActions.add(rejectionKey); return JSON.stringify({ status: 'declined', path: request.path, operation: request.operation, message: 'The user declined the file action. No original file was changed. Do not retry without a new user request.' }) }
       this.check()
-      this.options.activity(request.operation === 'delete' ? 'Moving approved file to the Recycle Bin…' : 'Preparing a copy in the native editor…')
+      this.options.activity(direct ? `${actionName(request.operation)}…` : request.operation === 'delete' ? 'Moving approved file to the Recycle Bin…' : 'Preparing a copy in the native editor…')
       const description = await this.options.api.prepare(id, { settings: this.options.settings?.(), task: this.childInstruction(request.instruction) }); this.check()
-      if (request.operation !== 'delete' && !request.workflow?.conversion) this.watchWorkflow(id)
+      if (!direct && request.operation !== 'delete' && !request.workflow?.conversion) this.watchWorkflow(id)
       let summary = ''
-      if (request.operation !== 'delete') {
+      if (!direct && request.operation !== 'delete') {
         if (!request.workflow?.conversion) {
         if (!description) throw new Error('The native editor did not supply its tools.')
         summary = await new Promise<string>((resolve, reject) => {
@@ -336,12 +345,14 @@ export class DirectoryActionClient {
         this.check()
       }
       await this.validateEvidence(); this.check()
-      const result = await this.options.api.commit(id)
+      const result = await this.options.api.commit(id, this.options.approvals.confirmation)
       this.catalogCache.clear()
-      this.evidence = this.usedAnalytics || this.usedMyAgent ? [] : this.evidence.filter(e => e.path !== result.path)
+      const affected = (path: string) => pathKey(path) === pathKey(result.path) || result.operation === 'delete-folder' && isWithin(path, result.path)
+      this.evidence = this.usedAnalytics || this.usedMyAgent ? [] : this.evidence.filter(e => !affected(e.path))
       this.usedAnalytics = false
       this.usedMyAgent = false
-      for (const [key, inspection] of this.inspections) if (inspection.path === result.path) this.inspections.delete(key)
+      for (const [key, inspection] of this.inspections) if (affected(inspection.path)) this.inspections.delete(key)
+      for (const [key, citation] of this.citations) if (affected(citation.path)) this.citations.delete(key)
       this.receipts.push(result)
       this.options.committed(result)
       return JSON.stringify({ status: 'committed', ...result, summary })
@@ -356,8 +367,9 @@ export class DirectoryActionClient {
 export function directoryMutationSkill(client: DirectoryActionClient, scope: DirectorySelection): AgentSkill {
   return {
     id: 'approved-directory-files',
-    systemPrompt: 'You can propose updates, creation, or deletion using update_file, create_file, delete_file. These are approval-gated, NOT automatic writes. Updates and deletions require an individually selected file. Creation requires an opened or explicitly selected folder. The native editor works on a staged copy using the same core editing tools as its normal file chat. The user approves preparing the action and separately approves saving edits/creation. Deletion uses one explicit Recycle Bin approval. Never say a file changed unless the tool returns status=committed. Respect rejection; do not retry a rejected action in this turn. Do not claim unsupported operations succeeded. Local document writing, deck generation, HTML briefs and workbook merging reuse the native workflows. Use convert_file for format conversion, never reconstruct a converted document from text. validate_file runs native checks without changing a file. Request renderPreview=true for a first-page screenshot in save review, not a full visual guarantee. Supply individually selected source paths via sources. Request network=true only when the task needs external research or downloads; media=true additionally requests external media processing. These requests appear explicitly in the user approval. Never promise those services before approval or successful provider execution.',
+    systemPrompt: 'Use rename_file, move_file, copy_file, create_folder and delete_folder for filesystem operations; they need one explicit user review and do not open a native editor. Never emulate copying with generated content. Renaming changes the name, not the document format. Folder deletion requires an explicitly selected folder and approval of its inventoried contents; it never grants content-read permission. Normal deletion uses the Recycle Bin. Use permanently_delete_file or delete_folder permanent=true only when the user explicitly requests permanent deletion; the user must type the exact target name and no backup is made. Destinations must be opened or selected folders; no overwriting or implicit folder selection. Case-only renames are unsupported. Report partial outcomes and warnings accurately; never claim a partial move or deletion completed. You can propose document edits with update_file and new documents with create_file. These use a private copy in the native editor, with preparation approval and separate save approval. delete_file has one Recycle Bin approval. Files must be individually selected. Never say an action completed unless its tool returns status=committed. Respect rejection; do not retry a rejected action in this turn. Local document writing, deck generation, HTML briefs and workbook merging reuse native workflows. Use convert_file for format conversion, never reconstruct converted documents from text. validate_file runs native checks without changing a file. Request renderPreview=true for a first-page screenshot in save review. Supply individually selected references via sources. Request network=true only for needed external research/downloads; media=true additionally requests external media processing. These permissions appear in the user approval. Never promise services before approval or successful execution.',
     tools: [
+      ...filesystemTools,
       { name: 'validate_file', description: 'Run the existing native DOCX/XLSX/PPTX checks on a saved copy of one selected file. Returns diagnostics, not a guarantee of correctness. Does not save or require edit approval.', inputSchema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } },
       { name: 'convert_file', description: 'Propose an engine-based conversion/export of a selected file to a NEW file in an opened/selected directory. Two user approvals required; source unchanged. Unsupported routes return an error. PDF OCR is used only if the existing platform helper is installed.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, directory: { type: 'string' }, name: { type: 'string' }, to: { type: 'string' }, network: { type: 'boolean', description: 'Explicit permission to load remote resources from an HTML/Markdown input; shown before conversion.' }, sheet: { type: 'string', description: 'Worksheet for XLSX to CSV only.' }, renderPreview: { type: 'boolean' } }, required: ['path','directory','name','to'] } },
       { name: 'update_file', description: 'Propose editing a selected individual file with its native editor; user approval is required. Give an exact, self-contained edit instruction.', inputSchema: { type: 'object', properties: { path: { type: 'string' }, instruction: { type: 'string' }, sources: { type: 'array', items: { type: 'string' }, maxItems: 16, description: 'Exact individually selected reference files, also used by native workbook merge.' }, network: { type: 'boolean', description: 'Request additional external research/image downloads; shown in the preparation approval.' }, media: { type: 'boolean', description: 'Request external media analysis/generation; requires network and explicit preparation approval.' }, renderPreview: { type: 'boolean', description: 'Render first-page preview before final save approval; native checks also run.' } }, required: ['path','instruction'] } },
@@ -367,9 +379,16 @@ export function directoryMutationSkill(client: DirectoryActionClient, scope: Dir
     verifyResponse: text => client.actionCorrection(text),
     async executeTool(call, signal) {
       try {
-        if (!['create_file', 'update_file', 'delete_file', 'convert_file', 'validate_file'].includes(call.name)) throw new Error('Unknown directory action tool.')
+        if (!['create_file', 'update_file', 'delete_file', 'convert_file', 'validate_file', ...filesystemTools.map(tool => tool.name)].includes(call.name)) throw new Error('Unknown directory action tool.')
         const args = call.input as Record<string, unknown>
         if (!args || typeof args !== 'object') throw new Error('Invalid file action arguments.')
+        if (filesystemTools.some(tool => tool.name === call.name)) {
+          const request = filesystemProposal(call.name, args, scope)
+          const output = await client.perform(request, signal)
+          const outcome = JSON.parse(output) as { status: string }
+          return { output, summary: outcome.status === 'committed' ? `${actionName(request.operation)}: ${request.path}${request.destination ? ` → ${request.destination}` : ''}` : `File action ${outcome.status}.`,
+            mutated: ['committed', 'partial'].includes(outcome.status), isError: outcome.status === 'partial' }
+        }
         if (call.name === 'validate_file') {
           const path = resolveSelectionPath(scope, args.path, 'file')
           if (!path) throw new Error('Select the file before validation.')

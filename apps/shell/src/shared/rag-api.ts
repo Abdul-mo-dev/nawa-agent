@@ -34,16 +34,20 @@ export interface RagSettingsView { settings: RagSettings; hasKey: boolean; datab
 export interface RagFileStatus {
   path: string; status: RagState; chunks: number; indexedAt?: number
   sourceHash?: string; error?: string; warnings?: string[]; partial?: boolean
+  verified?: boolean
 }
 export interface RagProgress {
   running: boolean; folder: string; scanned: number; embedded: number; unchanged: number
   failed: number; chunks: number; current: string; message: string; incomplete: boolean
+  scope?: 'directory' | 'selected'
+  files?: { path: string; status: 'pending' | 'checking' | 'indexing' | 'embedded' | 'failed' | 'canceled'; error?: string }[]
 }
 export interface RagApi {
   settings(): Promise<RagSettingsView>
   save(settings: RagSettings, apiKey?: string): Promise<RagSettingsView>
   test(settings: RagSettings, apiKey?: string): Promise<{ dimensions: number; message: string }>
   index(folder: string, recursive: boolean, consent: boolean): Promise<RagProgress>
+  indexSelected(folder: string, paths: string[], consent: boolean): Promise<RagProgress>
   progress(): Promise<RagProgress>
   cancel(): Promise<void>
   statuses(paths: string[], verify?: boolean): Promise<RagFileStatus[]>

@@ -64,7 +64,7 @@ export function directoryRoute(task: string, scope: DirectorySelection): Directo
   if (/\b(?:list|show|name|what are)\b.*\b(?:knowledge tools|tool names|available tools|all tools)\b/.test(text)) intent = 'tools'
   else if (isMetadataListing(text)) intent = 'metadata'
   else if (target && isWorkbookOverview(text, target)) intent = 'overview'
-  else if (/\b(?:edit|update|create|delete|remove|convert|format|save|write|merge|rename)\b|عدّل|احذف|أنشئ|編集|作成/.test(text)) intent = 'edit'
+  else if (/\b(?:edit|update|create|delete|remove|convert|format|save|write|merge|rename|move|copy|duplicate)\b|عدّل|احذف|أنشئ|編集|作成/.test(text)) intent = 'edit'
   else if (/\b(?:reviewed|approved|exact decimal|accounting|correlation|variance|quantile|statistical)\b/.test(text)) intent = 'reviewed'
   else if (scope.files.some(path => sheet.test(path)) && /\b(?:how many|count|sum|total|average|join|group by|compare|percentage)\b|كم عدد|件数|何人|合計/.test(text)) intent = 'table'
   else if (/\b(?:find|search|which file|contains?|exists|mention)\b|ابحث|どのファイル/.test(text)) intent = 'lookup'

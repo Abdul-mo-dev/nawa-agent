@@ -10,6 +10,7 @@ import { settings as validateSettings, object, text, list } from './validation'
 import type { AnalyticsJob } from './engine'
 interface Options { roots():Promise<string[]>;isHomeSender(sender:WebContents):boolean }
 interface Active { owner:number;worker:Worker;flag:Int32Array;abort:AbortController;writer:boolean }
+interface WorkerSlot { reader:boolean; write:boolean; initialize:boolean }
 const initial=():AnalyticsProgress=>({running:false,folder:'',current:'',scanned:0,imported:0,unchanged:0,failed:0,rows:0,message:'',incomplete:false})
 /** Each request has a worker and a read scope. Imports/approvals never become model tools. */
 export class AnalyticsService {
@@ -21,7 +22,9 @@ export class AnalyticsService {
   private requests=new Map<string,{owner:number;abort:AbortController;writer:boolean}>()
   private writer=false
   private readers=0
-  private waitingReaders=new Set<()=>void>()
+  private databaseWriter=false
+  private databaseReady=false
+  private waitingWorkers=new Set<{available():boolean;start():void}>()
   private state=initial()
   private stopped=false
   private saving:Promise<unknown>=Promise.resolve()
@@ -43,26 +46,43 @@ export class AnalyticsService {
   }
   progress():AnalyticsProgress{return {...this.state}}
   cancel(owner:number):void{for(const item of this.requests.values())if(item.owner===owner&&item.writer)item.abort.abort()}
-  private async acquireReader(signal:AbortSignal,timeoutMs:number):Promise<void>{
+  private async acquireWorker(writer:boolean,writes:boolean,signal:AbortSignal,timeoutMs:number):Promise<WorkerSlot>{
     if(signal.aborted)throw new Error('Analytics request cancelled.')
-    if(this.readers<2){this.readers++;return}
-    if(this.waitingReaders.size>=64)throw new Error('Too many queued analytics requests. Please retry shortly.')
-    // Reserve the freed slot before waking a waiter so newer reads cannot jump the queue.
-    await new Promise<void>((resolve,reject)=>{
-      const cleanup=()=>{clearTimeout(timer);signal.removeEventListener('abort',cancel);this.waitingReaders.delete(start)}
-      const start=()=>{cleanup();this.readers++;resolve()}
+    // Bootstrap alone. Afterwards WAL metadata readers can overlap one database writer.
+    // Queries/analyzes/drill-downs also write, because they persist result receipts.
+    const available=()=>!this.databaseReady
+      ? !this.databaseWriter&&this.readers===0
+      : (writer||this.readers<2)&&(!writes||!this.databaseWriter)
+    const reserve=():WorkerSlot=>{
+      const slot={reader:!writer,write:writes||!this.databaseReady,initialize:!this.databaseReady}
+      if(slot.reader)this.readers++
+      if(slot.write)this.databaseWriter=true
+      return slot
+    }
+    if(!this.waitingWorkers.size&&available())return reserve()
+    if(this.waitingWorkers.size>=64)throw new Error('Too many queued analytics requests. Please retry shortly.')
+    return new Promise<WorkerSlot>((resolve,reject)=>{
+      const cleanup=()=>{clearTimeout(timer);signal.removeEventListener('abort',cancel);this.waitingWorkers.delete(waiter)}
+      const start=()=>{cleanup();resolve(reserve())}
       const cancel=()=>{cleanup();reject(new Error('Analytics request cancelled.'))}
-      const timer=setTimeout(()=>{cleanup();reject(new Error('Analytics request timed out waiting for an available reader.'))},timeoutMs)
-      this.waitingReaders.add(start)
+      const waiter={available,start}
+      const timer=setTimeout(()=>{cleanup();reject(new Error('Analytics request timed out waiting for an available worker. Finish the active import/review or retry shortly.'))},timeoutMs)
+      this.waitingWorkers.add(waiter)
       signal.addEventListener('abort',cancel,{once:true})
+      this.wakeWorkers()
     })
   }
-  private releaseReader():void{
-    this.readers--
-    this.waitingReaders.values().next().value?.()
+  private wakeWorkers():void{
+    for(const waiter of this.waitingWorkers)if(waiter.available())waiter.start()
+  }
+  private releaseWorker(slot:WorkerSlot):void{
+    if(slot.reader)this.readers--
+    if(slot.write)this.databaseWriter=false
+    this.wakeWorkers()
   }
   async request(owner:number,job:AnalyticsJob,signal?:AbortSignal):Promise<unknown>{
     const writer=['import','review','clear'].includes(job.action)
+    const writes=writer||['query','analyze','drill'].includes(job.action)
     if(this.stopped||signal?.aborted)throw new Error('Analytics request cancelled.')
     if(writer&&this.writer)throw new Error('Another data import/review is running.')
     if(Buffer.byteLength(JSON.stringify(job))>256000)throw new Error('Analytics request is too large.')
@@ -71,17 +91,17 @@ export class AnalyticsService {
     signal?.addEventListener('abort',forward,{once:true})
     this.requests.set(id,{owner,abort,writer})
     let worker:Worker|undefined
-    let readerAcquired=false
+    let slot:WorkerSlot|undefined
     try{
       const config=await this.config()
-      if(!writer){await this.acquireReader(abort.signal,config.queryTimeoutSeconds*1000);readerAcquired=true}
+      slot=await this.acquireWorker(writer,writes,abort.signal,config.queryTimeoutSeconds*1000)
       if(this.stopped||abort.signal.aborted)throw new Error('Analytics request cancelled.')
       const roots=await this.options.roots()
       if(job.folder)await authorizePath(roots,job.folder)
       for(const path of job.paths??[])await authorizePath(roots,job.action==='statuses'||job.action==='discover'?dirname(path):path)
       if(this.stopped||abort.signal.aborted)throw new Error('Analytics request cancelled.')
       const buffer=new SharedArrayBuffer(4),flag=new Int32Array(buffer)
-      worker=new Worker(workerPath,{workerData:{databasePath:this.databasePath,roots,settings:config,job,cancel:buffer,deadline:Date.now()+(writer?24*3600*1000:config.queryTimeoutSeconds*1000)},resourceLimits:{maxOldGenerationSizeMb:512}})
+      worker=new Worker(workerPath,{workerData:{databasePath:this.databasePath,roots,settings:config,job,cancel:buffer,deadline:Date.now()+(writer?24*3600*1000:config.queryTimeoutSeconds*1000),storeOptions:{readOnly:!slot.write,initialize:slot.initialize}},resourceLimits:{maxOldGenerationSizeMb:512}})
       this.active.set(id,{owner,worker,flag,abort,writer})
       if(writer){this.state={...initial(),running:true,folder:job.folder??'',message:job.action==='review'?'Validating the approved table policy…':'Preparing local structured-data import…'};this.changed()}
       const current=worker
@@ -92,8 +112,9 @@ export class AnalyticsService {
         const onError=(error:Error)=>finish(error)
         const onExit=(code:number)=>finish(new Error(`Analytics worker exited (${code}). Completed generations remain stored; retry the operation.`))
         const onAbort=()=>{Atomics.store(flag,0,1);killer??=setTimeout(()=>terminate(new Error('Analytics request cancelled. Interrupted imports require retry.')),2500)}
-        const onMessage=(raw:{heartbeat?:boolean;progress?:AnalyticsProgress;error?:string;result?:unknown})=>{
+        const onMessage=(raw:{ready?:boolean;heartbeat?:boolean;progress?:AnalyticsProgress;error?:string;result?:unknown})=>{
           lastActivity=Date.now()
+          if(raw.ready){if(slot?.initialize){this.databaseReady=true;this.wakeWorkers()}return}
           if(raw.heartbeat)return
           if(raw.progress){if(writer){this.state={...raw.progress,running:true,folder:job.folder??this.state.folder};this.changed()}return}
           if(abort.signal.aborted){finish(new Error('Analytics request cancelled.'));return}
@@ -116,7 +137,8 @@ export class AnalyticsService {
       return result
     }finally{
       signal?.removeEventListener('abort',forward);this.requests.delete(id);this.active.delete(id);if(worker)await worker.terminate().catch(()=>undefined)
-      if(writer){this.writer=false;this.state={...this.state,running:false};this.changed()}else if(readerAcquired)this.releaseReader()
+      if(writer){this.writer=false;this.state={...this.state,running:false};this.changed()}
+      if(slot)this.releaseWorker(slot)
     }
   }
   async selected(owner:number,paths:string[],action:AnalyticsReadAction,payload:unknown,signal:AbortSignal):Promise<AnalyticsEnvelope>{

@@ -6,6 +6,7 @@ import { WorkspaceControlPanel } from '../../apps/shell/src/renderer/src/explore
 import { WorkspaceChat } from '../../apps/shell/src/renderer/src/WorkspaceChat'
 import { DEFAULT_RAG_SETTINGS } from '../../apps/shell/src/shared/rag-api'
 import { DEFAULT_ANALYTICS_SETTINGS } from '../../apps/shell/src/shared/analytics-api'
+import { snapshot as myAgentSnapshot } from '../../apps/shell/tests/fixtures/myagent-settings'
 import '@genoffice/ui/tokens.css'
 import '@genoffice/ui/dropdown.css'
 import '../../apps/shell/src/renderer/src/home.css'
@@ -33,6 +34,7 @@ let settings = {
 }
 let rag = { ...DEFAULT_RAG_SETTINGS, backend: 'local', model: 'local-embedding', enabled: true }
 let analytics = { ...DEFAULT_ANALYTICS_SETTINGS }
+let serverSnapshot = clone(myAgentSnapshot)
 const now = Date.now()
 let record = {
   id: 'conversation',
@@ -114,6 +116,9 @@ const dataset = {
 const callbacks = new Set<() => void>()
 let running = false
 const state = {
+  toolCatalogRequests: [] as { query: string; offset: number; extensions?: string[] }[],
+  serverSaves: 0,
+  readinessChecks: 0,
   failLoad: false,
   failSave: false,
   failHistorySave: false,
@@ -132,12 +137,19 @@ const state = {
   requests: [] as any[],
   toolRequests: [] as any[],
   rejectHistory: false,
+  filesystemCommits: [] as any[],
+  beginScopes: [] as any[],
+  cancelledRuns: [] as string[],
+  streamCancels: 0,
+  clearSelectionOnCommit: false,
 }
 const runSources = new Map<string, Map<string, any>>()
 const streamListeners = new Set<(chunk: any) => void>()
 const turns = new Map<string, number>()
 let releaseTool: (() => void) | undefined
 let releaseCapture: (() => void) | undefined
+let releaseModel: (() => void) | undefined
+let changeSelection: ((files: string[], directories: string[]) => void) | undefined
 const stream = async (request: any) => {
   state.requests.push(clone(request))
   const emit = (chunk: any) => streamListeners.forEach(listener => listener({ ...chunk, requestId: request.requestId }))
@@ -145,6 +157,34 @@ const stream = async (request: any) => {
   await new Promise(resolve => setTimeout(resolve, 50))
   if (state.scenario === 'connection-error') { emit({ type: 'error', error: 'Fixture provider unavailable' }); return }
   if (state.scenario === 'cutoff') { emit({ type: 'delta', text: 'This answer stopped midway.' }); emit({ type: 'done', stopReason: 'max_tokens' }); return }
+  if (['scope-read', 'scope-list'].includes(state.scenario)) {
+    if (turn === 1) {
+      if (state.scenario === 'scope-read') {
+        emit({ type: 'delta', text: 'Checking the request selection. ' })
+        await new Promise<void>(resolve => { releaseModel = resolve })
+      }
+      emit({ type: 'tool-call', toolCall: { id: crypto.randomUUID(), name: 'list_files', input: {} } })
+    } else {
+      const result = request.messages.filter((m: any) => m.role === 'tool').flatMap((m: any) => m.results).at(-1)
+      emit({ type: 'delta', text: 'Request selection: ' + JSON.parse(result.output).selectedFiles.join(', ') })
+    }
+    emit({ type: 'done' }); return
+  }
+  if (state.scenario.startsWith('fs-')) {
+    const actions: Record<string, any> = {
+      'fs-copy': { name: 'copy_file', input: { path: source.path, directory: '.', name: 'revenue-copy.xlsx', reason: 'Keep a duplicate' } },
+      'fs-rename': { name: 'rename_file', input: { path: source.path, name: 'renamed.xlsx', reason: 'Rename workbook' } },
+      'fs-rename-original': { name: 'rename_file', input: { path: folder + '\\Untitled.docx', name: 'test.docs', reason: 'Rename the selected document' } },
+      'fs-move': { name: 'move_file', input: { path: source.path, directory: folder + '\\Archive', reason: 'Archive workbook' } },
+      'fs-mkdir': { name: 'create_folder', input: { directory: '.', name: 'New folder', reason: 'Organize files' } },
+      'fs-trash-folder': { name: 'delete_folder', input: { path: folder + '\\Archive', reason: 'Remove archive' } },
+      'fs-permanent-folder': { name: 'delete_folder', input: { path: folder + '\\Archive', reason: 'Permanently remove archive', permanent: true } },
+      'fs-permanent-file': { name: 'permanently_delete_file', input: { path: source.path, reason: 'Permanently delete workbook' } },
+    }
+    if (turn === 1) emit({ type: 'tool-call', toolCall: { id: crypto.randomUUID(), ...actions[state.scenario] } })
+    else emit({ type: 'delta', text: JSON.stringify(request.messages).includes('declined') ? 'The action was declined.' : 'The requested action completed.' })
+    emit({ type: 'done' }); return
+  }
   if (state.scenario.startsWith('overview')) {
     if (state.scenario === 'overview-missing' && turn <= 2) emit({ type: 'tool-call', toolCall: {
       id: crypto.randomUUID(), name: turn === 1 ? 'discover_file_tools' : 'inspect_file', input: turn === 1 ? { capability: 'reading' } : { path: surveySource.path },
@@ -192,6 +232,9 @@ Object.assign(window, {
     state,
     release: () => releaseTool?.(),
     releaseCapture: () => releaseCapture?.(),
+    releaseModel: () => releaseModel?.(),
+    select: (files: string[], directories: string[] = []) => changeSelection?.(files, directories),
+    restoreSelection: () => changeSelection?.([source.path, surveySource.path], [folder + '\\Archive']),
     messages: () => clone(record.messages),
     refresh: () => {
       dataset.generation = 'v2'
@@ -220,10 +263,10 @@ Object.assign(window, {
     setLanguage: async () => {},
     onAiStreamChunk: (listener: (chunk: any) => void) => { streamListeners.add(listener); return () => streamListeners.delete(listener) },
     aiStream: stream,
-    aiStreamCancel: async () => {},
+    aiStreamCancel: async () => { state.streamCancels++ },
   },
   nawaDirectory: {
-    begin: async () => { const id = crypto.randomUUID(); runSources.set(id, new Map()); return id }, cancel: async (id: string) => { runSources.delete(id) }, verifyInspections: async () => null,
+    begin: async (scope: any) => { const id = crypto.randomUUID(); state.beginScopes.push(clone(scope)); runSources.set(id, new Map()); return id }, cancel: async (id: string) => { state.cancelledRuns.push(id); runSources.delete(id) }, verifyInspections: async () => null,
     validateEvidence: async (run: string) => {
       if (state.scenario === 'overview-changed') throw new Error('Survey source changed during the answer.')
       const sources = [...(runSources.get(run)?.values() ?? [])]
@@ -261,12 +304,19 @@ Object.assign(window, {
         content: state.scenario === 'fail' ? '' : payload.tool === 'spreadsheet_catalog_search' ? JSON.stringify({ datasets }) : JSON.stringify({ rows: [{ count: 99 }], apiKey: 'fixture-secret-must-be-redacted' }),
         error: state.scenario === 'fail' ? 'revenue.xlsx needs indexing/refresh.' : null }
     },
-    propose: async (_run: string, input: any) => { proposal = { ...input, id: crypto.randomUUID(), run: _run }; return proposal },
-    prepare: async () => ({ kind: 'sheets', systemPrompt: 'Fixture native editor.', context: 'Selected staged workbook.', tools: [{ name: 'native_format', description: 'Format workbook', inputSchema: { type: 'object', properties: { range: { type: 'string' } } } }] }),
+    propose: async (_run: string, input: any) => { proposal = { ...input, id: crypto.randomUUID(), run: _run, ...(input.operation === 'delete-folder' ? { inventory: { files: 2, folders: 1, bytes: 5120, entries: ['Archive/', 'old.xlsx', 'notes.txt'] } } : {}) }; return proposal },
+    prepare: async () => state.scenario.startsWith('fs-') ? null : ({ kind: 'sheets', systemPrompt: 'Fixture native editor.', context: 'Selected staged workbook.', tools: [{ name: 'native_format', description: 'Format workbook', inputSchema: { type: 'object', properties: { range: { type: 'string' } } } }] }),
     execute: async () => ({ output: 'Formatted 8 cells', summary: 'Formatted the revenue table', mutated: true }),
     verify: async () => null,
     preview: async () => ({ ...proposal, bytes: 2048, beforeText: 'Before formatting', afterText: 'After formatting' }),
-    commit: async () => { state.commits++; return { path: proposal.path, operation: 'update', backupPath: proposal.path + '.backup' } },
+    commit: async (_id: string, confirmation?: string) => {
+      const permanent = proposal.operation === 'delete-permanently' || proposal.permanent
+      if (permanent && confirmation !== proposal.path.split('\\').pop()) throw new Error('Missing typed confirmation')
+      state.commits++
+      if (state.scenario.startsWith('fs-')) state.filesystemCommits.push({ ...proposal, confirmation })
+      if (state.clearSelectionOnCommit) changeSelection?.([], [])
+      return { path: proposal.path, operation: proposal.operation, destination: proposal.destination, permanent, ...(proposal.operation === 'update' ? { backupPath: proposal.path + '.backup' } : {}) }
+    },
     discard: async () => {},
   },
   nawaHistory: {
@@ -344,9 +394,23 @@ Object.assign(window, {
       return () => callbacks.delete(fn)
     },
     clear: async () => {},
+    statuses: async (paths: string[]) => paths.map(path => ({ path, status: 'not-indexed', chunks: 0 })),
     cancel: async () => {
       running = false
     },
+  },
+  nawaMyAgent: {
+    documentTools: async (request: { query: string; offset: number; extensions?: string[] }) => {
+      state.toolCatalogRequests.push(clone(request))
+      const names = ['pdf_read_pages', 'spreadsheet_analyze_text', 'spreadsheet_catalog_search', 'spreadsheet_query_sql']
+        .filter(name => !request.extensions || !name.startsWith('pdf_')).filter(name => name.includes(request.query))
+      return { serverUrl: serverSnapshot.serverUrl, checkedAt: new Date().toISOString(), filtered: !!request.extensions, total: names.length, nextOffset: request.offset + 2 < names.length ? request.offset + 2 : null,
+        tools: names.slice(request.offset, request.offset + 2).map(name => ({ name, description: 'Use selected, indexed document snapshots.', inputSchema: { type: 'object', properties: { documentId: { type: 'string' } } } })) }
+    },
+    inspect: async () => clone(serverSnapshot),
+    local: async () => ({ settings: { mode: 'process', serverPath: 'C:\\MyAgent\\MyAgent.Server.exe', configurationDirectory: 'C:\\MyAgent\\server' }, serviceState: 'not-installed', processId: null }),
+    diagnostics: async () => { state.readinessChecks++; return { serverUrl: serverSnapshot.serverUrl, checkedAt: new Date().toISOString(), health: clone(serverSnapshot.health), readiness: { ready: true, status: 'Provider available', providerAvailable: true, startsOnDemand: false, model: 'fixture-chat' }, warnings: [] } },
+    saveConfiguration: async (_url: string, _revision: string, patch: any) => { state.serverSaves++; serverSnapshot.configuration = { ...serverSnapshot.configuration!, provider: { ...serverSnapshot.configuration!.provider, ...patch.provider }, rag: { ...serverSnapshot.configuration!.rag, ...patch.rag } }; return { snapshot: clone(serverSnapshot), restartRequired: true, restartRequiredSettings: ['MyAgent.Rag.Indexing'], applied: false } },
   },
   nawaAnalytics: {
     settings: async () => ({ settings: clone(analytics), databasePath: 'fixture/analysis.sqlite' }),
@@ -388,6 +452,9 @@ Object.assign(window, {
   },
 })
 function Fixture() {
+  const [selectedFiles, setSelectedFiles] = useState([source.path, surveySource.path])
+  const [selectedDirectories, setSelectedDirectories] = useState([folder + '\\Archive'])
+  changeSelection = (files, directories) => { setSelectedFiles(files); setSelectedDirectories(directories) }
   const [visible, setVisible] = useState(true),
     [active, setActive] = useState<'ai' | 'ragAnalytics' | 'provider'>('ai'),
     [width, setWidth] = useState(360),
@@ -430,13 +497,14 @@ function Fixture() {
           assistantLabel="Nawa"
           closeLabel="Close sidebar"
           folder={folder}
+          selectedFiles={selectedFiles}
           onAddFolder={() => {}}
           assistant={
             <WorkspaceChat
               folder={folder}
               folderName="Quarterly reports"
-              scopePaths={[folder + '\\revenue.xlsx', surveySource.path]}
-              scopeDirs={[]}
+              scopePaths={selectedFiles}
+              scopeDirs={selectedDirectories}
               onOpenFile={path => { state.openedFiles.push(path) }}
               onClose={() => setVisible(false)}
             />

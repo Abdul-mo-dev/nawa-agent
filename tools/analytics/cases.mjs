@@ -93,3 +93,42 @@ test('undefined grouped ratios remain last when sorting descending',async()=>fix
 test('an importer version mismatch forces fresh review even with unchanged source bytes',async()=>fixture(async ctx=>{const d=await approve(ctx,await importCsv(ctx,'version.csv','id,value\na,1\n'));const old=ctx.engine.store.dataset(d.id);old.data.profile.importerVersion='older';ctx.engine.store.putDataset(old);const p=await ctx.engine.execute({action:'import',folder:ctx.source});assert.equal(p.imported,1);assert.equal(ctx.engine.store.dataset(d.id).data.status,'needs-review')}))
 test('table-review catalog and selected-file coverage are paginated for large collections',async()=>fixture(async ctx=>{const paths=[];for(let i=0;i<26;i++){const file=path.join(ctx.source,`file${i}.csv`);paths.push(file);await fs.writeFile(file,'id,value\na,1\n')}await ctx.engine.execute({action:'import',folder:ctx.source});const a=await ctx.engine.execute({action:'catalog',folder:ctx.source});assert.equal(a.datasets.length,20);assert.equal(a.total,26);assert.equal(a.nextOffset,20);const b=await ctx.engine.execute({action:'catalog',folder:ctx.source,payload:{offset:20}});assert.equal(b.datasets.length,6);assert.equal(b.nextOffset,null);const discovered=(await ctx.engine.execute({action:'discover',paths,payload:{}})).value;assert.equal(discovered.datasets.length,25);assert.equal(discovered.nextOffset,25);assert.equal(discovered.selectedFiles.length,16);assert.equal(discovered.nextFileOffset,16);const more=(await ctx.engine.execute({action:'discover',paths,payload:{offset:25,fileOffset:16}})).value;assert.equal(more.datasets.length,1);assert.equal(more.selectedFiles.length,10);assert.equal(more.nextFileOffset,null)}))
 test('cross-file unions reject incompatible reviewed row grains',async()=>fixture(async ctx=>{const a=await approve(ctx,await importCsv(ctx,'grain-a.csv','id,value\na,1\n'),{key:['c0'],grain:'One invoice'}),b=await approve(ctx,await importCsv(ctx,'grain-b.csv','id,value\nb,2\n'),{key:['c0'],grain:'One invoice line'});await assert.rejects(()=>ctx.engine.execute({action:'query',paths:[a.path,b.path],payload:{datasetIds:[a.id,b.id],metrics:[{op:'count',as:'n'}]}}),/row grains/)}))
+
+test('fresh database initializes once for overlapping metadata requests',async()=>fixture(async ctx=>{
+  process.env.NAWA_ANALYTICS_HARNESS_USERDATA=ctx.state
+  const {service}=await import('./service-harness.mjs')
+  const s=new service.AnalyticsService({roots:async()=>[ctx.source],isHomeSender:()=>true})
+  try{
+    const reads=await Promise.all(Array.from({length:8},()=>s.request(201,{action:'statuses',paths:[]})))
+    assert.deepEqual(reads,Array.from({length:8},()=>[]))
+    const catalog=await s.request(201,{action:'catalog',folder:ctx.source})
+    assert.equal(catalog.total,0)
+  }finally{s.stop()}
+}))
+
+test('real workers handle imports, status refreshes and result receipt writes together',async()=>fixture(async ctx=>{
+  process.env.NAWA_ANALYTICS_HARNESS_USERDATA=ctx.state
+  const {service}=await import('./service-harness.mjs')
+  const s=new service.AnalyticsService({roots:async()=>[ctx.source],isHomeSender:()=>true})
+  const file=path.join(ctx.source,'approved.csv'),incoming=path.join(ctx.source,'incoming.csv')
+  await fs.writeFile(file,'id,value\na,10\nb,20\n')
+  try{
+    await s.request(202,{action:'import',folder:ctx.source})
+    const catalog=await s.request(202,{action:'catalog',folder:ctx.source}),draft=catalog.datasets[0]
+    await s.request(202,{action:'review',payload:{datasetId:draft.id,expectedGeneration:draft.generation,policy:{...draft.policy,grain:'One test record',confirmed:true}}})
+    await fs.writeFile(incoming,'id,value\n'+Array.from({length:12000},(_,i)=>`row${i},${i}`).join('\n'))
+    const importing=s.request(202,{action:'import',folder:ctx.source})
+    const statuses=Array.from({length:12},()=>s.request(202,{action:'statuses',paths:[file,incoming]}))
+    const queries=Array.from({length:6},()=>s.selected(202,[file],'query',{datasetIds:[draft.id],metrics:[{op:'sum',column:'c1',as:'total'}]},new AbortController().signal))
+    const [imported,refreshed,results]=await Promise.all([importing,Promise.all(statuses),Promise.all(queries)])
+    assert.equal(imported.failed,0)
+    assert.equal(imported.imported,1)
+    for(const status of refreshed)assert.ok(status.every(f=>f.state!=='failed'))
+    assert.equal(new Set(results.map(r=>r.value.id)).size,6)
+    for(const result of results){
+      assert.equal(result.value.rows[0].total,'30')
+      const saved=await s.selected(202,[file],'result',{resultId:result.value.id},new AbortController().signal)
+      assert.equal(saved.value.rows[0].total,'30')
+    }
+  }finally{s.stop()}
+}))

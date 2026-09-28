@@ -17,6 +17,7 @@ let searchPatch: Record<string, unknown>, documentPatch: Record<string, unknown>
 let onSearch: (() => Promise<void>) | undefined
 let onPoll: (() => void) | undefined
 let toolPatch: Record<string, unknown>, onTool: (() => Promise<void>) | undefined
+let extraRoots: unknown[]
 const signal = () => new AbortController().signal
 beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), 'nawa-myagent-'))
@@ -25,6 +26,7 @@ beforeEach(async () => {
   mapping = join(directory, 'mappings.json'); contentHash = await hashFile(file); revision = 'revision-1'
   selectedRoots = [root]; calls = []; searchPatch = {}; documentPatch = {}; windowPatch = {}; onSearch = undefined; onPoll = undefined; running = false
   toolPatch = {}; onTool = undefined
+  extraRoots = []
   let jobId = ''
   server = createServer(async (req, res) => {
     try {
@@ -33,7 +35,7 @@ beforeEach(async () => {
       calls.push({ route, method: req.method!, body, key: req.headers['x-myagent-key'] as string | undefined })
       let result: unknown
       const doc = () => ({ id: 'doc-1', contentHash, indexRevision: revision, chunkCount: 2, fullyEmbedded: true, updatedAt: new Date().toISOString(), ...documentPatch })
-      if (route === 'roots') result = [{ id: 'docs', displayName: 'Documents', available: true, localPath: root, maxFilesPerJob: 2, maxFileSizeBytes: 50_000_000, allowedExtensions: ['.txt'] }]
+      if (route === 'roots') result = [{ id: 'docs', displayName: 'Documents', available: true, localPath: root, maxFilesPerJob: 2, maxFileSizeBytes: 50_000_000, allowedExtensions: ['.txt'] }, ...extraRoots]
       else if (route === 'jobs') { jobId = body.jobId; result = { jobId } }
       else if (route === `jobs/${jobId}/cancel`) { running = false; result = { canceled: true } }
       else if (route === `jobs/${jobId}`) { onPoll?.(); result = { status: running ? 'running' : 'completed', files: [{ relativePath: 'report.txt', status: 'indexed', documentId: 'doc-1' }] } }
@@ -65,6 +67,51 @@ afterEach(async () => {
 const index = () => client.index(settings, 'fixture-key', root, true, signal(), () => {})
 
 describe('MyAgent shared-file adapter', () => {
+  it('refreshes only explicit files, including unchanged files, and preserves unselected mappings', async () => {
+    await index()
+    const other = join(root, 'unselected.txt'); await writeFile(other, 'Unselected content')
+    const saved = JSON.parse(await readFile(mapping, 'utf8'))
+    saved.entries.push({ ...saved.entries[0], path: other, documentId: 'unselected-doc' })
+    await writeFile(mapping, JSON.stringify(saved))
+    const fresh = new MyAgentRag(mapping, async () => selectedRoots, fetch, 10)
+    calls = []
+    const result = await fresh.indexSelected(settings, 'fixture-key', root, [file, file], signal(), () => {})
+    expect(result).toMatchObject({ scope: 'selected', scanned: 1, embedded: 1, failed: 0, files: [{ path: file, status: 'embedded' }] })
+    expect(calls.filter(call => call.route === 'jobs').map(call => call.body.selections)).toEqual([['report.txt']])
+    expect(calls.some(call => call.route.includes('unselected-doc'))).toBe(false)
+    expect(JSON.parse(await readFile(mapping, 'utf8')).entries.some((entry: any) => entry.path === other)).toBe(true)
+  })
+  it('batches selected files by their containing server root and reports unsupported files', async () => {
+    const sub = join(root, 'nested'); await mkdir(sub)
+    const second = join(sub, 'report.txt'); await writeFile(second, 'Annual refund policy')
+    const unsupported = join(root, 'legacy.xls'); await writeFile(unsupported, 'legacy')
+    extraRoots = [{ id: 'nested', displayName: 'Nested', available: true, localPath: sub, maxFilesPerJob: 1, maxFileSizeBytes: 100000, allowedExtensions: ['.txt'] }]
+    const result = await client.indexSelected(settings, 'fixture-key', root, [file, second, unsupported], signal(), () => {})
+    expect(result).toMatchObject({ embedded: 2, failed: 1, incomplete: false })
+    expect(calls.filter(call => call.route === 'jobs').map(call => [call.body.rootId, call.body.selections])).toEqual([['docs', ['report.txt']], ['nested', ['report.txt']]])
+    expect(result.files?.find(entry => entry.path === unsupported)).toMatchObject({ status: 'failed', error: expect.stringContaining('extension') })
+  })
+  it('rejects empty or expanded selected scopes before making requests and cancels accepted jobs', async () => {
+    await expect(client.indexSelected(settings, '', root, [], signal(), () => {})).rejects.toThrow('1–256')
+    await expect(client.indexSelected(settings, '', root, [join(directory, 'outside.txt')], signal(), () => {})).rejects.toThrow('inside')
+    expect(calls).toEqual([])
+    running = true; const abort = new AbortController(); onPoll = () => abort.abort()
+    const result = await client.indexSelected(settings, '', root, [file], abort.signal, () => {})
+    expect(result).toMatchObject({ incomplete: true, files: [{ status: 'canceled' }] })
+    expect(calls.some(call => call.route.endsWith('/cancel'))).toBe(true)
+  })
+  it('performs live snapshot diagnostics only when requested and exposes changed generations', async () => {
+    await index(); calls = []
+    await client.statuses(settings, [file])
+    expect(calls).toEqual([])
+    expect((await client.statuses(settings, [file], 'fixture-key', true))[0]).toMatchObject({ status: 'embedded', verified: true })
+    expect(calls.map(call => call.route)).toEqual(['documents/doc-1'])
+    documentPatch.indexRevision = 'new-generation'
+    expect((await client.statuses(settings, [file], 'fixture-key', true))[0]).toMatchObject({ status: 'stale', verified: false })
+    const offline = new MyAgentRag(mapping, async () => selectedRoots, async () => { throw new Error('offline fixture-key') })
+    const failed = (await offline.statuses(settings, [file], 'fixture-key', true))[0]
+    expect(failed.verified).toBe(false); expect(failed.error).toContain('[redacted]'); expect(failed.error).not.toContain('fixture-key')
+  })
   it('indexes through root-relative jobs and returns scoped, cited evidence with neighbors', async () => {
     expect(await index()).toMatchObject({ embedded: 1, failed: 0, incomplete: false })
     expect(calls.find(c => c.route === 'jobs')?.body).toMatchObject({ rootId: 'docs', selections: ['report.txt'], recursive: false })

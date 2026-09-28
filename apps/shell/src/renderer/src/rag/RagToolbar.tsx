@@ -2,8 +2,9 @@ import { useSidebarText } from '../explorer/sidebar-i18n'
 import { usePanelActivity } from '../explorer/panel-state'
 import { useEffect, useState } from 'react'
 import type { RagProgress, RagSettingsView } from '../../../shared/rag-api'
+import { SelectedFileRefresh } from './SelectedFileRefresh'
 import './rag.css'
-export function RagToolbar({ folder, inSidebar = false, onStatus }: { folder: string | null; inSidebar?: boolean; onStatus?(value: string): void }) {
+export function RagToolbar({ folder, selectedFiles = [], inSidebar = false, onStatus, onSetup }: { folder: string | null; selectedFiles?: string[]; inSidebar?: boolean; onStatus?(value: string): void; onSetup?(): void }) {
   const { s } = useSidebarText()
   const [retry, setRetry] = useState(0)
   const [settings, setSettings] = useState<RagSettingsView | null>(null), [progress, setProgress] = useState<RagProgress | null>(null)
@@ -38,18 +39,23 @@ export function RagToolbar({ folder, inSidebar = false, onStatus }: { folder: st
   const remote = settings?.settings.backend === 'myagent'
   const configured = settings?.settings.enabled && (remote || !!settings?.settings.model)
   const running = progress?.running === true
-  const status = error ? 'Check needs attention' : running ? 'Indexing…' : !settings ? 'Loading…' : configured ? 'Ready' : 'Needs setup'
+  const status = error ? 'Check needs attention' : running ? 'Indexing…' : !settings ? 'Loading…' : configured ? 'Enabled' : 'Needs setup'
   useEffect(() => { onStatus?.(status) }, [onStatus, status])
   usePanelActivity('ragAnalytics', 'index', error ? { kind: 'error', text: s('File search') + ': ' + error } : running ? { kind: 'busy', text: s('Indexing…') + ' ' + (progress?.folder ?? '') } : null)
   if (!folder) return null
   return <section className="nawa-rag-toolbar" aria-label={s('File search')} onContextMenu={e => e.stopPropagation()}>
     <details open={inSidebar || undefined}><summary hidden={inSidebar}>{s('File search')} · {s(status)}</summary>
       <p><strong>{remote ? "MyAgent · " : settings?.settings.model ? settings.settings.model + " · " : ""}</strong><bdi>{remote ? settings?.settings.serverUrl : settings?.settings.baseUrl}</bdi></p>
-      {status === 'Needs setup' && <p role="status">{s('Configure and enable a RAG backend in Search settings.')}</p>}
+      {status === 'Needs setup' && <p role="status">{s('Configure and enable file search in Setup.')}</p>}
+      {onSetup && <button type="button" className="set-btn" onClick={onSetup}>{s('Configure file search')}</button>}
+      {remote && <SelectedFileRefresh folder={folder} selectedFiles={selectedFiles} configured={!!configured} progress={progress} onProgress={setProgress}/>}
+      <details className="nawa-directory-indexing" open={!remote || undefined}><summary>{s('Index the whole directory')}</summary>
+      <p>{s('Use this to prepare all supported files in this directory. It does not select those files for chat.')}</p>
       <label className="nawa-rag-check"><input type="checkbox" disabled={running || busy} checked={recursive} onChange={e => setRecursive(e.target.checked)}/>{s('Include subdirectories')}</label>
       <small>{s('Hidden files, links and node_modules are excluded.')}</small>
       <label className="nawa-rag-check"><input type="checkbox" disabled={running || busy} checked={consent} onChange={e => setConsent(e.target.checked)}/>{s(remote ? 'I allow MyAgent on this machine to read this directory and store its contents in the shared index using its configured embedding service.' : 'I allow this directory’s text to be sent to the embedding server and stored in the unencrypted local index.')}</label>
       <div className="nawa-rag-actions"><button className="set-btn primary" type="button" disabled={busy || running || !consent || !configured} onClick={() => void action('index')}>{s('Index / refresh directory')}</button></div>
+      </details>
       <details><summary>{s('Manage stored data')}</summary>
         <button className="set-btn" type="button" disabled={busy || running} onClick={() => setClear(true)}>{s(remote ? 'Forget file mappings' : 'Clear index')}</button>
         {clear && <div role="group" aria-label={s(remote ? 'Forget file mappings' : 'Clear index')}><p>{s(remote ? 'Forget this directory’s MyAgent mappings? Shared server documents, source files and conversations are kept.' : 'Clear these records? Source files and conversations are kept.')}</p><button className="set-btn danger" disabled={busy} onClick={() => void action('clear')}>{s('Clear')}</button> <button className="set-btn" disabled={busy} onClick={() => setClear(false)}>{s('Cancel')}</button></div>}

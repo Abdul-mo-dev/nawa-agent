@@ -22,3 +22,15 @@
 .nawa-rag-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:0 16px; }
 .nawa-rag-path { padding-top:14px; border-top:1px solid color-mix(in srgb,currentColor 20%,transparent); font-size:11px!important; }
 .nawa-rag-error { padding:8px; border-inline-start:3px solid currentColor; font-weight:600; }
+.nawa-selected-refresh { margin:14px 0; padding:12px 0; border-block:1px solid color-mix(in srgb,currentColor 20%,transparent); }
+.nawa-selected-refresh h4 { margin:0 0 8px; }
+.nawa-rag-file-results { list-style:none; margin:10px 0; padding:0; max-height:320px; overflow:auto; }
+.nawa-rag-file-results li { padding:8px 0; border-bottom:1px solid color-mix(in srgb,currentColor 15%,transparent); overflow-wrap:anywhere; }
+.nawa-rag-file-results strong, .nawa-rag-file-results span { display:block; }
+.nawa-rag-file-results p { font-size:11px; }
+.nawa-document-tools { min-width:0; }
+.nawa-document-tool-list { list-style:none; margin:12px 0; padding:0; max-height:420px; overflow:auto; }
+.nawa-document-tool-list li { padding:12px 0; border-bottom:1px solid color-mix(in srgb,currentColor 15%,transparent); overflow-wrap:anywhere; }
+.nawa-document-tool-list li details { margin:0; padding:0; border:0; }
+.nawa-document-tool-list code { white-space:normal; overflow-wrap:anywhere; }
+.nawa-document-tool-list pre { max-width:100%; padding:8px; font-size:11px; white-space:pre-wrap; overflow-wrap:anywhere; border:1px solid color-mix(in srgb,currentColor 15%,transparent); border-radius:6px; }

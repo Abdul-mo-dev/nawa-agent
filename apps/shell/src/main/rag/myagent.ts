@@ -107,15 +107,67 @@ export class MyAgentRag {
     fingerprint(d); return d
   }
   async index(s: RagSettings, key: string, folder: string, recursive: boolean, signal: AbortSignal, report: (p: RagProgress) => void): Promise<RagProgress> {
+    return this.indexScope(s, key, folder, recursive, signal, report)
+  }
+  async indexSelected(s: RagSettings, key: string, folder: string, paths: string[], signal: AbortSignal, report: (p: RagProgress) => void): Promise<RagProgress> {
+    if (!Array.isArray(paths) || !paths.length || paths.length > 256 || paths.some(path => typeof path !== 'string' || !isAbsolute(path) || !within(folder, path))) throw new Error('Select 1–256 individual files inside this directory.')
+    const selected = [...new Map(paths.map(path => [pathKey(path), path])).values()]
+    await authorizePath(await this.roots(), folder)
+    // Validate the full requested scope before making a server request; never expand folders.
+    for (const path of selected) await authorizePath(await this.roots(), dirname(path))
+    await this.load()
+    const server = myAgentUrl(s.serverUrl)
+    const p: RagProgress = { running: true, scope: 'selected', folder, scanned: 0, embedded: 0, unchanged: 0, failed: 0, chunks: 0, current: '', message: 'Checking selected files…', incomplete: false, files: selected.map(path => ({ path, status: 'pending' })) }
+    const emit = () => report({ ...p, files: p.files!.map(file => ({ ...file })) })
+    const fail = (path: string, error: string) => {
+      p.scanned++; p.failed++; p.files = p.files!.map(file => file.path === path ? { path, status: 'failed', error } : file)
+      this.entries.set(this.key(server, path), { server, path, status: 'failed', chunks: 0, error })
+    }
+    emit()
+    try {
+      const roots = await this.serverRoots(s, key, signal), groups = new Map<Root, string[]>()
+      for (const path of selected) {
+        signal.throwIfAborted()
+        const root = roots.filter(r => r.available && within(r.localPath!, path)).sort((a, b) => b.localPath!.length - a.localPath!.length)[0]
+        if (relative(folder, path).split(/[/\\]/).some(excluded)) fail(path, 'Hidden files, links and node_modules are excluded from indexing.')
+        else if (!root) fail(path, 'Add an available MyAgent RAG folder containing this file, restart MyAgent, then refresh it.')
+        else if (!root.allowedExtensions!.some(extension => extension.toLowerCase() === extname(path).toLowerCase())) fail(path, 'This file extension is not enabled in MyAgent extraction settings.')
+        else groups.set(root, [...(groups.get(root) ?? []), path])
+      }
+      await this.save(); emit()
+      for (const [root, group] of groups) {
+        const base = { ...p }
+        const merge = (part: RagProgress) => {
+          const files = new Map(part.files?.map(file => [file.path, file]))
+          Object.assign(p, part, { scope: 'selected', scanned: base.scanned + part.scanned, embedded: base.embedded + part.embedded,
+            unchanged: base.unchanged + part.unchanged, failed: base.failed + part.failed, chunks: base.chunks + part.chunks,
+            files: p.files!.map(file => files.get(file.path) ?? file) })
+          p.running = true; emit()
+        }
+        const result = await this.indexScope(s, key, folder, false, signal, merge, { root, paths: group })
+        if (result.incomplete) { p.incomplete = true; break }
+      }
+      if (!p.incomplete) p.message = `MyAgent: ${p.embedded} selected files refreshed, ${p.failed} failed.`
+    } catch (error) { p.incomplete = true; p.message = signal.aborted ? 'Selected-file refresh stopped. Completed mappings are retained.' : errorText(error) }
+    finally {
+      p.files = p.files!.map(file => ['pending', 'checking', 'indexing'].includes(file.status) ? { ...file, status: signal.aborted ? 'canceled' : 'failed', error: p.message } : file)
+      p.failed = p.files.filter(file => file.status === 'failed').length
+      p.running = false; p.current = ''; emit()
+    }
+    return p
+  }
+  private async indexScope(s: RagSettings, key: string, folder: string, recursive: boolean, signal: AbortSignal, report: (p: RagProgress) => void, selected?: { root: Root; paths: string[] }): Promise<RagProgress> {
     await this.load()
     const server = myAgentUrl(s.serverUrl)
     const p: RagProgress = { running: true, folder, scanned: 0, embedded: 0, unchanged: 0, failed: 0, chunks: 0, current: '', message: 'Checking MyAgent shared roots…', incomplete: false }
-    const emit = () => report({ ...p })
+    if (selected) { p.scope = 'selected'; p.files = selected.paths.map(path => ({ path, status: 'pending' })) }
+    const fileProgress = (path: string, status: NonNullable<RagProgress['files']>[number]['status'], error?: string) => { p.files = p.files?.map(file => file.path === path ? { path, status, ...(error ? { error } : {}) } : file) }
+    const emit = () => report({ ...p, ...(p.files ? { files: p.files.map(file => ({ ...file })) } : {}) })
     let activeJob: string | undefined
     const check = async (path: string) => { signal.throwIfAborted(); await authorizePath(await this.roots(), path) }
     try {
       await check(folder); emit()
-      const root = (await this.serverRoots(s, key, signal)).filter(r => r.available && within(r.localPath!, folder)).sort((a, b) => b.localPath!.length - a.localPath!.length)[0]
+      const root = selected?.root ?? (await this.serverRoots(s, key, signal)).filter(r => r.available && within(r.localPath!, folder)).sort((a, b) => b.localPath!.length - a.localPath!.length)[0]
       if (!root) throw new Error(`Add a MyAgent RAG root containing ${folder}, then restart MyAgent and retry.`)
       if (!Number.isInteger(root.maxFilesPerJob) || root.maxFilesPerJob < 1 || !Number.isFinite(root.maxFileSizeBytes) || root.maxFileSizeBytes < 1) throw new Error('Invalid MyAgent ingestion limits.')
       const extensions = new Set(root.allowedExtensions!.map(e => e.toLowerCase())), seen = new Set<string>()
@@ -134,10 +186,13 @@ export class MyAgentRag {
       const batch: Array<{ path: string; hash: string; relativePath: string }> = []
       const fail = (path: string, error: unknown) => {
         this.entries.set(this.key(server, path), { server, path, status: 'failed', chunks: 0, error: errorText(error) }); p.failed++
+        fileProgress(path, 'failed', errorText(error))
       }
       const publish = async () => {
         if (!batch.length) return
         for (const item of batch) await check(item.path)
+        for (const item of batch) fileProgress(item.path, 'indexing')
+        emit()
         // A caller-generated ID lets cancellation also cancel an accepted job
         // whose admission response was lost or interrupted.
         activeJob = randomUUID()
@@ -166,16 +221,18 @@ export class MyAgentRag {
             if (!doc.fullyEmbedded || fingerprint(doc) !== item.hash || await hashFile(item.path) !== item.hash) throw new Error('File changed during indexing. Refresh it again.')
             this.entries.set(this.key(server, item.path), { server, path: item.path, documentId: doc.id, sourceHash: item.hash, indexRevision: doc.indexRevision, status: 'embedded', chunks: doc.chunkCount, indexedAt: Date.parse(doc.updatedAt) })
             p.embedded++; p.chunks += doc.chunkCount
+            fileProgress(item.path, 'embedded')
           } catch (e) { signal.throwIfAborted(); fail(item.path, e) }
         }
         await this.save(); batch.length = 0; emit()
       }
-      for await (const path of walk(folder)) {
+      for await (const path of selected?.paths ?? walk(folder)) {
         await check(path); p.scanned++; p.current = path; seen.add(pathKey(path))
+        fileProgress(path, 'checking')
         try {
           await regularFile(await this.roots(), path, root.maxFileSizeBytes)
           const hash = await hashFile(path), old = this.entries.get(this.key(server, path))
-          if (old?.status === 'embedded' && old.sourceHash === hash && old.documentId) {
+          if (!selected && old?.status === 'embedded' && old.sourceHash === hash && old.documentId) {
             const d = await this.document(s, key, old.documentId, signal).catch(() => undefined)
             signal.throwIfAborted()
             if (d?.fullyEmbedded && fingerprint(d) === hash && d.indexRevision === old.indexRevision) { p.unchanged++; emit(); continue }
@@ -187,7 +244,7 @@ export class MyAgentRag {
       }
       await publish()
       // Forget removed files only after fully scanning the requested scope.
-      for (const [id, e] of this.entries) if (e.server === server && within(folder, e.path) && (recursive || samePath(dirname(e.path), folder)) && !seen.has(pathKey(e.path))) this.entries.delete(id)
+      if (!selected) for (const [id, e] of this.entries) if (e.server === server && within(folder, e.path) && (recursive || samePath(dirname(e.path), folder)) && !seen.has(pathKey(e.path))) this.entries.delete(id)
       await this.save()
       p.message = `MyAgent: ${p.embedded} indexed, ${p.unchanged} unchanged, ${p.failed} failed. Only server-supported formats were scanned.`
     } catch (e) {
@@ -201,16 +258,30 @@ export class MyAgentRag {
     }
     return p
   }
-  async statuses(s: RagSettings, paths: string[]): Promise<RagFileStatus[]> {
+  async statuses(s: RagSettings, paths: string[], key = '', verify = false): Promise<RagFileStatus[]> {
     await this.load(); const server = myAgentUrl(s.serverUrl), out: RagFileStatus[] = []
-    for (const path of paths) {
+    const status = async (path: string): Promise<RagFileStatus> => {
       const old = this.entries.get(this.key(server, path))
       try {
         await regularFile(await this.roots(), path)
-        if (!old) { out.push({ path, status: 'not-indexed', chunks: 0 }); continue }
+        if (!old) return { path, status: 'not-indexed', chunks: 0 }
         const { server: _server, documentId: _id, indexRevision: _rev, ...view } = old
-        out.push(old.sourceHash && await hashFile(path) !== old.sourceHash ? { ...view, status: 'stale', error: 'Source changed. Refresh MyAgent indexing.' } : view)
-      } catch (e) { out.push({ path, status: 'stale', chunks: 0, error: errorText(e) }) }
+        if (old.sourceHash && await hashFile(path) !== old.sourceHash) return { ...view, status: 'stale', error: 'Source changed. Refresh MyAgent indexing.', verified: false }
+        if (verify && old.status === 'embedded' && old.documentId) {
+          try {
+            const doc = await this.document({ ...s, timeoutMs: Math.min(s.timeoutMs, 5000) }, key, old.documentId)
+            // Recheck bytes after the network probe, as retrieval does.
+            if (!doc.fullyEmbedded || fingerprint(doc) !== old.sourceHash || doc.indexRevision !== old.indexRevision || await hashFile(path) !== old.sourceHash) return { ...view, status: 'stale', error: 'MyAgent indexed snapshot changed. Refresh this file.', verified: false }
+            await regularFile(await this.roots(), path)
+            return { ...view, verified: true }
+          } catch (error) { return { ...view, verified: false, error: `Could not verify MyAgent snapshot: ${key ? errorText(error).replaceAll(key, '[redacted]') : errorText(error)} Check server readiness, then refresh this file if its index is missing.` } }
+        }
+        return view
+      } catch (e) { return { path, status: 'stale', chunks: 0, error: errorText(e), verified: false } }
+    }
+    // This live check is explicitly requested, bounded, and never run by badge polling.
+    for (let offset = 0; offset < paths.length; offset += 4) {
+      out.push(...await Promise.all(paths.slice(offset, offset + 4).map(status)))
     }
     return out
   }

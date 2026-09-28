@@ -433,6 +433,7 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
         <WorkspaceControlPanel visible={inspectorVisible} drawer={drawer} onActivity={setPanelActivity} active={lastPanel.current}
           assistantLabel={t('assistant')} closeLabel={t('close')}
           folder={folder && currentRootPath ? folder : null}
+          selectedFiles={selectedItems.filter(item => item.kind === 'file').map(item => item.path)}
           onChange={pane => changePrefs({ pane })} onClose={() => changePrefs({ pane: 'none' })}
           onAddFolder={() => { void addRoot() }}
           assistant={(folder && currentRootPath) || selectedItems.length > 0 ? <WorkspaceChat folder={folder} folderName={folder ? basename(folder) : 'Selected items'} scopePaths={selectedItems.filter(item => item.kind === 'file').map(item => item.path)} scopeDirs={selectedItems.filter(item => item.kind === 'folder').map(item => item.path)} onOpenFile={openFile} onClose={() => changePrefs({ pane: 'none' })} /> : <div className="ex-pane-empty"><span className="ex-ai-orb"><Icon name="sparkles" size={32} /></span><h2>{t('chooseFolder')}</h2><p>{t('chooseFolderHelp')}</p><button className="ex-secondary" onClick={() => { void addRoot() }}><Icon name="plus" size={15} />{t('add')}</button><div className="ex-readonly"><Icon name="check" size={13} />{t('readOnly')}</div></div>}

@@ -5,13 +5,16 @@ import type { DirectoryCommit } from '../../../shared/directory-actions-api'
 export function actionClaimCorrection(text: string, receipts: readonly DirectoryCommit[], selectedPaths: readonly string[] = []): string | null {
   // Only explicit completed-action claims. Descriptions, negatives and proposed changes are not claims.
   const claims = text.split(/(?<=[.!?])\s+|\n/).filter(sentence => !/\b(?:not|no|never|cannot|can't|couldn't|would|will|should|need|pending|declined|discarded)\b/i.test(sentence) &&
-    /\b(?:(?:I|we)(?:'ve| have)?\s+(?:successfully\s+)?(?:updated|created|deleted|saved|changed|converted|removed)|(?:changes|file|document|workbook)\s+(?:were|was|has been|have been)\s+(?:successfully\s+)?(?:saved|updated|created|changed|deleted|removed))\b/i.test(sentence))
+    /\b(?:(?:I|we)(?:'ve| have)?\s+(?:successfully\s+)?(?:permanently\s+)?(?:updated|created|deleted|saved|changed|converted|removed|renamed|moved|copied|duplicated)|(?:changes|file|folder|document|workbook)\s+(?:were|was|has been|have been)\s+(?:successfully\s+)?(?:permanently\s+)?(?:saved|updated|created|changed|deleted|removed|renamed|moved|copied|duplicated))\b/i.test(sentence))
   const pathKey = (path: string) => path.replaceAll('\\', '/').toLowerCase()
   for (const claim of claims) {
-    const operation = /\b(?:deleted|removed)\b/i.test(claim) ? 'delete' : /\bcreated\b/i.test(claim) ? 'create' : 'write'
-    const matching = receipts.filter(receipt => operation === 'write' ? receipt.operation !== 'delete' : receipt.operation === operation)
-    const named = selectedPaths.filter(path => claim.toLowerCase().includes(pathKey(path).split('/').pop()!))
-    if (!matching.length || named.some(path => !matching.some(receipt => pathKey(receipt.path) === pathKey(path))))
+    const operations: DirectoryCommit['operation'][] = /\b(?:deleted|removed|Recycle Bin)\b/i.test(claim) ? ['delete', 'delete-folder', 'delete-permanently']
+      : /\brenamed\b/i.test(claim) ? ['rename'] : /\bmoved\b/i.test(claim) ? ['move']
+      : /\b(?:copied|duplicated)\b/i.test(claim) ? ['copy'] : /\bcreated\b/i.test(claim) ? ['create', 'create-folder'] : ['update', 'create']
+    const matching = receipts.filter(receipt => !receipt.status && operations.includes(receipt.operation) &&
+      (!/\bpermanently\b/i.test(claim) || receipt.permanent || receipt.operation === 'delete-permanently'))
+    const named = [...new Set([...selectedPaths, ...receipts.flatMap(r => r.destination ? [r.destination] : [])])].filter(path => claim.toLowerCase().includes(pathKey(path).split('/').pop()!))
+    if (!matching.length || named.some(path => !matching.some(receipt => [receipt.path, receipt.destination].some(p => p && pathKey(p) === pathKey(path)))))
       return 'No file commit receipt exists for the claimed action and target in this request. Describe only the confirmed commit receipts; identify declined or unsaved actions accurately.'
   }
   return null

@@ -15,6 +15,7 @@ interface Props {
   assistantLabel: string
   closeLabel: string
   folder: string | null
+  selectedFiles?: string[]
   assistant: ReactNode
   onChange(tab: WorkspaceTab): void
   onClose(): void
@@ -107,7 +108,7 @@ export function WorkspaceControlPanel(props: Props) {
   const choose = (tab: WorkspaceTab) => { setFocused(tab); props.onChange(tab) }
   const content: Record<WorkspaceTab, ReactNode> = {
     ai: props.assistant,
-    ragAnalytics: <RagAnalyticsPanel folder={props.folder} onAddFolder={props.onAddFolder} />,
+    ragAnalytics: <RagAnalyticsPanel folder={props.folder} selectedFiles={props.selectedFiles} onAddFolder={props.onAddFolder} />,
     provider: <div className="nawa-provider-panel"><AiModelPane t={t} /></div>,
   }
   return <PanelActivityContext.Provider value={publish}>

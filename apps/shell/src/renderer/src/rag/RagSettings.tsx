@@ -3,22 +3,26 @@ import { useSidebarText } from '../explorer/sidebar-i18n'
 import { usePanelActivity } from '../explorer/panel-state'
 import { DEFAULT_RAG_SETTINGS, type RagSettings as Settings, type RagSettingsView } from '../../../shared/rag-api'
 import './rag.css'
-export function RagSettings() {
+import { MyAgentDocumentTools } from '../myagent/MyAgentDocumentTools'
+export function RagSettings({ myAgentOnly = false, suspended = false, allowKeyGeneration = false, selectedFiles, compact = false, onDirtyChanged }: { myAgentOnly?: boolean; suspended?: boolean; allowKeyGeneration?: boolean; selectedFiles?: string[]; compact?: boolean; onDirtyChanged?(dirty: boolean): void }) {
   const { s } = useSidebarText()
   const [retry, setRetry] = useState(0)
   const id = useId(), [settings, setSettings] = useState<Settings>({ ...DEFAULT_RAG_SETTINGS })
   const [view, setView] = useState<RagSettingsView | null>(null), [key, setKey] = useState(''), [removeKey, setRemoveKey] = useState(false)
-  const [busy, setBusy] = useState(false), [loaded, setLoaded] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('')
+  const [working, setBusy] = useState(false), [loaded, setLoaded] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('')
+  const [toolsOpen, setToolsOpen] = useState(false), [toolsVisited, setToolsVisited] = useState(false)
+  const busy = working || suspended
   const remote = settings.backend === 'myagent'
   const dirty = loaded && (!!key || removeKey || JSON.stringify(settings) !== JSON.stringify(view?.settings))
+  useEffect(() => { onDirtyChanged?.(dirty || working) }, [dirty, working, onDirtyChanged])
   usePanelActivity('ragAnalytics', 'search-settings', error ? { kind: 'error', text: error } : dirty ? { kind: 'unsaved', text: s('Unsaved search settings') } : null)
   useEffect(() => {
     let alive = true
     setError('')
     if (!window.nawaRag) { setError('RAG bridge is unavailable. Rebuild and restart Nawa.'); return }
-    void window.nawaRag.settings().then(result => { if (alive) { setView(result); setSettings(result.settings); setLoaded(true) } }).catch(e => { if (alive) setError(String(e)) })
+    void window.nawaRag.settings().then(result => { if (alive) { setView(result); setSettings(myAgentOnly ? { ...result.settings, backend: 'myagent' } : result.settings); setLoaded(true) } }).catch(e => { if (alive) setError(String(e)) })
     return () => { alive = false }
-  }, [retry])
+  }, [retry, myAgentOnly])
   const change = <K extends keyof Settings>(field: K, value: Settings[K]) => { setSettings(previous => ({ ...previous, [field]: value })); setNotice('') }
   const credential = () => removeKey ? '' : key.trim() ? key : undefined
   const perform = async (action: 'save' | 'test') => {
@@ -30,18 +34,18 @@ export function RagSettings() {
     } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false) }
   }
-  const textField = (field: 'serverUrl' | 'baseUrl' | 'model' | 'modelRevision' | 'documentPrefix' | 'queryPrefix', label: string, hint: string) => <label className="nawa-rag-field" htmlFor={`${id}-${field}`} key={field}><span>{s(label)}</span><input aria-label={s(label)} id={`${id}-${field}`} className="set-input" value={settings[field]} disabled={busy} onChange={e => change(field, e.target.value)} spellCheck={false}/><small>{s(hint)}</small></label>
+  const textField = (field: 'serverUrl' | 'baseUrl' | 'model' | 'modelRevision' | 'documentPrefix' | 'queryPrefix', label: string, hint: string) => <label className="nawa-rag-field" htmlFor={`${id}-${field}`} key={field}><span>{s(label)}</span><input aria-label={s(label)} id={`${id}-${field}`} className="set-input" value={settings[field]} disabled={busy} onChange={e => change(field, e.target.value)} spellCheck={false}/>{!compact && <small>{s(hint)}</small>}</label>
   const numberField = (field: 'dimensions' | 'maxInputTokens' | 'chunkTokens' | 'overlapTokens' | 'batchSize' | 'concurrency' | 'timeoutMs' | 'topK' | 'contextChars', label: string, min: number, max: number) => <label className="nawa-rag-field" key={field} htmlFor={`${id}-${field}`}><span>{s(label)}</span><input id={`${id}-${field}`} className="set-input" type="number" min={min} max={max} step={1} value={settings[field]} disabled={busy} onChange={e => change(field, Number(e.target.value))}/></label>
   if (!loaded) return <div><p role={error ? 'alert' : 'status'}>{error || s('Loading…')}</p>{error && <button type="button" className="set-btn" onClick={() => setRetry(value => value + 1)}>{s('Retry')}</button>}</div>
-  return <section className="nawa-rag-settings" aria-label={s('Search settings')}>
-    <h3 className="set-pane-title">{s("Search backend")}</h3>
-    <p>{s('Choose the service that indexes and searches your selected files. Your chat model is configured separately.')}</p>
-    <label className="nawa-rag-check"><input type="checkbox" checked={settings.enabled} disabled={busy} onChange={e => change('enabled', e.target.checked)}/> {s("Enable RAG for directory chat’s selected-file content searches")}</label>
-    <label className="nawa-rag-field" htmlFor={`${id}-backend`}><span>{s('RAG backend')}</span><select aria-label={s('RAG backend')} id={`${id}-backend`} className="set-input" value={settings.backend} disabled={busy} onChange={e => change('backend', e.target.value as Settings['backend'])}><option value="myagent">MyAgent server (localhost)</option><option value="local">{s('Local embeddings')}</option></select></label>
+  return <section className={`nawa-rag-settings${compact ? ' is-compact' : ''}`} aria-label={s(myAgentOnly ? 'MyAgent connection' : 'Search settings')}>
+    {!myAgentOnly && !compact && <><h3 className="set-pane-title">{s('Search backend')}</h3><p>{s('Choose the service that indexes and searches your selected files. Your chat model is configured separately.')}</p></>}
+    <label className="nawa-rag-check"><input type="checkbox" checked={settings.enabled} disabled={busy} onChange={e => change('enabled', e.target.checked)}/> {s(compact ? 'Enable file search' : "Enable RAG for directory chat’s selected-file content searches")}</label>
+    {!myAgentOnly && <label className="nawa-rag-field" htmlFor={`${id}-backend`}><span>{s('RAG backend')}</span><select aria-label={s('RAG backend')} id={`${id}-backend`} className="set-input" value={settings.backend} disabled={busy} onChange={e => change('backend', e.target.value as Settings['backend'])}><option value="myagent">MyAgent server (localhost)</option><option value="local">{s('Local embeddings')}</option></select></label>}
+    {myAgentOnly && view?.settings.backend !== 'myagent' && <p>{s('Saving this connection switches file search to MyAgent. Enter its service key; the local embedding key will not be reused.')}</p>}
     {remote && <>
       {textField('serverUrl', 'MyAgent server URL', 'Example: http://127.0.0.1:5187. MyAgent must run on this machine and have RAG roots containing your document folders.')}
-      <p>{s('MyAgent manages extraction, embeddings and its shared index. Test connection to see its configured document folders.')}</p>
-      <details><summary>{s('MyAgent document tools')}</summary><p>{s('The assistant can read pages, sections and slides, inspect visuals, query spreadsheets and classify text in selected indexed files. Nawa keeps its editing and reviewed-table tools.')}</p><p>{s('Visual analysis and text classification use MyAgent’s configured models, which may be remote. Classifications are saved on the server. Document-tool calls allow at least 3 minutes; classification allows at least 10 minutes. Stop in chat cancels the request.')}</p></details>
+      {!compact && <><p>{s('MyAgent manages extraction, embeddings and its shared index. Test connection to see its configured document folders.')}</p>
+      <details onToggle={event => { setToolsOpen(event.currentTarget.open); if (event.currentTarget.open) setToolsVisited(true) }}><summary>{s('MyAgent document tools')}</summary>{toolsVisited && <MyAgentDocumentTools active={toolsOpen} disabled={busy || dirty || view?.settings.backend !== 'myagent'} selectedFiles={selectedFiles}/>}</details></>}
     </>}
     {!remote && <>
     {textField('baseUrl', 'Embedding API base URL', 'Example: http://127.0.0.1:8081/v1. Requests use /v1/embeddings, not /chat/completions.')}
@@ -63,7 +67,7 @@ export function RagSettings() {
     <details><summary>{s("Performance and retrieval")}</summary><div className="nawa-rag-grid">{!remote && <>{numberField('batchSize', 'Chunks per embedding request', 1, 64)}{numberField('concurrency', 'Concurrent embedding requests', 1, 8)}</>}{numberField('timeoutMs', 'Request timeout (milliseconds)', 1000, 300000)}{numberField('topK', 'Primary retrieved chunks', 1, 24)}{numberField('contextChars', 'Retrieved text character budget', 4000, 64000)}</div><p>{s(remote ? 'MyAgent performs hybrid search. Up to 100 selected files can be searched per request. These settings bound Nawa’s requests and returned context.' : 'Vector and keyword results are fused. Extraction runs in a worker; indexing and search have separate workers. Increase concurrency only within your embedding server’s capacity.')}</p></details>
     <div className="nawa-settings-footer">
       {dirty && <p role="status">{s('Unsaved changes')}</p>}
-      <div className="nawa-rag-actions"><button className="set-btn" type="button" disabled={busy} onClick={() => void perform('test')}>{s(busy ? 'Working…' : 'Test connection')}</button><button className="set-btn" type="button" disabled={busy || !dirty} onClick={() => { setSettings(view!.settings); setKey(''); setRemoveKey(false); setNotice(''); setError('') }}>{s('Discard changes')}</button><button className="set-btn primary" type="button" disabled={busy || !dirty} onClick={() => void perform('save')}>{s(remote ? 'Save search settings' : 'Save embedding settings')}</button></div>
+      <div className="nawa-rag-actions"><button className="set-btn" type="button" disabled={busy} onClick={() => void perform('test')}>{s(busy ? 'Working…' : 'Test connection')}</button><button className="set-btn" type="button" disabled={busy || !dirty} onClick={() => { setSettings(myAgentOnly ? { ...view!.settings, backend: 'myagent' } : view!.settings); setKey(''); setRemoveKey(false); setNotice(''); setError('') }}>{s('Discard changes')}</button><button className="set-btn primary" type="button" disabled={busy || !dirty} onClick={() => void perform('save')}>{s(myAgentOnly ? 'Save connection' : remote ? 'Save search settings' : 'Save embedding settings')}</button>{remote && (myAgentOnly || allowKeyGeneration) && <button className="set-btn" type="button" disabled={busy || removeKey} onClick={() => { void (async () => setKey(await window.nawaMyAgent.generateKey()))().catch(e => setError(String(e))) }}>{s('Generate new service key')}</button>}</div>
     {notice && <p role="status">{notice}</p>}{error && <p className="nawa-rag-error" role="alert">{error}</p>}
     </div>
     {view && <details><summary>{s('Storage details')}</summary><p className="nawa-rag-path">{s(remote ? 'Local file mappings' : 'Database')}: <code>{view.databasePath}</code><br/>{s(remote ? 'Only file mappings are stored here. MyAgent stores the shared index. Forgetting mappings keeps shared server documents, source files and conversations.' : 'Extracted text and vectors are unencrypted. Clearing an index keeps source files and conversations.')}</p></details>}
