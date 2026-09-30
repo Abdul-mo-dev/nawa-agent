@@ -33,9 +33,23 @@ export function DirectoryTree({ root, selectedPath, revision, get, load, navigat
     setFocused(root.path)
   }, [root.path])
   useEffect(() => {
-    for (const path of expanded) if (isWithin(path, root.path)) void load(path)
+    if (!root.usable) return
+    // Saved expansion paths are preferences, not evidence that a directory still exists.
+    // Discover each expanded child through its current parent listing before loading it.
+    const loadExpanded = (path: string, depth = 0) => {
+      if (depth > 40 || !expanded.has(path)) return
+      void load(path)
+      const state = get(path)
+      if (!state?.listing || state.loading || state.stale || state.error || state.listing.missing) return
+      for (const child of state.listing.folders) {
+        if (isWithin(child.path, path) && !samePath(child.path, path)) loadExpanded(child.path, depth + 1)
+      }
+    }
+    loadExpanded(root.path)
+  }, [expanded, root.path, root.usable, get, load, revision])
+  useEffect(() => {
     try { localStorage.setItem(EXPANDED_KEY, JSON.stringify([...expanded].slice(-128))) } catch { /* Private windows can deny storage. */ }
-  }, [expanded, root.path, load, revision])
+  }, [expanded])
   useEffect(() => {
     if (!selectedPath || !isWithin(selectedPath, root.path)) return
     const components = selectedPath.replace(/\\/g, '/').split('/')
@@ -80,7 +94,7 @@ export function DirectoryTree({ root, selectedPath, revision, get, load, navigat
   }
   const render = (path: string, name: string, depth: number, parent?: string): ReactNode => {
     if (depth > 40) return null
-    const state = get(path), open = expanded.has(path)
+    const state = root.usable ? get(path) : undefined, open = expanded.has(path)
     const folders = [...(state?.listing?.folders ?? [])].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
     const files = [...(state?.listing?.files ?? [])].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
     const current = !!selectedPath && samePath(path, selectedPath)
@@ -97,6 +111,7 @@ export function DirectoryTree({ root, selectedPath, revision, get, load, navigat
         {depth === 0 && <span className="ex-root-dot" aria-hidden="true" />}
       </div>
       {open && <div role="group">
+        {!root.usable && <div className="ex-tree-message ex-error" role="status">This folder is unavailable. Reconnect it or remove it from the workspace.</div>}
         {state?.loading && !state.listing && <div className="ex-tree-message" role="status">Loading…</div>}
         {state?.error && <div className="ex-tree-message ex-error"><span>{state.error}</span><button type="button" onClick={() => void load(path, true)}>Retry</button></div>}
         {folders.map(folder => render(folder.path, folder.name, depth + 1, path))}

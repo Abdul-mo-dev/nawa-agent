@@ -14,7 +14,7 @@ export class QuerySession {
   readonly db:DatabaseSync
   readonly sql:string[]=[]
   readonly parameters:unknown[][]=[]
-  constructor(readonly store:AnalyticsStore,readonly paths:string[],readonly settings:AnalyticsSettings,readonly check:()=>void){this.db=store.reader(check)}
+  constructor(readonly store:AnalyticsStore,readonly paths:string[],readonly settings:AnalyticsSettings,readonly check:()=>void,databasePath?:string){this.db=store.reader(check,databasePath)}
   close():void{this.db.close()}
   statement(sql:string,params:SQLInputValue[]=[]):import('node:sqlite').StatementSync{
     this.check();this.sql.push(sql);this.parameters.push(jsonSafe(params) as unknown[])

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { HomeApi } from '../src/shared/home-api'
 import { HOME_CHANNELS } from '../src/shared/home-api'
+import { ANALYTICS_CHANNEL, type AnalyticsApi } from '../src/shared/analytics-api'
 
 const electronMocks = vi.hoisted(() => ({
   exposed: new Map<string, unknown>(),

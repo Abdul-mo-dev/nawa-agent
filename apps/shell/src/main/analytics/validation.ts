@@ -1,4 +1,5 @@
 import { DEFAULT_ANALYTICS_SETTINGS, type AnalyticsSettings, type TablePolicy, type DataColumn } from '../../shared/analytics-api'
+import { MAX_ROW_GRAIN_LENGTH, rowGrainError } from '../../shared/analytics-policy'
 export function object(value: unknown, label = 'arguments'): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`Invalid ${label}: expected an object.`)
   return value as Record<string, unknown>
@@ -22,7 +23,12 @@ export function id(value: unknown, label = 'identifier'): string {
 }
 export function settings(raw: unknown): AnalyticsSettings {
   const r = { ...DEFAULT_ANALYTICS_SETTINGS, ...object(raw, 'analytics settings') }
+  if (typeof r.allowAgentPreparation !== 'boolean') throw new Error('Agent preparation consent must be true or false.')
+  if (typeof r.allowAgentApproval !== 'boolean') throw new Error('Agent approval consent must be true or false.')
+  if (r.allowAgentApproval && !r.allowAgentPreparation) throw new Error('Enable agent preparation before automatic approval.')
   return {
+    allowAgentPreparation: r.allowAgentPreparation,
+    allowAgentApproval: r.allowAgentApproval,
     maxFileMiB: int(r.maxFileMiB, 'Maximum file size', 1, 8192),
     maxRows: int(r.maxRows, 'Maximum rows', 1, 10000000),
     maxColumns: int(r.maxColumns, 'Maximum columns', 1, 1024),
@@ -34,6 +40,8 @@ export function settings(raw: unknown): AnalyticsSettings {
 }
 export function policy(raw: unknown, maxColumns: number): TablePolicy {
   const r = object(raw, 'table policy')
+  const grainError = rowGrainError(r.grain)
+  if (grainError) throw new Error(grainError)
   const columns = list(r.columns, 'columns', maxColumns).map((v, i): DataColumn => {
     const c = object(v, 'column'), type = text(c.type, 'column type') as DataColumn['type']
     if (!['text', 'integer', 'decimal', 'real', 'date', 'boolean'].includes(type)) throw new Error('Unsupported column type.')
@@ -56,7 +64,7 @@ export function policy(raw: unknown, maxColumns: number): TablePolicy {
   for (const k of [...key, ...(currencyColumn ? [currencyColumn] : [])]) if (!columns.some(c => c.id === k)) throw new Error(`Unknown policy column: ${k}.`)
   if (!['reject', 'saved-cache'].includes(String(r.formulaPolicy))) throw new Error('Choose reject or saved-cache for formulas.')
   return { name: text(r.name, 'table name', 256), description: text(r.description ?? '', 'description', 4000, true),
-    grain: text(r.grain, 'row grain', 1000), headerRow, firstRow,
+    grain: text(r.grain, 'row grain', MAX_ROW_GRAIN_LENGTH), headerRow, firstRow,
     lastRow: r.lastRow == null ? null : int(r.lastRow, 'Last data row', firstRow, 10000000), firstColumn, lastColumn, columns, key,
     currencyColumn, includeHiddenRows: r.includeHiddenRows === true,
     skipRows: [...new Set(list(r.skipRows ?? [], 'excluded source rows', 10000).map(v => int(v, 'excluded row', 1, 10000000)))],

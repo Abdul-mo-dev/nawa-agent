@@ -113,7 +113,7 @@ export function registerWorkspaceIpc(options: WorkspaceIpcOptions): {
   handle('home:workspace-list-folder', async (_sender, dir) => {
     if (typeof dir !== 'string') throw new Error('Invalid workspace directory.')
     const listing = await getStore().listFolder(dir, options.starredPaths())
-    watchDirectory(listing.dir)
+    if (!listing.missing) watchDirectory(listing.dir)
     return listing
   })
   handle('home:workspace-scope', async (_sender, folder) => {

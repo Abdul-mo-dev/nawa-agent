@@ -23,6 +23,10 @@ test('CSV larger than 64 MiB streams through import, full validation and exact S
     const ready=await engine.execute({action:'review',payload:{datasetId:draft.id,expectedGeneration:draft.generation,policy:{...draft.policy,grain:'One generated transaction',columns:draft.policy.columns.map(c=>c.id==='c1'?{...c,scale:2,unit:'synthetic units'}:c),key:['c0'],confirmed:true}}});assert.equal(ready.rows,rows);timings.validateMs=performance.now()-reviewStart
     const queryStart=performance.now(),result=(await engine.execute({action:'query',paths:[file],payload:{datasetIds:[draft.id],metrics:[{op:'count',as:'records'},{op:'sum',column:'c1',as:'total'}]}})).value
     timings.queryMs=performance.now()-queryStart;assert.equal(result.rows[0].records,String(rows));assert.equal(result.rows[0].total,'22000.00');assert.equal(result.inputSampled,false)
+    const exportStart=performance.now(),exported=(await engine.execute({action:'export-sqlite',paths:[file],folder:source,preparationAuthorized:true,reviewedDatasets:[{datasetId:ready.id,generation:ready.generation}]})).value
+    timings.exportMs=performance.now()-exportStart;assert.equal(exported.exports[0].rows,rows)
+    const sqlStart=performance.now(),sql=(await engine.execute({action:'sql',paths:[file],payload:{datasetIds:[ready.id],sql:`SELECT COUNT(*) AS records,SUM(c1) AS scaled_total FROM "${exported.exports[0].sqlTable}"`}})).value
+    timings.snapshotSqlMs=performance.now()-sqlStart;assert.equal(sql.rows[0].records,String(rows));assert.equal(sql.rows[0].scaled_total,'2200000');assert.equal(sql.summary.sqliteSnapshot.path,exported.databasePath)
     console.log(JSON.stringify({fixture:'synthetic ASCII CSV, not a Windows/user-workbook benchmark',bytes,rows,result:result.rows[0],timings,peakObservedRssMiB:Math.round(rss/1048576)},null,2))
   }finally{clearInterval(memory);engine.close();await fs.rm(dir,{recursive:true,force:true})}
 })

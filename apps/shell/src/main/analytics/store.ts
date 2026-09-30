@@ -66,8 +66,8 @@ export class AnalyticsStore {
     const used=new Set(this.datasets().flatMap(d=>[d.rawTable,d.typedTable].filter((p):p is string=>!!p)))
     for(const r of this.db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as unknown as {name:string}[])if(/^(ar|at)_[a-f0-9]{32}$/.test(r.name)&&!used.has(r.name))this.dropTable(r.name)
   }
-  reader(check:()=>void):import('node:sqlite').DatabaseSync{
-    const db=new DatabaseSync(this.path,{readOnly:true,allowExtension:false,enableDoubleQuotedStringLiterals:false})
+  reader(check:()=>void,path=this.path):import('node:sqlite').DatabaseSync{
+    const db=new DatabaseSync(path,{readOnly:true,allowExtension:false,enableDoubleQuotedStringLiterals:false})
     db.exec('PRAGMA query_only=ON; PRAGMA busy_timeout=5000; PRAGMA temp_store=FILE; PRAGMA cache_size=-16384;')
     let calls=0
     db.function('analytics_guard',{directOnly:true,deterministic:false},()=>{if(++calls%256===0)check();return 1})

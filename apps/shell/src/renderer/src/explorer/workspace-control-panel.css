@@ -117,7 +117,7 @@
 .nawa-panel-dialog .nawa-history-heading { display:none; }
 .nawa-review-footer { display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:12px; width:100%; }
 .nawa-review-footer .nawa-data-check { flex:1 1 320px; margin:0; }
-.nawa-review-footer [role='alert'] { flex-basis:100%; }
+.nawa-review-footer :is([role='alert'],[role='status']) { flex-basis:100%; margin:0; }
 .ex-inspector .ws-chat-scroll { flex:1; min-height:0; overflow:auto; }
 .ex-inspector .ws-chat-scroll .ws-chat-log { min-height:0; overflow:visible; padding:16px 12px; }
 .ex-inspector .ws-chat-scroll .ws-chat-scope { max-height:none; overflow:visible; margin:8px 12px; }

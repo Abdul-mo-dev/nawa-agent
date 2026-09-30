@@ -3,7 +3,7 @@ import { useSidebarText } from '../explorer/sidebar-i18n'
 import { usePanelActivity } from '../explorer/panel-state'
 import { DEFAULT_ANALYTICS_SETTINGS, type AnalyticsSettings as Settings } from '../../../shared/analytics-api'
 import './analytics.css'
-const fields:Array<{key:keyof Settings;label:string;min:number;max:number;help:string}>=[
+const fields:Array<{key:Exclude<keyof Settings,'allowAgentPreparation'|'allowAgentApproval'>;label:string;min:number;max:number;help:string}>=[
   {key:'maxFileMiB',label:'Maximum source file size (MiB)',min:1,max:8192,help:'Streaming import; saved source snapshots also need disk space. XLSX ZIP64 remains unsupported.'},
   {key:'maxRows',label:'Maximum records per source file',min:1,max:10000000,help:'A limit failure is not published as a partially complete dataset.'},
   {key:'maxColumns',label:'Maximum columns per table',min:1,max:1024,help:'Narrow or export exceptionally wide sheets before analysis.'},
@@ -22,7 +22,11 @@ export function AnalyticsSettings({compact=false}:{compact?:boolean}={}){
   const save=async()=>{setBusy(true);setError('');setSaved(false);try{await window.nawaAnalytics.saveSettings(value);setBaseline(value);setSaved(true)}catch(e){setError(e instanceof Error?e.message:String(e))}finally{setBusy(false)}}
   if(!baseline)return <div><p role={error?'alert':'status'}>{error||s('Loading…')}</p>{error&&<button type="button" className="set-btn" onClick={()=>setRetry(value=>value+1)}>{s('Retry')}</button>}</div>
   return <div className={`nawa-data-settings${compact?' is-compact':''}`}><h3 className="set-pane-title">{s("Structured Data Analysis")}</h3>
-    <p hidden={compact}>{s('Set limits for local table imports and analysis. Review each imported table before the assistant can query it.')}</p>
+    <p hidden={compact}>{s('Set limits for local table imports and analysis. Choose manual review or automatic approval of clear tables.')}</p>
+    <label className="nawa-data-check"><input type="checkbox" disabled={busy||loading} checked={value.allowAgentPreparation} onChange={e=>{const enabled=e.target.checked;setSaved(false);setValue(v=>({...v,allowAgentPreparation:enabled,allowAgentApproval:enabled?v.allowAgentApproval:false}))}}/>{s('Allow agent preparation')}</label>
+    <p>{s('The assistant may import individually selected files and prepare table policies. File snapshots, table records and analysis results are stored locally without encryption.')}</p>
+    <label className="nawa-data-check"><input type="checkbox" disabled={busy||loading||!value.allowAgentPreparation} checked={value.allowAgentApproval} onChange={e=>{setSaved(false);setValue(v=>({...v,allowAgentApproval:e.target.checked}))}}/>{s('Automatically approve clear tables')}</label>
+    <p>{s('Clear tables become Ready after every included row is validated. Formulas, hidden rows, possible subtotals and changed row ranges remain for review. Unknown units stay unspecified. With this setting off, you approve each draft manually.')}</p>
     <div className="nawa-data-settings-grid">{fields.map(f=><label className="nawa-data-field" key={f.key}><span>{s(f.label)}</span><input className="set-input" type="number" min={f.min} max={f.max} step={1} disabled={busy||loading} value={Number.isNaN(value[f.key])?'':value[f.key]} onChange={e=>{setSaved(false);setValue(v=>({...v,[f.key]:Number(e.target.value)}))}}/><small>{s(f.help)}</small></label>)}</div>
     <details><summary>{s('Storage details')}</summary><p>{s('Source snapshots, tables and analysis results are stored locally without encryption. Clearing analysis data keeps source files, conversations and search indexes.')}</p><p className="nawa-data-path">{s('Database')}: <code>{database}</code></p></details>
     <div className="nawa-settings-footer">{dirty&&<p role="status">{s('Unsaved changes')}</p>}

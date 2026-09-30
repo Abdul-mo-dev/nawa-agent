@@ -95,11 +95,16 @@ export function FileList({ items, selected, cutPaths, preferences: p, locale, te
   const date = (ms: number) => ms > 0 ? new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(ms) : '—'
   const type = (item: Item) => item.kind === 'folder' ? t('folder') : `${item.ext.toUpperCase()} ${t('file')}`
   const visibleFocused = focused ? items.slice(first, last).findIndex(item => item.path === focused) : -1
-  return <div ref={host} className={`ex-file-list${tile ? ' is-tiles' : ''}`} role="grid" aria-label={t('files')} aria-rowcount={items.length + (tile ? 0 : 1)} aria-colcount={tile ? 2 : 5} aria-multiselectable="true" tabIndex={0}
+  return <div ref={host} className={`ex-file-list${tile ? ' is-tiles' : ''}`} role="grid" aria-label={t('files')} aria-rowcount={items.length + (tile ? 0 : 1)} aria-colcount={tile ? 2 : 7} aria-multiselectable="true" tabIndex={0}
       aria-activedescendant={visibleFocused >= 0 ? `ex-item-${first + visibleFocused}` : undefined} onKeyDown={keyboard}>
     {!tile && <div className="ex-list-heading ex-row-layout" role="row">
       <span className="ex-check-cell" role="columnheader"><input type="checkbox" aria-label="Select all visible results" checked={items.length > 0 && items.every(item => selected.has(item.path))} ref={el => { if (el) el.indeterminate = selected.size > 0 && !items.every(item => selected.has(item.path)) }} onChange={onSelectAll} /></span>
-      {(['name', 'modified', 'type', 'size'] as const).map(key => <div role="columnheader" aria-sort={p.sort === key ? p.descending ? 'descending' : 'ascending' : 'none'} key={key} className={`ex-column-${key}`}>
+      <div role="columnheader" aria-sort={p.sort === 'name' ? p.descending ? 'descending' : 'ascending' : 'none'} className="ex-column-name">
+        <button type="button" onClick={() => onSort('name')}>{t('name')}{p.sort === 'name' && <Icon name={p.descending ? 'down' : 'up'} size={12} />}</button>
+      </div>
+      <div role="columnheader" className="ex-column-indexed"><span className="ex-column-label">{t('indexed')}</span></div>
+      <div role="columnheader" className="ex-column-data"><span className="ex-column-label">{t('data')}</span></div>
+      {(['modified', 'type', 'size'] as const).map(key => <div role="columnheader" aria-sort={p.sort === key ? p.descending ? 'descending' : 'ascending' : 'none'} key={key} className={`ex-column-${key}`}>
         <button type="button" onClick={() => onSort(key)}>{t(key)}{p.sort === key && <Icon name={p.descending ? 'down' : 'up'} size={12} />}</button>
       </div>)}
     </div>}
@@ -112,8 +117,8 @@ export function FileList({ items, selected, cutPaths, preferences: p, locale, te
           onClick={e => { setFocused(item.path); host.current?.focus({ preventScroll: true }); onSelect(item.path, { toggle: e.ctrlKey || e.metaKey, range: e.shiftKey, additive: e.ctrlKey || e.metaKey }) }}
           onDoubleClick={() => onOpen(item)} onContextMenu={e => { setFocused(item.path); onContext(e, item) }}>
           <div role="gridcell" className="ex-check-cell"><input type="checkbox" tabIndex={-1} aria-label={`${t('checked')}: ${item.name}`} checked={selected.has(item.path)} onClick={e => e.stopPropagation()} onChange={() => { setFocused(item.path); onSelect(item.path, { toggle: true }) }} /></div>
-          <div role="gridcell" className="ex-file-name"><span className="ex-file-symbol">{item.kind === 'folder' ? <FolderGlyph size={tile ? 70 : 24} /> : <DocumentIcon ext={item.ext} size={tile ? 66 : 26} />}</span><span className="ex-file-label" dir="auto">{item.name}</span>{item.kind === 'file' && <RagBadge value={ragStatuses[item.path]} error={ragStatusError} />}{item.kind === 'file' && <AnalyticsBadge value={analyticsStatuses[item.path]} error={analyticsStatusError} />}{item.starred && <Icon name="star" size={12} className="ex-starred-mark" />}{item.missing && <span className="ex-error">{t('unavailable')}</span>}</div>
-          {!tile && <><div role="gridcell" className="ex-column-modified">{date(item.mtimeMs)}</div><div role="gridcell" className="ex-column-type">{type(item)}</div><div role="gridcell" className="ex-column-size">{item.kind === 'file' ? sizeLabel(item.sizeBytes, locale) : '—'}</div></>}
+          <div role="gridcell" className="ex-file-name"><span className="ex-file-symbol">{item.kind === 'folder' ? <FolderGlyph size={tile ? 70 : 24} /> : <DocumentIcon ext={item.ext} size={tile ? 66 : 26} />}</span><span className="ex-file-label" dir="auto">{item.name}</span>{tile && item.kind === 'file' && <RagBadge value={ragStatuses[item.path]} error={ragStatusError} />}{tile && item.kind === 'file' && <AnalyticsBadge value={analyticsStatuses[item.path]} error={analyticsStatusError} />}{item.starred && <Icon name="star" size={12} className="ex-starred-mark" />}{item.missing && <span className="ex-error">{t('unavailable')}</span>}</div>
+          {!tile && <><div role="gridcell" className="ex-column-indexed">{item.kind === 'file' ? <RagBadge value={ragStatuses[item.path]} error={ragStatusError} /> : <span className="ex-column-empty">—</span>}</div><div role="gridcell" className="ex-column-data">{item.kind === 'file' ? <AnalyticsBadge value={analyticsStatuses[item.path]} error={analyticsStatusError} /> : <span className="ex-column-empty">—</span>}</div><div role="gridcell" className="ex-column-modified">{date(item.mtimeMs)}</div><div role="gridcell" className="ex-column-type">{type(item)}</div><div role="gridcell" className="ex-column-size">{item.kind === 'file' ? sizeLabel(item.sizeBytes, locale) : '—'}</div></>}
           {tile && <span className="ex-tile-meta">{item.kind === 'folder' ? t('folder') : sizeLabel(item.sizeBytes, locale)}</span>}
         </div>)}
       </div>

@@ -3,11 +3,12 @@ import { lstat, mkdir, copyFile, rm } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { ANALYTICS_VERSION, type Dataset, type DataColumn, type TablePolicy, type AnalyticsSettings } from '../../shared/analytics-api'
-import { authorizePath, regularFile, hashFile } from '../directory-actions/file-safety'
+import { regularFile, hashFile } from '../directory-actions/file-safety'
 import { readTables, columnName } from './readers'
-import { decimal, scaled, validDate, convert, MIN_I64, MAX_I64 } from './numeric'
+import { decimal, validDate, convert, MIN_I64, MAX_I64 } from './numeric'
 import { policy as validatePolicy } from './validation'
 import { AnalyticsStore, tableName, quotedTable, type StoredDataset } from './store'
+import { automaticApprovalIssues } from './preparation'
 import type { RawRow, RawCell, SourceTable } from './stream'
 interface Draft { meta:SourceTable; rawTable:string; count:number }
 interface Infer { count:number; blank:number; decimal:boolean; boolean:boolean; date:boolean; scale:number; min:bigint|null; max:bigint|null; leadingZero:boolean; errors:number; formulas:number }
@@ -47,7 +48,7 @@ export function describeDraft(store:AnalyticsStore,draft:Draft,path:string,hash:
     if(Object.values(row.cells).slice(0,3).some(c=>/^(?:grand\s+total|sub\s*total|total|合計|小計|総計)(?:\s|$|:)/i.test(c.value?.trim()??''))){suspicious++;if(suspiciousRows.length<50)suspiciousRows.push(r.row)}
   }
   const seen=new Map<string,number>(),columns=profiles.map((p,i)=>{
-    let name=headers[i]?.trim()||`Column ${i+1}`,key=name.normalize('NFKC').toLowerCase(),n=(seen.get(key)??0)+1;seen.set(key,n);if(n>1)name+=` (${n})`;return inferColumn(i,name,p)
+    let name=headers[i]?.trim()||`Column ${i+1}`;const key=name.normalize('NFKC').toLowerCase(),n=(seen.get(key)??0)+1;seen.set(key,n);if(n>1)name+=` (${n})`;return inferColumn(i,name,p)
   })
   const warnings=[...m.warnings,'Analytics is blocked until a user confirms this table policy. Review numeric units and exclusions.']
   if(hidden)warnings.push(`${hidden} hidden rows found; the default policy excludes them and reports that exclusion.`)
@@ -101,9 +102,22 @@ export async function importFile(store:AnalyticsStore,path:string,roots:string[]
   finally{await rm(staging,{recursive:true,force:true})}
 }
 export async function approveDataset(store:AnalyticsStore,datasetId:string,expectedGeneration:string,rawPolicy:unknown,roots:string[],settings:AnalyticsSettings,check:()=>void,progress:(rows:number)=>void):Promise<Dataset>{
+  return materializeDataset(store,datasetId,expectedGeneration,rawPolicy,roots,settings,check,progress,'user')
+}
+/** Saved preparation/approval consent is checked independently of any model-provided confirmation. */
+export async function approveDatasetByAgent(store:AnalyticsStore,datasetId:string,expectedGeneration:string,rawPolicy:unknown,roots:string[],settings:AnalyticsSettings,check:()=>void,progress:(rows:number)=>void):Promise<Dataset>{
+  if(!settings.allowAgentPreparation||!settings.allowAgentApproval)throw new Error('Enable automatic agent approval in Table settings first.')
+  return materializeDataset(store,datasetId,expectedGeneration,rawPolicy,roots,settings,check,progress,'agent')
+}
+/** Validate every included row and key, then discard the temporary typed table. Never publishes approval. */
+export async function validateDatasetPolicy(store:AnalyticsStore,datasetId:string,expectedGeneration:string,rawPolicy:unknown,roots:string[],settings:AnalyticsSettings,check:()=>void,progress:(rows:number)=>void):Promise<Dataset>{
+  return materializeDataset(store,datasetId,expectedGeneration,rawPolicy,roots,settings,check,progress,null)
+}
+async function materializeDataset(store:AnalyticsStore,datasetId:string,expectedGeneration:string,rawPolicy:unknown,roots:string[],settings:AnalyticsSettings,check:()=>void,progress:(rows:number)=>void,publication:'user'|'agent'|null):Promise<Dataset>{
   const record=store.dataset(datasetId);if(!record||record.data.generation!==expectedGeneration)throw new Error('Dataset changed. Reload its review before applying a policy.')
-  const d=record.data,pol=validatePolicy(rawPolicy,settings.maxColumns)
-  if(!pol.confirmed)throw new Error('A human must confirm the table policy before analytics is enabled.')
+  const d=record.data,pol=validatePolicy(rawPolicy,settings.maxColumns),publish=publication!==null
+  if(publication==='user'&&!pol.confirmed)throw new Error('A human must confirm the table policy before analytics is enabled.')
+  if(publication==='agent'){const issues=automaticApprovalIssues(d,pol);if(issues.length)throw new Error(issues.join(' '))}
   const bounds=d.profile.sourceBounds as {firstColumn:number;lastColumn:number;firstRow:number;lastRow:number|null}|undefined
   if(bounds&&(pol.firstColumn<bounds.firstColumn||pol.lastColumn>bounds.lastColumn||pol.firstRow<bounds.firstRow||(bounds.lastRow!==null&&(pol.lastRow===null||pol.lastRow>bounds.lastRow))))throw new Error('The approved range exceeds the imported source table bounds. Import an explicit larger table before expanding this policy.')
   await regularFile(roots,d.path,settings.maxFileMiB*1048576)
@@ -119,7 +133,7 @@ export async function approveDataset(store:AnalyticsStore,datasetId:string,expec
       if(row.row<pol.firstRow||pol.lastRow!==null&&row.row>pol.lastRow||skip.has(row.row)||row.hidden&&!pol.includeHiddenRows){excluded++;continue}
       const raw=pol.columns.map((_,i)=>row.cells[pol.firstColumn+i])
       if(raw.every(c=>!c?.formula&&!c?.error&&(c?.value==null||c.value===''))){excluded++;continue}
-      const values=pol.columns.map((c,i)=>{const cell=raw[i];if(cell?.error)throw new Error(`Row ${row.row}, ${c.name}: ${cell.error}. Fix or explicitly exclude this source row/column.`);if(cell?.formula){formulas++;if(pol.formulaPolicy==='reject')throw new Error(`Row ${row.row}, ${c.name} contains a formula. Review the saved-cache policy or exclude the formula column.`);if(cell.value==null)throw new Error(`Row ${row.row}, ${c.name}: formula has no saved value.`)}try{return convert(cell?.value??null,c)}catch(e){throw new Error(`Row ${row.row}, ${c.name}: ${e instanceof Error?e.message:String(e)}`)}})
+      const values=pol.columns.map((c,i)=>{const cell=raw[i];if(cell?.error)throw new Error(`Row ${row.row}, ${c.name}: ${cell.error}. Fix or explicitly exclude this source row/column.`);if(cell?.formula){formulas++;if(pol.formulaPolicy==='reject')throw new Error(`Row ${row.row}, ${c.name} contains a formula. Review the saved-cache policy or exclude the formula column.`);if(cell.value==null)throw new Error(`Row ${row.row}, ${c.name}: formula has no saved value.`)}try{return convert(cell?.value??null,c)}catch(e){throw new Error(`Row ${row.row}, ${c.name}: ${e instanceof Error?e.message:String(e)}`,{cause:e})}})
       if(!tx){store.db.exec('BEGIN');tx=true}insert.run(row.row,...values);included++
       if(included%1000===0){store.db.exec('COMMIT');tx=false;progress(included);await new Promise<void>(resolve=>setImmediate(resolve))}
     }
@@ -135,11 +149,16 @@ export async function approveDataset(store:AnalyticsStore,datasetId:string,expec
     for(const c of pol.columns.filter(c=>c.type==='date').slice(0,4))store.db.exec(`CREATE INDEX "${typed}_${c.id}" ON ${quotedTable(typed)}("${c.id}")`)
     await regularFile(roots,d.path,settings.maxFileMiB*1048576);if(await hashFile(d.path)!==d.sourceHash)throw new Error('Source changed during schema validation. No new typed table was published.')
     check()
-    const warnings=d.warnings.filter(w=>!w.startsWith('Analytics is blocked'))
-    if(formulas)warnings.push('Statistics use saved formula caches, explicitly accepted by the user; these values were not recalculated or verified against external dependencies.')
+    const warnings=d.warnings.filter(w=>!w.startsWith('Analytics is blocked')&&!w.startsWith('This policy was automatically approved')&&!w.startsWith('Row grain is structural'))
+    if(formulas)warnings.push(publication==='user'?'Statistics use saved formula caches, explicitly accepted by the user; these values were not recalculated or verified against external dependencies.':'The proposed policy uses unverified saved formula caches. User approval is pending; these values were not recalculated or verified against external dependencies.')
     if(pol.columns.some(c=>c.type==='real'))warnings.push('REAL columns use approximate floating-point arithmetic, not exact decimal arithmetic.')
     if(pol.columns.some(c=>c.role==='measure'&&!c.unit))warnings.push('Some measure units are unspecified. Treat results as mechanical column statistics, not validated business metrics.')
-    const next:Dataset={...d,generation:randomUUID(),name:pol.name,status:'ready',policy:pol,rows:included,excludedRows:excluded,formulaCells:formulas,warnings,range:`${d.sheet?d.sheet+'!':''}${columnName(pol.firstColumn)}${pol.firstRow}:${columnName(pol.lastColumn)}${pol.lastRow??'end'}`}
+    if(publication==='agent'){
+      warnings.push('This policy was automatically approved by the agent after full validation under automatic approval mode; it has not been manually reviewed by a user.')
+      if(pol.grain==='One source data record')warnings.push('Row grain is structural: one source data record. Business meaning was not inferred.')
+    }
+    const next:Dataset={...d,preparedPolicy:undefined,preparationError:undefined,approval:publication?{by:publication,at:Date.now(),reason:publication==='agent'?'Validated all included rows and declared keys; preserved the imported population and rejected formula caches.':'User confirmed the table policy.'}:undefined,generation:publish?randomUUID():d.generation,name:pol.name,status:publish?'ready':'needs-review',policy:{...pol,confirmed:publication==='user'},rows:included,excludedRows:excluded,formulaCells:formulas,warnings,range:`${d.sheet?d.sheet+'!':''}${columnName(pol.firstColumn)}${pol.firstRow}:${columnName(pol.lastColumn)}${pol.lastRow??'end'}`}
+    if(!publish){store.dropTable(typed);return next}
     store.db.exec('BEGIN IMMEDIATE')
     try{store.putDataset({...record,data:next,typedTable:typed});store.dropTable(record.typedTable);const all=store.datasets([d.path]);store.putFile({...file,state:all.every(x=>x.data.status==='ready')?'ready':'needs-review',error:all.every(x=>x.data.status==='ready')?'':'Some tables still need review.'});store.db.exec('COMMIT')}
     catch(e){store.db.exec('ROLLBACK');throw e}

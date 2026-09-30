@@ -69,6 +69,7 @@ export class DirectoryActionClient {
   constructor(private options: {
     api: DirectoryActionsApi
     selection: DirectorySelection
+    prepareTables?: boolean
     approvals: ApprovalController
     transport: () => AgentTransport
     current(): boolean
@@ -96,6 +97,7 @@ export class DirectoryActionClient {
     return this.runPromise ??= this.options.api.begin({
       opened: this.options.selection.opened,
       files: [...this.options.selection.files], directories: [...this.options.selection.directories],
+      ...(this.options.prepareTables ? { prepareTables: true } : {}),
     })
   }
   async analytics(action: AnalyticsReadAction, payload: unknown): Promise<unknown> {

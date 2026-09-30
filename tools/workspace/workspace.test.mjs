@@ -79,6 +79,32 @@ test('missing root remains visible and can be removed without stat-ing it', asyn
   assert.deepEqual(await store.list(), [])
 })
 
+test('listing a deleted folder within a registered root returns unavailable without broadening read access', async (t) => {
+  const { a, child, store } = await fixture(t)
+  await store.add(a)
+  await rm(child, { recursive: true })
+  assert.deepEqual(await store.listFolder(child), { dir: child, folders: [], files: [], missing: true })
+  await assert.rejects(store.authorize(child), /not in the workspace/)
+})
+
+test('listing a disconnected registered root returns unavailable', async (t) => {
+  const { a, store } = await fixture(t)
+  await store.add(a)
+  await rm(a, { recursive: true })
+  assert.deepEqual(await store.listFolder(a), { dir: a, folders: [], files: [], missing: true })
+  assert.equal((await store.list())[0].usable, false)
+})
+
+test('unregistered and detached folders still reject listings, including missing paths', async (t) => {
+  const { a, b, child, store } = await fixture(t)
+  await store.add(a)
+  await assert.rejects(store.listFolder(b), /not in the workspace/)
+  await assert.rejects(store.listFolder(join(b, 'missing')), /not in the workspace/)
+  await store.remove(a)
+  await rm(child, { recursive: true })
+  await assert.rejects(store.listFolder(child), /not in the workspace/)
+})
+
 test('corrupt saved registration is rejected without overwriting it', async (t) => {
   const { statePath, store } = await fixture(t)
   await mkdir(dirname(statePath), { recursive: true })
@@ -213,11 +239,17 @@ test('ordinary listings preserve file metadata and stars', async (t) => {
   assert.ok(entry.mtimeMs > 0)
 })
 
-test('unregistering an overlapping root does not revoke a separately registered child', async (t) => {
+test('picking a child navigates within its mounted parent, and detaching the parent revokes both', async (t) => {
   const { a, child, store } = await fixture(t)
   const path = join(child, 'notes.md'); await writeFile(path, 'hello')
-  await store.add(a); await store.add(child); await store.remove(a)
+  await store.add(a)
+  assert.equal((await store.add(child)).path, child)
+  assert.deepEqual((await store.list()).map(root => root.path), [a])
   assert.deepEqual((await store.scope(child)).paths, [path])
+  await store.remove(a)
+  assert.deepEqual(await store.list(), [])
+  assert.equal(await readFile(path, 'utf8'), 'hello')
+  await assert.rejects(store.scope(child), /not in the workspace/)
   await assert.rejects(store.scope(a))
 })
 

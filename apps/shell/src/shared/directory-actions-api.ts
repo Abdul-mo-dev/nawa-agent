@@ -28,7 +28,7 @@ export interface DirectoryInspection extends DirectoryEditorDescription {
   openedAt: number
 }
 export interface LinkedImage { path: string; hash: string; source: string }
-export interface DirectoryActionScope { opened: string | null; files: string[]; directories: string[] }
+export interface DirectoryActionScope { opened: string | null; files: string[]; directories: string[]; prepareTables?: boolean }
 export type DirectoryOperation = 'update' | 'create' | 'delete' | 'rename' | 'move' | 'copy' | 'create-folder' | 'delete-folder' | 'delete-permanently'
 export const filesystemOperations: readonly DirectoryOperation[] = ['rename', 'move', 'copy', 'create-folder', 'delete-folder', 'delete-permanently']
 export const isFilesystemOperation = (operation: DirectoryOperation): boolean => filesystemOperations.includes(operation)

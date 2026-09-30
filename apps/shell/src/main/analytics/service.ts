@@ -1,6 +1,7 @@
 import { app, ipcMain, type WebContents } from 'electron'
 import { Worker } from 'node:worker_threads'
 import { randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { mkdir, readFile, writeFile, rename, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import workerPath from './worker?modulePath'
@@ -12,7 +13,7 @@ interface Options { roots():Promise<string[]>;isHomeSender(sender:WebContents):b
 interface Active { owner:number;worker:Worker;flag:Int32Array;abort:AbortController;writer:boolean }
 interface WorkerSlot { reader:boolean; write:boolean; initialize:boolean }
 const initial=():AnalyticsProgress=>({running:false,folder:'',current:'',scanned:0,imported:0,unchanged:0,failed:0,rows:0,message:'',incomplete:false})
-/** Each request has a worker and a read scope. Imports/approvals never become model tools. */
+/** Scoped preparation and automatic clear-table approval each require saved user consent. */
 export class AnalyticsService {
   private directory=join(app.getPath('userData'),'analytics')
   private databasePath=join(this.directory,'data-v1.sqlite3')
@@ -28,7 +29,12 @@ export class AnalyticsService {
   private state=initial()
   private stopped=false
   private saving:Promise<unknown>=Promise.resolve()
-  constructor(private options:Options){}
+  private workerSource:string|null=null
+  constructor(private options:Options){
+    // Keep this build's worker in memory before a dev rebuild removes its output.
+    // A missing startup bundle is retried on request so the workspace can still open.
+    try{this.workerSource=readFileSync(workerPath,'utf8')}catch{}
+  }
   private changed():void{for(const [id,c]of this.clients){if(c.isDestroyed())this.clients.delete(id);else if(this.options.isHomeSender(c))c.send(ANALYTICS_CHANGED)}}
   track(sender:WebContents):void{
     if(this.clients.has(sender.id))return;this.clients.set(sender.id,sender)
@@ -81,8 +87,8 @@ export class AnalyticsService {
     this.wakeWorkers()
   }
   async request(owner:number,job:AnalyticsJob,signal?:AbortSignal):Promise<unknown>{
-    const writer=['import','review','clear'].includes(job.action)
-    const writes=writer||['query','analyze','drill'].includes(job.action)
+    const writer=['import','review','clear','prepare','propose-policy','export-sqlite'].includes(job.action)
+    const writes=writer||['query','sql','analyze','drill'].includes(job.action)
     if(this.stopped||signal?.aborted)throw new Error('Analytics request cancelled.')
     if(writer&&this.writer)throw new Error('Another data import/review is running.')
     if(Buffer.byteLength(JSON.stringify(job))>256000)throw new Error('Analytics request is too large.')
@@ -101,7 +107,9 @@ export class AnalyticsService {
       for(const path of job.paths??[])await authorizePath(roots,job.action==='statuses'||job.action==='discover'?dirname(path):path)
       if(this.stopped||abort.signal.aborted)throw new Error('Analytics request cancelled.')
       const buffer=new SharedArrayBuffer(4),flag=new Int32Array(buffer)
-      worker=new Worker(workerPath,{workerData:{databasePath:this.databasePath,roots,settings:config,job,cancel:buffer,deadline:Date.now()+(writer?24*3600*1000:config.queryTimeoutSeconds*1000),storeOptions:{readOnly:!slot.write,initialize:slot.initialize}},resourceLimits:{maxOldGenerationSizeMb:512}})
+      const source=this.workerSource??=readFileSync(workerPath,'utf8')
+      const effectiveSettings=job.preparationAuthorized?{...config,allowAgentPreparation:true,allowAgentApproval:job.action!=='prepare'}:config
+      worker=new Worker(source,{eval:true,workerData:{databasePath:this.databasePath,roots,settings:effectiveSettings,job,cancel:buffer,deadline:Date.now()+(writer?24*3600*1000:config.queryTimeoutSeconds*1000),storeOptions:{readOnly:!slot.write,initialize:slot.initialize}},resourceLimits:{maxOldGenerationSizeMb:512}})
       this.active.set(id,{owner,worker,flag,abort,writer})
       if(writer){this.state={...initial(),running:true,folder:job.folder??'',message:job.action==='review'?'Validating the approved table policy…':'Preparing local structured-data import…'};this.changed()}
       const current=worker
@@ -141,9 +149,11 @@ export class AnalyticsService {
       if(slot)this.releaseWorker(slot)
     }
   }
-  async selected(owner:number,paths:string[],action:AnalyticsReadAction,payload:unknown,signal:AbortSignal):Promise<AnalyticsEnvelope>{
-    if(!['discover','describe','query','analyze','result','drill','verify'].includes(action))throw new Error('The agent has read-only analytical tools; importing/reviewing/clearing is user-controlled.')
-    return await this.request(owner,{action,paths,payload},signal) as AnalyticsEnvelope
+  async selected(owner:number,paths:string[],action:AnalyticsReadAction,payload:unknown,signal:AbortSignal,preparation?:{folder:string;reviewedDatasets:{datasetId:string;generation:string}[]}):Promise<AnalyticsEnvelope>{
+    if(!['discover','describe','query','sql','analyze','result','drill','verify','prepare','propose-policy','export-sqlite'].includes(action))throw new Error('Direct review/clearing is user-controlled. Use Prepare & export for agent preparation and SQLite export.')
+    if(action==='export-sqlite'&&!preparation)throw new Error('Use Prepare & export to authorize a SQLite export.')
+    if((action==='prepare'||action==='propose-policy')&&!preparation&&!(await this.config()).allowAgentPreparation)throw new Error('Click Prepare & export to prepare and review selected files with the agent. Source snapshots and table data will be stored locally without encryption.')
+    return await this.request(owner,{action,paths,payload,...(preparation?{folder:preparation.folder,preparationAuthorized:true,reviewedDatasets:preparation.reviewedDatasets}:{})},signal) as AnalyticsEnvelope
   }
   stop():void{this.stopped=true;for(const item of this.requests.values())item.abort.abort();for(const item of this.active.values()){Atomics.store(item.flag,0,1);void item.worker.terminate()}this.active.clear()}
 }

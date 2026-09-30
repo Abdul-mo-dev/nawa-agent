@@ -13,7 +13,8 @@ export function useDirectories() {
     const key = pathKey(path), active = requests.current.get(key)
     if (active) return active
     const prior = cache.current.get(key)
-    if (!force && prior?.listing && !prior.stale) return Promise.resolve(prior.listing)
+    // Failed reads stay settled too; only Retry or invalidation starts another request.
+    if (!force && prior && !prior.stale && (prior.listing || prior.error !== undefined)) return Promise.resolve(prior.listing)
     const current = generation.current
     cache.current.set(key, { ...prior, error: undefined, loading: true })
     paint(n => n + 1)

@@ -1,9 +1,10 @@
 import { composeSkills, type AgentSkill, type AgentToolDef } from '@genoffice/agent-core'
 import type { DirectorySelection } from '../ai/directory-selection'
 
-export type DirectoryIntent = 'metadata' | 'tools' | 'lookup' | 'overview' | 'table' | 'reviewed' | 'edit' | 'general'
+export type DirectoryIntent = 'metadata' | 'tools' | 'lookup' | 'overview' | 'table' | 'analysis' | 'reviewed' | 'edit' | 'general'
 export interface DirectoryRoute { intent: DirectoryIntent; prepareKnowledge: boolean; maxTurns: number; target?: string }
 const sheet = /\.(?:xlsx?|xlsm|csv|tsv|ods)$/i
+const tableFile = /\.(?:xlsx?|xlsm|csv|tsv|ods|json|jsonl|ndjson)$/i
 const name = (path: string) => path.replace(/\\/g, '/').split('/').pop()!.toLowerCase()
 
 // Recognize the whole listing request, including common shorthand and courtesy words.
@@ -60,15 +61,18 @@ export function directoryRoute(task: string, scope: DirectorySelection): Directo
     if (close.length === 1) target = close[0]
   }
   if (!target && scope.files.length === 1) target = scope.files[0]
+  const analyticalRequest = target ? text.replaceAll(target.toLowerCase(), '@file@').replaceAll(name(target), '@file@') : text
   let intent: DirectoryIntent = 'general'
   if (/\b(?:list|show|name|what are)\b.*\b(?:knowledge tools|tool names|available tools|all tools)\b/.test(text)) intent = 'tools'
   else if (isMetadataListing(text)) intent = 'metadata'
   else if (target && isWorkbookOverview(text, target)) intent = 'overview'
+  else if (/\b(?:prepare|preparation)\b.*\b(?:analysis|analytics|tables?|datasets?|data|workbooks?|spreadsheets?)\b|\b(?:analysis|analytics|data|tables?|datasets?|workbooks?|spreadsheets?)\b.*\bpreparation\b/.test(text)) intent = 'reviewed'
   else if (/\b(?:edit|update|create|delete|remove|convert|format|save|write|merge|rename|move|copy|duplicate)\b|عدّل|احذف|أنشئ|編集|作成/.test(text)) intent = 'edit'
   else if (/\b(?:reviewed|approved|exact decimal|accounting|correlation|variance|quantile|statistical)\b/.test(text)) intent = 'reviewed'
-  else if (scope.files.some(path => sheet.test(path)) && /\b(?:how many|count|sum|total|average|join|group by|compare|percentage)\b|كم عدد|件数|何人|合計/.test(text)) intent = 'table'
+  else if (scope.files.length && /\b(?:insights?|analy[sz](?:e|is)|analytics|statistics?|stats|standard deviation|median|percentiles?|quartiles?|distributions?|outliers?|trends?)\b/.test(analyticalRequest)) intent = 'analysis'
+  else if (scope.files.some(path => tableFile.test(path)) && /\b(?:how many|count|sum|total|average|join|group by|compare|percentage)\b|كم عدد|件数|何人|合計/.test(text)) intent = 'table'
   else if (/\b(?:find|search|which file|contains?|exists|mention)\b|ابحث|どのファイル/.test(text)) intent = 'lookup'
-  return { intent, target, prepareKnowledge: !!scope.files.length && ['overview', 'table', 'lookup', 'general'].includes(intent),
+  return { intent, target, prepareKnowledge: !!scope.files.length && ['overview', 'table', 'analysis', 'lookup', 'general'].includes(intent),
     maxTurns: ['metadata', 'tools'].includes(intent) ? 12 : intent === 'edit' ? 60 : 32 }
 }
 
@@ -79,8 +83,8 @@ export function routedDirectorySkill(route: DirectoryRoute, parts: { reader: Age
   const active = new Set<string>(['metadata'])
   if (route.intent === 'tools') active.add('knowledge')
   if (['lookup', 'general'].includes(route.intent)) { active.add('reading'); active.add('knowledge') }
-  if (route.intent === 'table' || route.intent === 'overview') active.add('knowledge')
-  if (route.intent === 'reviewed') active.add('analysis')
+  if (['table', 'analysis', 'overview'].includes(route.intent)) active.add('knowledge')
+  if (['table', 'analysis', 'reviewed'].includes(route.intent)) { active.add('reading'); active.add('analysis') }
   if (route.intent === 'edit') { active.add('editing'); active.add('reading') }
   const fullKnowledge = route.intent === 'general' || route.intent === 'tools'
   let expandedKnowledge = fullKnowledge
@@ -96,17 +100,17 @@ export function routedDirectorySkill(route: DirectoryRoute, parts: { reader: Age
       tools: parts.knowledge.tools.filter(t => expandedKnowledge ||
       ['discover_knowledge_tools', 'use_knowledge_tool'].includes(t.name) ||
       (route.intent === 'overview' ? ['spreadsheet_catalog_search', 'spreadsheet_describe_dataset'].includes(t.name) :
-        route.intent === 'table' ? ['spreadsheet_query_sql', 'spreadsheet_catalog_search', 'spreadsheet_describe_dataset'].includes(t.name) : /search|read_neighbors|get_document/.test(t.name))) }] : []),
+        ['table', 'analysis'].includes(route.intent) ? ['spreadsheet_query_sql', 'spreadsheet_catalog_search', 'spreadsheet_describe_dataset'].includes(t.name) : /search|read_neighbors|get_document/.test(t.name))) }] : []),
     ...(active.has('editing') ? [parts.mutation] : []),
   ]
-  const composed = () => composeSkills('directory', 'Use the smallest sufficient tool path. Tools can be activated with discover_file_tools if a capability is missing. Do not repeat identical reads when their evidence already answers the question. Cite returned RAG citation IDs as Markdown links; their registered source opens in the evidence viewer.', selectedParts())
+  const composed = () => composeSkills('directory', 'Use the smallest sufficient tool path. Tools can be activated with discover_file_tools if a capability is missing. Use existing native inspection for file structure and source evidence. For data insights, large-file aggregates or statistics, activate analysis when needed and calculate over the complete relevant table population; bounded reads and retrieval hits cannot establish whole-file statistics. Reuse prepared SQLite tables for follow-up questions. Prepare & export starts agent review and SQLite export in this chat; ordinary queries can reuse the prepared data without repeating preparation. Do not repeat identical reads when their evidence already answers the question. Cite returned RAG citation IDs as Markdown links; their registered source opens in the evidence viewer.', selectedParts())
   const repetitions = new Map<string, number>()
   return {
     id: 'directory',
     get systemPrompt() { return composed().systemPrompt },
     get tools() { return [...composed().tools, discover] },
     buildContext: () => composed().buildContext?.() ?? '',
-    verifyResponse: (text, calls) => parts.mutation.verifyResponse?.(text, calls) ?? null,
+    verifyResponse: (text, calls) => parts.analytics.verifyResponse?.(text, calls) ?? parts.mutation.verifyResponse?.(text, calls) ?? null,
     canExecuteParallel: call => ['list_directory', 'list_files', 'search_files'].includes(call.name),
     async executeTool(call, signal) {
       if (call.name === discover.name) {
@@ -115,7 +119,7 @@ export function routedDirectorySkill(route: DirectoryRoute, parts: { reader: Age
         active.add(capability); if (capability === 'knowledge') expandedKnowledge = true
         return { output: JSON.stringify({ capability, tools: composed().tools, guidance: composed().systemPrompt }), summary: `Enabled ${capability} tools`, mutated: false }
       }
-      if (['read_file', 'search_contents', 'discover_datasets', 'describe_dataset', 'query_data', 'analyze_data', 'inspect_file', 'query_file', 'use_knowledge_tool'].includes(call.name) || call.name.startsWith('spreadsheet_')) {
+      if (['read_file', 'search_contents', 'discover_datasets', 'describe_dataset', 'query_data', 'query_sql', 'analyze_data', 'inspect_file', 'query_file', 'use_knowledge_tool'].includes(call.name) || call.name.startsWith('spreadsheet_')) {
         const key = JSON.stringify([call.name, call.input]), count = (repetitions.get(key) ?? 0) + 1
         repetitions.set(key, count)
         if (count > 3) return { output: 'This identical read was already attempted three times. Use the evidence, change the query/range, or report the unresolved limitation.', summary: 'Repeated read stopped', isError: true }

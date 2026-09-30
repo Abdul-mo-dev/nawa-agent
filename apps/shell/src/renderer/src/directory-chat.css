@@ -1,5 +1,9 @@
 /* Directory conversation follows the native file chat geometry, using Explorer's
    theme tokens. Its diagnostics remain a separate row, never an assistant bubble. */
+.nawa-chat-primary-actions { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ex-inspector .ws-chat-head .nawa-chat-primary-actions > .ws-chat-close { min-height: 32px; padding: 5px 9px; font-size: 12px; flex-shrink: 0; }
+.nawa-table-export-dialog { width: min(680px, calc(100vw - 32px)); height: fit-content; max-height: 80vh; }
+.nawa-table-export-dialog .nawa-panel-dialog-body { overflow-wrap: anywhere; }
 .workspace-chat-main .ws-chat-scroll .ws-chat-log {
   display: flex; flex-direction: column; gap: 16px; padding: 32px 16px;
 }

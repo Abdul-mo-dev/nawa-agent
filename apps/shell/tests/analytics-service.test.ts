@@ -2,14 +2,15 @@ import { EventEmitter } from 'node:events'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WebContents } from 'electron'
 
-const mocks = vi.hoisted(() => ({ readFile: vi.fn(), authorizePath: vi.fn(), autoReady: true }))
+const mocks = vi.hoisted(() => ({ readFile: vi.fn(), readFileSync: vi.fn(), authorizePath: vi.fn(), autoReady: true }))
 vi.mock('electron', () => ({ app: { getPath: () => 'analytics-test' }, ipcMain: {} }))
+vi.mock('node:fs', () => ({ readFileSync: mocks.readFileSync }))
 vi.mock('node:fs/promises', () => ({
   ...mocks,
   mkdir: vi.fn(),
   writeFile: vi.fn(),
   rename: vi.fn(),
-  rm: vi.fn(),
+  rm: vi.fn().mockResolvedValue(undefined),
 }))
 vi.mock('../src/main/directory-actions/file-safety', () => ({ authorizePath: mocks.authorizePath }))
 vi.mock('../src/main/analytics/worker?modulePath', () => ({ default: 'analytics-worker.js' }))
@@ -18,8 +19,12 @@ vi.mock('node:worker_threads', () => ({
     static instances: TestWorker[] = []
     job: { action: string; payload?: unknown }
     storeOptions: { readOnly: boolean; initialize: boolean }
-    constructor(_path: string, options: { workerData: { job: { action: string }; storeOptions: { readOnly: boolean; initialize: boolean } } }) {
+    source: string
+    eval: boolean
+    constructor(source: string, options: { eval: boolean; workerData: { job: { action: string }; storeOptions: { readOnly: boolean; initialize: boolean } } }) {
       super()
+      this.source = source
+      this.eval = options.eval
       this.job = options.workerData.job
       this.storeOptions = options.workerData.storeOptions
       TestWorker.instances.push(this)
@@ -34,11 +39,12 @@ vi.mock('node:worker_threads', () => ({
 
 import { Worker } from 'node:worker_threads'
 import { AnalyticsService } from '../src/main/analytics/service'
+import { DEFAULT_ANALYTICS_SETTINGS } from '../src/shared/analytics-api'
 
 const workers = () =>
   (
     Worker as unknown as {
-      instances: Array<EventEmitter & { job: { action: string; payload?: unknown }; storeOptions: { readOnly: boolean; initialize: boolean } }>
+      instances: Array<EventEmitter & { source: string; eval: boolean; job: { action: string; payload?: unknown }; storeOptions: { readOnly: boolean; initialize: boolean } }>
     }
   ).instances
 const settle = async () => {
@@ -49,6 +55,7 @@ beforeEach(() => {
   vi.useFakeTimers()
   workers().length = 0
   mocks.autoReady = true
+  mocks.readFileSync.mockReset().mockReturnValue('trusted analytics worker source')
   mocks.readFile.mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' }))
   mocks.authorizePath.mockResolvedValue(undefined)
   service = new AnalyticsService({ roots: async () => [], isHomeSender: () => true })
@@ -59,6 +66,57 @@ afterEach(() => {
 })
 
 describe('analytics worker admission', () => {
+  it('requires saved consent for preparation and never admits model approval or clearing', async () => {
+    const signal = new AbortController().signal
+    await expect(service.selected(1, [], 'prepare', {}, signal)).rejects.toThrow('Prepare & export')
+    expect(workers()).toHaveLength(0)
+    await service.saveSettings({ ...DEFAULT_ANALYTICS_SETTINGS, allowAgentPreparation: true })
+    const request = service.selected(1, [], 'prepare', {}, signal)
+    await settle()
+    expect(workers()[0].job.action).toBe('prepare')
+    expect(workers()[0].storeOptions.readOnly).toBe(false)
+    workers()[0].emit('message', { result: { value: { approvalRequired: true }, sources: [] } })
+    await expect(request).resolves.toMatchObject({ value: { approvalRequired: true } })
+    for (const action of ['review', 'import', 'clear', 'prepare-export']) {
+      await expect(service.selected(1, [], action as never, {}, signal)).rejects.toThrow('user-controlled')
+    }
+  })
+  it('admits the explicit UI batch as a cancellable writer without changing saved agent settings', async () => {
+    const request = service.selected(7, [], 'export-sqlite', {}, new AbortController().signal, { folder: 'workspace', reviewedDatasets: [] })
+    await settle()
+    expect(workers()[0].job.action).toBe('export-sqlite')
+    expect(workers()[0].storeOptions.readOnly).toBe(false)
+    expect(service.progress().running).toBe(true)
+    await expect(service.request(7, { action: 'import' })).rejects.toThrow('Another data import/review')
+    const rejection = expect(request).rejects.toThrow('cancelled')
+    service.cancel(7)
+    workers()[0].emit('message', { result: { exports: [], sources: [] } })
+    await rejection
+    expect(service.progress().running).toBe(false)
+    expect((await service.settings()).settings).toEqual(DEFAULT_ANALYTICS_SETTINGS)
+  })
+  it('retains the startup worker code when rebuilds remove its generated file', async () => {
+    mocks.readFileSync.mockImplementation(() => { throw Object.assign(new Error('bundle removed'), { code: 'ENOENT' }) })
+    const request = service.request(1, { action: 'statuses' })
+    await settle()
+    expect(workers()[0]).toMatchObject({ source: 'trusted analytics worker source', eval: true })
+    expect(mocks.readFileSync).toHaveBeenCalledTimes(1)
+    workers()[0].emit('message', { result: [] })
+    await expect(request).resolves.toEqual([])
+  })
+
+  it('retries a missing startup bundle after the build finishes', async () => {
+    mocks.readFileSync.mockImplementationOnce(() => { throw Object.assign(new Error('building'), { code: 'ENOENT' }) })
+    const recovering = new AnalyticsService({ roots: async () => [], isHomeSender: () => true })
+    try {
+      const request = recovering.request(1, { action: 'statuses' })
+      await settle()
+      expect(workers()[0]).toMatchObject({ source: 'trusted analytics worker source', eval: true })
+      workers()[0].emit('message', { result: [] })
+      await expect(request).resolves.toEqual([])
+    } finally { recovering.stop() }
+  })
+
   it('queues overlapping reads in order and keeps at most two workers running', async () => {
     const requests = [1, 2, 3, 4].map((payload) =>
       service.request(1, { action: 'statuses', payload }),

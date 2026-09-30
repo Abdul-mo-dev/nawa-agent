@@ -36,7 +36,7 @@ export function registerDirectoryActionsIpc(options: {
     linkedImages: discoverLinkedImages, stageImages: stageLinkedImages, finalizeAssets: finalizeWorkflowAssets,
     search: (owner, paths, query, signal) => rag.searchSelected(owner, paths, query, signal, () => search.selected(owner, paths, query, signal)),
     myAgentTools: (paths, sessionId, action, payload, signal) => rag.toolsSelected(paths, sessionId, action, payload, signal),
-    analytics: (owner, paths, action, payload, signal) => analytics.selected(owner, paths, action, payload, signal),
+    analytics: (owner, paths, action, payload, signal, preparation) => analytics.selected(owner, paths, action, payload, signal, preparation),
     review: reviewFileChanges, convert: convertWorkflowFile, quality: reviewWorkflowFile,
     changed: path => options.changed([dirname(path)]),
   })

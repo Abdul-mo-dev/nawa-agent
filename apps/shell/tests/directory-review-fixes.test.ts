@@ -3,6 +3,7 @@ import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { DirectoryActionManager, type ActionDependencies } from '../src/main/directory-actions/manager'
+import { analyticsSkill } from '../src/renderer/src/analytics/skill'
 import { directoryRoute, routedDirectorySkill } from '../src/renderer/src/directory-actions/routing'
 import { createDirectorySkill } from '../src/renderer/src/ai/directory-skill'
 import { directoryInspectionSkill } from '../src/renderer/src/directory-actions/inspection-skill'
@@ -24,6 +25,69 @@ beforeEach(async () => {
   manager = new DirectoryActionManager(deps); run = await manager.begin(1, { opened: root, files: [file], directories: [] })
 })
 afterEach(async () => { await manager.cancelOwner(1); await rm(root, { recursive: true, force: true }) })
+it('keeps button consent scoped to its run and forwards only fully described table generations for export', async () => {
+  deps.analytics = vi.fn().mockImplementation(async (_owner, _paths, action) => ({ value: action === 'describe' ? { id: 'table', generation: 'draft', totalColumns: 3, policy: { columns: [{}, {}] } } : {}, sources: [] }))
+  await expect(manager.analyticsData(1, run, 'export-sqlite', {})).rejects.toThrow('Prepare & export')
+  run = await manager.begin(1, { opened: root, files: [file], directories: [], prepareTables: true })
+  await manager.analyticsData(1, run, 'describe', { datasetId: 'table', columnOffset: 0 })
+  await manager.analyticsData(1, run, 'export-sqlite', {})
+  expect(deps.analytics).toHaveBeenLastCalledWith(1, [file], 'export-sqlite', {}, expect.any(AbortSignal), { folder: root, reviewedDatasets: [] })
+  await manager.analyticsData(1, run, 'describe', { datasetId: 'table', columnOffset: 1 })
+  await manager.analyticsData(1, run, 'export-sqlite', {})
+  expect(deps.analytics).toHaveBeenLastCalledWith(1, [file], 'export-sqlite', {}, expect.any(AbortSignal), { folder: root, reviewedDatasets: [{ datasetId: 'table', generation: 'draft' }] })
+  run = await manager.begin(1, { opened: root, files: [file], directories: [] })
+  await expect(manager.analyticsData(1, run, 'export-sqlite', {})).rejects.toThrow('Prepare & export')
+})
+it('guides a premature multi-table export through the manager review ledger before publishing once', async () => {
+  run = await manager.begin(1, { opened: root, files: [file], directories: [], prepareTables: true })
+  const ids = ['files', 'data', 'budget']
+  const exported = vi.fn()
+  deps.analytics = vi.fn(async (_owner, _paths, action, payload, _signal, preparation) => {
+    if (action === 'prepare') return { value: { preparation: { draftsPrepared: 3 } }, sources: [] }
+    if (action === 'discover') return { value: { datasets: ids.map(id => ({ id, generation: 'draft', name: id, status: 'needs-review' })), nextOffset: null }, sources: [] }
+    if (action === 'describe') {
+      const id = (payload as { datasetId: string }).datasetId
+      return { value: { id, generation: 'draft', totalColumns: 2, policy: { columns: [{ id: 'c0' }, { id: 'c1' }] } },
+        sources: [{ path: file, hash: 'source-hash', datasetId: id, generation: 'draft' }] }
+    }
+    if (action === 'export-sqlite') {
+      exported(preparation?.reviewedDatasets)
+      return { value: { databasePath: join(root, 'tables.sqlite3') }, sources: [] }
+    }
+    throw new Error(`Unexpected ${action}`)
+  })
+  const skill = analyticsSkill({ analytics: (action, payload) => manager.analyticsData(1, run, action, payload), cancel: vi.fn() }, { prepareExport: true })
+  await skill.executeTool({ id: 'prepare', name: 'prepare_data', input: {} })
+  for (const [index, id] of ids.entries()) {
+    const result = await skill.executeTool({ id: String(index), name: 'export_sqlite', input: {} })
+    expect(JSON.parse(result.output)).toMatchObject({ status: 'review-required', datasetId: id })
+    expect(exported).not.toHaveBeenCalled()
+  }
+  expect(JSON.parse((await skill.executeTool({ id: 'export', name: 'export_sqlite', input: {} })).output).databasePath).toBe(join(root, 'tables.sqlite3'))
+  expect(exported).toHaveBeenCalledExactlyOnceWith(ids.map(datasetId => ({ datasetId, generation: 'draft' })))
+})
+it('advances discovery evidence only for trusted policy publication and then allows native calculation', async () => {
+  const previous = { path: file, hash: 'source-hash', datasetId: 'table', generation: 'draft' }
+  const current = { ...previous, generation: 'applied' }
+  deps.analytics = vi.fn().mockResolvedValueOnce({ value: {}, sources: [previous] }).mockResolvedValueOnce({ value: { readyTables: 1 }, sources: [current], policyChanges: [{ datasetId: 'table', previousGeneration: 'draft', generation: 'applied', sourceHash: 'source-hash' }] }).mockResolvedValueOnce({ value: { total: '30' }, sources: [current] })
+  await manager.analyticsData(1, run, 'discover', {})
+  expect(await manager.analyticsData(1, run, 'prepare', {})).toEqual({ readyTables: 1 })
+  expect(await manager.analyticsData(1, run, 'query', { datasetIds: ['table'] })).toEqual({ total: '30' })
+})
+it('rejects unexplained analytical revisions and changed source hashes even with a policy transition', async () => {
+  const previous = { path: file, hash: 'original', datasetId: 'table', generation: 'draft' }
+  deps.analytics = vi.fn().mockResolvedValueOnce({ value: {}, sources: [previous] }).mockResolvedValueOnce({ value: {}, sources: [{ ...previous, generation: 'unexplained' }] }).mockResolvedValueOnce({ value: {}, sources: [{ ...previous, hash: 'changed', generation: 'applied' }], policyChanges: [{ datasetId: 'table', previousGeneration: 'draft', generation: 'applied', sourceHash: 'changed' }] })
+  await manager.analyticsData(1, run, 'discover', {})
+  await expect(manager.analyticsData(1, run, 'prepare', {})).rejects.toThrow('revisions changed')
+  await expect(manager.analyticsData(1, run, 'prepare', {})).rejects.toThrow('revisions changed')
+})
+it('stops policy writes before execution after numerical results have been used', async () => {
+  deps.analytics = vi.fn().mockResolvedValue({ value: { total: '30' }, sources: [{ path: file, hash: 'source', datasetId: 'table', generation: 'approved' }] })
+  await manager.analyticsData(1, run, 'query', { datasetIds: ['table'] })
+  await expect(manager.analyticsData(1, run, 'prepare', {})).rejects.toThrow('Start a new request')
+  await expect(manager.analyticsData(1, run, 'propose-policy', {})).rejects.toThrow('Start a new request')
+  expect(deps.analytics).toHaveBeenCalledTimes(1)
+})
 it('pages plain text beyond 12000 characters and rejects changed evidence at final validation', async () => {
   const first = await manager.readFile(1, run, file)
   expect(first).toMatchObject({ end: 12000, total: 14003, nextOffset: 12000 })

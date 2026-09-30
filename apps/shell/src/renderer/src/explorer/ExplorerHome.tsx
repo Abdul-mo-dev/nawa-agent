@@ -78,6 +78,7 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
   const folder = location.kind === 'folder' ? location.path : null
   const editorActive = !!editorTab && editorTab.kind !== 'home'
   const currentRootPath = folder ? rootFor(folder, roots) : undefined
+  const currentFolderRoot = roots.find(root => samePath(root.path, currentRootPath || ''))
   const currentRoot = roots.find(root => samePath(root.path, currentRootPath || activeRoot || '')) ?? roots[0]
   const state = folder ? directory(folder) : undefined
   const inspectorVisible = !editorActive && prefs.pane !== 'none'
@@ -140,8 +141,8 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
     try { localStorage.setItem(LAST_LOCATION_KEY, JSON.stringify(location)) } catch { /* Storage is optional. */ }
   }, [location, rootsLoading])
   useEffect(() => {
-    if (folder && rootFor(folder, roots)) { void loadDirectory(folder); setActiveRoot(rootFor(folder, roots) ?? null) }
-  }, [folder, roots, loadDirectory, revision])
+    if (folder && currentFolderRoot?.usable) { void loadDirectory(folder); setActiveRoot(currentFolderRoot.path) }
+  }, [folder, currentFolderRoot, loadDirectory, revision])
   useEffect(() => {
     if (location.kind === 'folder') { pageSequence.current++; setPageLoading(false); return }
     const sequence = ++pageSequence.current
@@ -378,8 +379,8 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
   const crumbs = crumbPath && crumbRoot ? breadcrumbs(crumbPath, crumbRoot) : []
   const upPath = editorActive ? crumbPath : folder && currentRootPath && !samePath(folder, currentRootPath) ? parentPath(folder) : null
   const itemCount = allItems.length
-  const loading = folder ? !!state?.loading || (!state && !!currentRootPath) : pageLoading || rootsLoading
-  const listError = folder ? (!currentRootPath && !rootsLoading ? t('notMounted') : state?.error) : pageError
+  const loading = folder ? !!state?.loading || (!state && !!currentFolderRoot?.usable) : pageLoading || rootsLoading
+  const listError = folder ? (!currentRootPath && !rootsLoading ? t('notMounted') : currentFolderRoot?.usable === false ? t('unavailable') : state?.error) : pageError
   const headerIcon = folder ? <FolderGlyph size={34} open /> : location.kind === 'home' ? <NawaIcon size={34} /> : <Icon name={location.kind === 'starred' ? 'star' : location.kind === 'recent' ? 'recent' : 'home'} size={28} />
 
   return <div ref={explorer} className={`explorer${prefs.compact ? ' ex-compact' : ''}${editorActive ? ' ex-editor-active' : ''}`} data-testid="nawa-explorer" style={{ '--ex-nav-width': `${effectiveNavWidth}px`, '--ex-inspector-width': `${effectiveInspectorWidth}px` } as CSSProperties}>

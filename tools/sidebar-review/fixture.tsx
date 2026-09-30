@@ -6,6 +6,7 @@ import { WorkspaceControlPanel } from '../../apps/shell/src/renderer/src/explore
 import { WorkspaceChat } from '../../apps/shell/src/renderer/src/WorkspaceChat'
 import { DEFAULT_RAG_SETTINGS } from '../../apps/shell/src/shared/rag-api'
 import { DEFAULT_ANALYTICS_SETTINGS } from '../../apps/shell/src/shared/analytics-api'
+import type { Dataset, TablePolicy } from '../../apps/shell/src/shared/analytics-api'
 import { snapshot as myAgentSnapshot } from '../../apps/shell/tests/fixtures/myagent-settings'
 import '@genoffice/ui/tokens.css'
 import '@genoffice/ui/dropdown.css'
@@ -34,7 +35,7 @@ let settings = {
 }
 let rag = { ...DEFAULT_RAG_SETTINGS, backend: 'local', model: 'local-embedding', enabled: true }
 let analytics = { ...DEFAULT_ANALYTICS_SETTINGS }
-let serverSnapshot = clone(myAgentSnapshot)
+const serverSnapshot = clone(myAgentSnapshot)
 const now = Date.now()
 let record = {
   id: 'conversation',
@@ -114,8 +115,12 @@ const dataset = {
   })),
 }
 const callbacks = new Set<() => void>()
+let preparedPolicy: Dataset['preparedPolicy']
+let agentApproved = false
 let running = false
 const state = {
+  exportRequests: [] as { paths: string[]; folder: string | null }[],
+  revealedPaths: [] as string[],
   toolCatalogRequests: [] as { query: string; offset: number; extensions?: string[] }[],
   serverSaves: 0,
   readinessChecks: 0,
@@ -155,6 +160,19 @@ const stream = async (request: any) => {
   const emit = (chunk: any) => streamListeners.forEach(listener => listener({ ...chunk, requestId: request.requestId }))
   const turn = (turns.get(request.sessionId) ?? 0) + 1; turns.set(request.sessionId, turn)
   await new Promise(resolve => setTimeout(resolve, 50))
+  if (request.system.includes('The user clicked Prepare & export.')) {
+    const calls = [
+      { name: 'prepare_data', input: {} },
+      { name: 'discover_datasets', input: {} },
+      { name: 'describe_dataset', input: { datasetId: 'table' } },
+      { name: 'propose_table_policy', input: { datasetId: 'table', expectedGeneration: 'draft-v1', policy: {} } },
+      { name: 'describe_dataset', input: { datasetId: 'survey' } },
+      { name: 'export_sqlite', input: {} },
+    ]
+    if (calls[turn - 1]) emit({ type: 'tool-call', toolCall: { id: crypto.randomUUID(), ...calls[turn - 1] } })
+    else emit({ type: 'delta', text: 'SQLite export complete: 1 table exported, 99 rows; 1 table needs a header decision. Database: ' + folder + '\\\\Nawa table exports fixture\\\\tables.sqlite3' })
+    emit({ type: 'done' }); return
+  }
   if (state.scenario === 'connection-error') { emit({ type: 'error', error: 'Fixture provider unavailable' }); return }
   if (state.scenario === 'cutoff') { emit({ type: 'delta', text: 'This answer stopped midway.' }); emit({ type: 'done', stopReason: 'max_tokens' }); return }
   if (['scope-read', 'scope-list'].includes(state.scenario)) {
@@ -230,6 +248,7 @@ let proposal: any
 Object.assign(window, {
   sidebarFixture: {
     state,
+    analyticsSettings: () => clone(analytics),
     release: () => releaseTool?.(),
     releaseCapture: () => releaseCapture?.(),
     releaseModel: () => releaseModel?.(),
@@ -240,12 +259,23 @@ Object.assign(window, {
       dataset.generation = 'v2'
       callbacks.forEach((fn) => fn())
     },
+    preparePolicy: () => {
+      preparedPolicy = { policy: { ...clone(dataset.policy) as TablePolicy, grain: 'One invoice', confirmed: false }, validatedRows: 99, excludedRows: 1, createdAt: now }
+      callbacks.forEach((fn) => fn())
+    },
+    approvePolicy: () => {
+      agentApproved = true
+      preparedPolicy = undefined
+      dataset.generation = 'agent-v3'
+      callbacks.forEach((fn) => fn())
+    },
     job: (value: boolean) => {
       running = value
       callbacks.forEach((fn) => fn())
     },
   },
   aiOffice: {
+    revealPath: async (path: string) => { state.revealedPaths.push(path) },
     listWorkspaceFolder: async () => ({ files: [{ name: 'revenue.xlsx', path: source.path, sizeBytes: 2048 }], folders: [] }),
     getAiProviders: () => [
       { id: 'custom', label: 'Custom provider', defaultModel: '', models: [], needsBaseUrl: true },
@@ -266,6 +296,21 @@ Object.assign(window, {
     aiStreamCancel: async () => { state.streamCancels++ },
   },
   nawaDirectory: {
+    analytics: async (_run: string, action: string, payload: any) => {
+      if (action === 'prepare') return { preparation: { draftsPrepared: 2, existingDrafts: 0, draftTables: 2, readyTables: 0, issues: [] }, datasets: [] }
+      if (action === 'discover') return { datasets: [{ id: 'table', generation: agentApproved ? 'agent-v1' : 'draft-v1', name: 'Revenue', status: agentApproved ? 'ready' : 'needs-review' }, { id: 'survey', generation: 'survey-v1', name: 'Survey', status: 'needs-review' }], nextOffset: null, nextFileOffset: null }
+      if (action === 'describe') return { ...clone(dataset), id: payload.datasetId, generation: payload.datasetId === 'table' ? 'draft-v1' : 'survey-v1', totalColumns: dataset.policy.columns.length, nextColumnOffset: null }
+      if (action === 'propose-policy') { agentApproved = true; return { datasetId: 'table', generation: 'agent-v1', approved: true, status: 'ready' } }
+      if (action === 'export-sqlite') {
+        const scope = state.beginScopes.at(-1)
+        if (!scope.prepareTables) throw new Error('Export not authorized.')
+        state.exportRequests.push({ paths: clone(scope.files), folder: scope.opened })
+        return { exportDirectory: folder + '\\\\Nawa table exports fixture', databasePath: folder + '\\\\Nawa table exports fixture\\\\tables.sqlite3', manifestPath: folder + '\\\\Nawa table exports fixture\\\\manifest.json',
+          exports: [{ datasetId: 'table', sourcePath: source.path, name: 'Revenue', sheet: 'Revenue', generation: 'agent-v1', sourceHash: source.contentHash, fileName: 'tables.sqlite3', sqlTable: 'at_fixture', rows: 99 }],
+          preparation: { readyTables: 1, draftTables: 1, issues: [{ datasetId: 'survey', reason: 'An unnamed column needs clarification.' }] }, sources: [] }
+      }
+      throw new Error('Unexpected fixture analytics action: ' + action)
+    },
     begin: async (scope: any) => { const id = crypto.randomUUID(); state.beginScopes.push(clone(scope)); runSources.set(id, new Map()); return id }, cancel: async (id: string) => { state.cancelledRuns.push(id); runSources.delete(id) }, verifyInspections: async () => null,
     validateEvidence: async (run: string) => {
       if (state.scenario === 'overview-changed') throw new Error('Survey source changed during the answer.')
@@ -418,7 +463,7 @@ Object.assign(window, {
       analytics = clone(value)
     },
     catalog: async () => ({
-      datasets: [clone(dataset)],
+      datasets: [clone({ ...dataset, preparedPolicy, status: agentApproved ? 'ready' : dataset.status, approval: agentApproved ? { by: 'agent', at: now, reason: 'Fully validated clear population' } : undefined })],
       total: 1,
       nextOffset: null,
       files: [],
@@ -473,6 +518,7 @@ function Fixture() {
       <header className="fixture-controls">
         <button onClick={() => setVisible(true)}>Open sidebar</button>
         <button onClick={() => setWidth(300)}>300px</button>
+        <button onClick={() => setWidth(360)}>360px</button>
         <button onClick={() => setWidth(560)}>560px</button>
         <button
           onClick={() => {

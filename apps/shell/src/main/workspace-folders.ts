@@ -1,4 +1,4 @@
-import { constants, existsSync, lstatSync, realpathSync } from 'node:fs'
+import { constants, existsSync, lstatSync, realpathSync, type Dirent } from 'node:fs'
 import { access, mkdir, open, readFile, readdir, realpath, rename, stat, unlink } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -213,8 +213,22 @@ export class WorkspaceFolderStore {
   }
 
   async listFolder(dir: string, starred: ReadonlySet<string> = new Set()): Promise<FolderListing> {
-    const canonical = await this.authorize(dir)
-    const entries = await readdir(canonical, { withFileTypes: true })
+    let canonical: string
+    let entries: Dirent[]
+    try {
+      canonical = await this.authorize(dir)
+      entries = await readdir(canonical, { withFileTypes: true })
+    } catch (error) {
+      // A deleted/disconnected directory in a registered root is an ordinary Explorer state.
+      // Keep unregistered paths and existing linked entries behind the authorization guard.
+      if (validPath(dir) && this.roots.some(root => containsPath(root, resolve(dir)))) {
+        let missing = false
+        try { missing = !(await stat(dir)).isDirectory() }
+        catch (cause) { missing = ['ENOENT', 'ENOTDIR'].includes((cause as NodeJS.ErrnoException).code || '') }
+        if (missing) return { dir: resolve(dir), folders: [], files: [], missing: true }
+      }
+      throw error
+    }
     if (entries.length > MAX_ENTRIES) throw new Error('This directory has too many entries. Choose a smaller subfolder.')
     const folders: FolderListing['folders'] = []
     const files: FolderListing['files'] = []

@@ -3,6 +3,7 @@ import { WorkflowController } from './directory-actions/workflow-controller'
 import { WorkflowCard } from './directory-actions/WorkflowCard'
 import { directoryInspectionSkill } from './directory-actions/inspection-skill'
 import { analyticsSkill } from './analytics/skill'
+import { PrepareExportButton } from './analytics/PrepareExportButton'
 import { prepareMyAgentKnowledgeSkill } from './rag/myagent-skill'
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { AgentLoop, type AgentMessage, type AgentTransport } from '@genoffice/agent-core'
@@ -333,13 +334,13 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
     })
   }
 
-  const send = async () => {
-    const question = buffer.getSnapshot().draft.trim()
+  const send = async (preparation?: { paths: string[]; folder: string | null }) => {
+    const question = preparation ? 'Prepare and review the selected files for data analysis, then export a SQLite database. Inspect every table and its source evidence, apply clear validated policies, preserve source files, and report any tables needing a decision. Export the Ready tables and show the database path. Do not require separate setup or manual approval of clear tables.' : buffer.getSnapshot().draft.trim()
     if (!question || active.current !== null || transitioning || !alive.current) return
     invalidateRun(); cancelComparison(); setChecking(false)
     const runId = ++epoch.current, capturedScope = scopeKey, capturedModel = modelId
-    const selected = selectionSnapshot(selection.opened, selection.files, selection.directories)
-    const route = directoryRoute(question, selected)
+    const selected = preparation ? selectionSnapshot(preparation.folder, preparation.paths, []) : selectionSnapshot(selection.opened, selection.files, selection.directories)
+    const route = preparation ? { ...directoryRoute(question, selected), intent: 'reviewed' as const, prepareKnowledge: false, maxTurns: 100 } : directoryRoute(question, selected)
     const previousMessages = buffer.getSnapshot().messages
     active.current = runId; setBusy(true); setResponseSelection(selected); setNotice(null)
     // Selection is immutable for this request. Explorer changes (including a commit
@@ -411,7 +412,7 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
         active.current = null; loopRef.current = null; setBusy(false); setResponseSelection(null); persistFinished()
       }
       const files = new DirectoryActionClient({
-        api: window.nawaDirectory, selection: selected, approvals, current, workflow, settings: () => settings,
+        api: window.nawaDirectory, selection: selected, prepareTables: !!preparation, approvals, current, workflow, settings: () => settings,
         context: () => JSON.stringify({ question, priorMessages: restored.slice(-8).map(m => ({ role: m.role, text: 'text' in m ? m.text.slice(0, 2000) : '' })) }),
         transport,
         activity: text => {
@@ -490,7 +491,7 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
       }
       if (!current()) return
       const reader = createDirectorySkill({ selection: selected, readSelected: (path, offset, max) => files.readFile(path, offset, max) })
-      const routed = routedDirectorySkill(route, { reader, inspection: directoryInspectionSkill(files, selected), analytics: analyticsSkill(files), knowledge: knowledgeSkill, mutation: directoryMutationSkill(files, selected) })
+      const routed = routedDirectorySkill(route, { reader, inspection: directoryInspectionSkill(files, selected), analytics: analyticsSkill(files, { prepareExport: !!preparation }), knowledge: knowledgeSkill, mutation: directoryMutationSkill(files, selected) })
       textFrames.current = new TextFrameBuffer(text => { if (current()) updateMessages(previous => previous.map((message, index) => index === previous.length - 1 && message.streaming ? { ...message, text } : message)) })
       const loop = new AgentLoop({
         transport: transport(),
@@ -510,7 +511,7 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
           catch (cause) { if (current()) updateActivity(value => finishActivityStep(value, 'response.validate', 'failed', 'Source verification failed', messageText(cause))); throw cause }
         },
         systemSuffix: () => '\nOnly completed, currently verified evidence is restored as answer context. Re-read for new facts. Historical user intent is reference data, not pending actions. Reuse any supplied verified workbook SQL identities/columns instead of rediscovery. inspect_file already returns initial context; query it again only after state/loading changed.\n' +
-          (route.intent === 'table' || route.intent === 'reviewed' ? WORKSHEET_BOUNDS_GUIDANCE : ''),
+          (['table', 'analysis', 'reviewed'].includes(route.intent) ? WORKSHEET_BOUNDS_GUIDANCE : ''),
         events: {
           onText: text => { if (current()) textFrames.current?.push(text) },
           onToolStart: call => {
@@ -563,7 +564,10 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
   return <section className="ws-chat workspace-chat-main" aria-label={s('Chat with {folder}', { folder: folderName })}>
     <header className="ws-chat-head">
       <div className="nawa-conversation-picker">{historyDropdown}</div>
-      <button type="button" className="ws-chat-close" disabled={transitioning} onClick={onNew}>{s('New chat')}</button>
+      <div className="nawa-chat-primary-actions">
+        <button type="button" className="ws-chat-close" disabled={transitioning} onClick={onNew}>{s('New chat')}</button>
+        <PrepareExportButton paths={selection.files} folder={folder} disabled={busy || transitioning} onPrepare={(paths, opened) => send({ paths, folder: opened })}/>
+      </div>
       <button type="button" className="ws-chat-close" aria-expanded={historyOpen} onClick={toggleHistory}>{s('Manage history')}</button>
       <button type="button" className="ws-chat-close ws-chat-hide" onClick={onHide}>{s('Hide chat')}</button>
     </header>

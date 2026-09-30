@@ -29,7 +29,7 @@ export interface NativeStage {
 export interface ActionDependencies {
   myAgentTools?(paths: string[], sessionId: string, action: MyAgentToolAction, payload: unknown, signal: AbortSignal): Promise<MyAgentToolResponse>
   search?(owner: number, paths: string[], query: string, signal: AbortSignal): Promise<FileSearchResult>
-  analytics?(owner: number, paths: string[], action: AnalyticsReadAction, payload: unknown, signal: AbortSignal): Promise<AnalyticsEnvelope>
+  analytics?(owner: number, paths: string[], action: AnalyticsReadAction, payload: unknown, signal: AbortSignal, preparation?: { folder: string; reviewedDatasets: { datasetId: string; generation: string }[] }): Promise<AnalyticsEnvelope>
   linkedImages?(file: string, roots: string[]): Promise<LinkedImage[]>
   stageImages?(original: string, copy: string, images: readonly LinkedImage[]): Promise<void>
   finalizeAssets?(file: string, network: boolean): Promise<string[]>
@@ -46,7 +46,7 @@ export interface ActionDependencies {
   convert?(source: string, target: string, conversion: DirectoryConversion, signal: AbortSignal, network?: boolean): Promise<string[]>
   quality?(path: string, images: boolean, signal: AbortSignal): Promise<DirectoryQuality>
 }
-interface Run { owner: number; scope: DirectoryActionScope; expires: number; cancelled: boolean; abort: AbortController; evidence: Map<string, string>; analyticsEvidence?: Map<string, SourceRef>; myAgentSources?: MyAgentSource[]; myAgentTools?: Set<string> }
+interface Run { owner: number; scope: DirectoryActionScope; expires: number; cancelled: boolean; abort: AbortController; evidence: Map<string, string>; analyticsEvidence?: Map<string, SourceRef>; analyticsResultsUsed?: boolean; analyticsReviewed?: Map<string, { generation: string; total: number; seen: Set<number> }>; myAgentSources?: MyAgentSource[]; myAgentTools?: Set<string> }
 interface Pending extends DirectoryApproval {
   filesystem?: FilesystemSnapshot
   run: string
@@ -81,7 +81,9 @@ export class DirectoryActionManager {
   }
   async begin(owner: number, raw: DirectoryActionScope): Promise<string> {
     if (!raw || !Array.isArray(raw.files) || !Array.isArray(raw.directories) || raw.files.length + raw.directories.length > 256) throw new Error('Invalid directory selection.')
-    const scope = { opened: raw.opened, files: [...new Set(raw.files)], directories: [...new Set(raw.directories)] }
+    if (raw.prepareTables !== undefined && typeof raw.prepareTables !== 'boolean') throw new Error('Invalid table preparation action.')
+    const scope = { opened: raw.opened, files: [...new Set(raw.files)], directories: [...new Set(raw.directories)], prepareTables: raw.prepareTables === true }
+    if (scope.prepareTables && !scope.files.length) throw new Error('Select individual table files before preparing them.')
     const roots = await this.deps.roots()
     // Freeze authority without reading/statting every selection. Actual operations revalidate roots and files.
     for (const path of [scope.opened, ...scope.files, ...scope.directories].filter((p): p is string => p !== null)) {
@@ -514,17 +516,32 @@ export class DirectoryActionManager {
   async analyticsData(owner: number, id: string, action: AnalyticsReadAction, payload: unknown): Promise<unknown> {
     const run = this.run(owner, id)
     if (!this.deps.analytics) throw new Error('Structured analysis is unavailable. Rebuild Nawa.')
-    const result = await this.deps.analytics(owner, [...run.scope.files], action, payload, run.abort.signal)
+    const prepares = action === 'prepare' || action === 'propose-policy'
+    if (prepares && run.analyticsResultsUsed) throw new Error('Start a new request to change table policies after using analytical results. Recompute results under the new policy.')
+    if (action === 'export-sqlite' && !run.scope.prepareTables) throw new Error('Use Prepare & export to authorize a SQLite export.')
+    const preparation = run.scope.prepareTables ? { folder: run.scope.opened ?? dirname(run.scope.files[0]!), reviewedDatasets: [...(run.analyticsReviewed ?? [])].filter(([, value]) => value.seen.size === value.total).map(([datasetId, value]) => ({ datasetId, generation: value.generation })) } : undefined
+    const result = await this.deps.analytics(owner, [...run.scope.files], action, payload, run.abort.signal, preparation)
     this.run(owner, id)
     const evidence = run.analyticsEvidence ??= new Map<string, SourceRef>()
     for (const source of result.sources) {
       if (!run.scope.files.some(path => samePath(path, source.path))) throw new Error('Analysis returned an unselected source; result rejected.')
       const previous = evidence.get(source.datasetId)
-      if (previous && (previous.hash !== source.hash || previous.generation !== source.generation)) throw new Error('Analytical revisions changed within this request. Start a fresh analysis.')
+      const changed = prepares && result.policyChanges?.some(change => change.datasetId === source.datasetId && change.previousGeneration === previous?.generation && change.generation === source.generation && change.sourceHash === source.hash && previous?.hash === source.hash)
+      if (previous && (previous.hash !== source.hash || previous.generation !== source.generation) && !changed) throw new Error('Analytical revisions changed within this request. Start a fresh analysis.')
       const textHash = run.evidence.get(source.path)
       if (textHash && textHash !== source.hash) throw new Error('RAG and SQL source revisions differ. Start a fresh request.')
       evidence.set(source.datasetId, source)
+      if (changed && run.analyticsReviewed?.has(source.datasetId)) run.analyticsReviewed.get(source.datasetId)!.generation = source.generation
     }
+    if (action === 'describe' && result.value && typeof result.value === 'object' && 'policy' in result.value && 'totalColumns' in result.value) {
+      const value = result.value as { id: string; generation: string; totalColumns: number; policy: { columns: unknown[] } }
+      const offset = Number((payload as { columnOffset?: number })?.columnOffset ?? 0)
+      const descriptions = run.analyticsReviewed ??= new Map()
+      let review = descriptions.get(value.id)
+      if (!review || review.generation !== value.generation) { review = { generation: value.generation, total: value.totalColumns, seen: new Set() }; descriptions.set(value.id, review) }
+      for (let column = offset; column < offset + value.policy.columns.length; column++) review.seen.add(column)
+    }
+    if (['query', 'sql', 'analyze', 'result', 'drill'].includes(action)) run.analyticsResultsUsed = true
     return result.value
   }
   async myAgentTools(owner: number, id: string, action: 'catalog' | 'execute', payload: unknown): Promise<MyAgentToolResponse> {

@@ -50,8 +50,13 @@ export interface Dataset {
   profile: Record<string, unknown>
   preview: { row: number; values: string[] }[]
   importedAt: number
+  preparedPolicy?: { policy: TablePolicy; validatedRows: number; excludedRows: number; createdAt: number; notes?: string[] }
+  preparationError?: string
+  approval?: { by: 'user' | 'agent'; at: number; reason: string }
 }
 export interface AnalyticsSettings {
+  allowAgentPreparation: boolean
+  allowAgentApproval: boolean
   maxFileMiB: number
   maxRows: number
   maxColumns: number
@@ -61,6 +66,8 @@ export interface AnalyticsSettings {
   retainedResults: number
 }
 export const DEFAULT_ANALYTICS_SETTINGS: AnalyticsSettings = {
+  allowAgentPreparation: false,
+  allowAgentApproval: false,
   maxFileMiB: 2048, maxRows: 2000000, maxColumns: 512,
   queryTimeoutSeconds: 45, maxGroups: 20000, resultRows: 100, retainedResults: 500,
 }
@@ -83,6 +90,40 @@ export interface AnalyticsProgress {
   rows: number
   message: string
   incomplete: boolean
+}
+export interface AnalyticsPreparationSummary {
+  selectedFileCount: number
+  imported: number
+  unchanged: number
+  failedFiles: number
+  unsupportedFiles: number
+  approvedTables: number
+  alreadyReady: number
+  readyTables: number
+  draftTables: number
+  reviewTables: number
+  blockedTables: number
+  issues: { kind: string; path: string; reason: string; datasetId?: string; name?: string; sheet?: string }[]
+  issuesTruncated: boolean
+}
+export interface AnalyticsTableExport {
+  datasetId: string
+  sourcePath: string
+  name: string
+  sheet: string
+  generation: string
+  sourceHash: string
+  fileName: string
+  sqlTable?: string
+  rows: number
+}
+export interface AnalyticsPrepareExportResult {
+  exportDirectory: string
+  manifestPath: string
+  databasePath: string
+  exports: AnalyticsTableExport[]
+  preparation: AnalyticsPreparationSummary
+  sources: SourceRef[]
 }
 export type FilterOp = 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'in' | 'contains' | 'is-null' | 'not-null'
 export interface DataFilter { column: string; op: FilterOp; value?: unknown }
@@ -134,8 +175,10 @@ export interface AnalyticsResult {
   summary?: Record<string, unknown>
   request: unknown
 }
-export type AnalyticsReadAction = 'discover' | 'describe' | 'query' | 'analyze' | 'result' | 'drill' | 'verify'
-export interface AnalyticsEnvelope { value: unknown; sources: SourceRef[] }
+export type AnalyticsAgentAction = 'discover' | 'describe' | 'query' | 'sql' | 'analyze' | 'result' | 'drill' | 'verify' | 'prepare' | 'propose-policy' | 'export-sqlite'
+/** Compatibility alias for existing directory clients. Direct review/clear actions remain UI-only. */
+export type AnalyticsReadAction = AnalyticsAgentAction
+export interface AnalyticsEnvelope { value: unknown; sources: SourceRef[]; policyChanges?: { datasetId: string; previousGeneration: string; generation: string; sourceHash: string }[] }
 export interface AnalyticsApi {
   settings(): Promise<{ settings: AnalyticsSettings; databasePath: string; backend: string }>
   saveSettings(settings: AnalyticsSettings): Promise<void>
