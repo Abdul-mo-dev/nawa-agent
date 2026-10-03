@@ -224,10 +224,9 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
   usePanelActivity('ai', 'conversation', buffer.error ? { kind: 'error', text: s('Save needs attention') } : needsReview ? { kind: 'attention', text: s('Approval needed') } : busy ? { kind: 'busy', text: s('Response in progress') } : null)
   const actionClient = useRef<DirectoryActionClient | null>(null)
   const activityRecord = useRef<{ messageId: string; value: DirectoryActivity } | null>(null)
-  const parentTool = useRef<string | undefined>(undefined)
   const textFrames = useRef<TextFrameBuffer | null>(null)
   const active = useRef<number | null>(null), epoch = useRef(0), alive = useRef(true)
-  const activeScan = useRef<string | null>(null), comparisonScan = useRef<string | null>(null)
+  const comparisonScan = useRef<string | null>(null)
   const savedCallback = useRef(onSaved); savedCallback.current = onSaved
   const loadSettings = useCallback(() => window.aiOffice.getAiSettings(), [])
   const updateMessages = useCallback((change: (messages: HistoryMessage[]) => HistoryMessage[]) => {
@@ -252,8 +251,6 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
     if (alive.current) setResponseSelection(null)
     actionClient.current?.cancel(); actionClient.current = null
     approvals.cancel()
-    const scan = activeScan.current; activeScan.current = null
-    if (scan) void window.nawaHistory.cancelScan(scan).catch(() => undefined)
     const loop = loopRef.current; loopRef.current = null
     try { if (loop?.busy) loop.reset() } catch (cause) { console.warn('Nawa: cleanup failed.', cause) }
   }, [approvals, updateActivity])
@@ -324,7 +321,6 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
       if (!alive.current) return
       if (entry && activityRecord.current?.value.id === entry.value.id) {
         updateActivity(value => finishActivityStep(value, 'history.save', 'completed', 'Conversation saved', buffer.lastSave))
-        void buffer.saveOnce().catch(() => undefined)
       }
       savedCallback.current()
     }).catch(cause => {
@@ -350,7 +346,7 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
     const startedAt = Date.now(), userMessageId = crypto.randomUUID(), assistantMessageId = crypto.randomUUID()
     const trace: DirectoryActivity = { id: crypto.randomUUID(), model: capturedModel, selectedFiles: selected.files.length,
       startedAt, status: 'running', steps: [], omitted: 0 }
-    activityRecord.current = { messageId: assistantMessageId, value: trace }; parentTool.current = undefined
+    activityRecord.current = { messageId: assistantMessageId, value: trace }
     buffer.edit(record => ({ ...record, draft: record.draft.trim() === question ? '' : record.draft,
       messages: [...record.messages, { id: userMessageId, role: 'user', text: question, createdAt: startedAt, contextKey: capturedScope, request: { id: trace.id, phase: 'user', outcome: 'running' } },
         { id: assistantMessageId, role: 'assistant', text: '', createdAt: startedAt, streaming: true, contextKey: capturedScope, activity: trace, request: { id: trace.id, phase: 'intermediate', outcome: 'running' } }] }))
@@ -359,7 +355,6 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
     try {
       const rawSettings = await loadSettings()
       if (!current()) return
-      activeScan.current = null
       const settings = applyChatModel(rawSettings, capturedModel), label = chatModelLabel(settings, capturedModel)
       updateActivity(value => ({ ...value, model: label }))
       const blank = (): HistoryMessage => ({ id: crypto.randomUUID(), createdAt: Date.now(), role: 'assistant', text: '',
@@ -370,7 +365,7 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
           const id = `model:${crypto.randomUUID()}`, startedAt = Date.now()
           let firstEventMs: number | undefined, calls = 0, stopReason: string | undefined, ended = false
           const received = () => { firstEventMs ??= Date.now() - startedAt }
-          if (current()) updateActivity(value => startActivityStep(value, { id, parentId: parentTool.current, tool: 'model_request', kind: 'model',
+          if (current()) updateActivity(value => startActivityStep(value, { id, tool: 'model_request', kind: 'model',
             status: 'running', startedAt, summary: 'Calling chat model', targets: [] }))
           const end = (status: 'completed' | 'failed' | 'cancelled', error?: string) => {
             if (ended || !current()) return
@@ -416,23 +411,26 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
         context: () => JSON.stringify({ question, priorMessages: restored.slice(-8).map(m => ({ role: m.role, text: 'text' in m ? m.text.slice(0, 2000) : '' })) }),
         transport,
         activity: text => {
-          if (!current() || !parentTool.current) return
-          const id = parentTool.current
-          updateActivity(value => ({ ...value, steps: value.steps.map(step => step.id === id
-            ? { ...step, summary: diagnosticText(text, 360) } : step) }))
+          if (!current()) return
+          updateActivity(value => {
+            const running = [...value.steps].reverse().find(step => step.status === 'running' && (step.kind === 'tool' || step.kind === 'native'))
+            if (!running) return value
+            return { ...value, steps: value.steps.map(step => step.id === running.id
+              ? { ...step, summary: diagnosticText(text, 360) } : step) }
+          })
         },
         toolActivity: event => {
           if (!current()) return
           if (event.type === 'approval') {
             const id = `approval:${event.id}:${event.phase}`
             if (event.approved === undefined) updateActivity(value => startActivityStep({ ...value, status: 'waiting' }, {
-              id, parentId: parentTool.current, tool: event.phase === 'save' ? 'approve_save' : event.phase === 'action' ? 'approve_file_action' : 'approve_preparation', kind: 'approval',
+              id, tool: event.phase === 'save' ? 'approve_save' : event.phase === 'action' ? 'approve_file_action' : 'approve_preparation', kind: 'approval',
               status: 'waiting', startedAt: Date.now(), summary: event.phase === 'save' ? 'Review changes before saving' : event.phase === 'action' ? 'Approve file action' : 'Approve preparation', targets: [event.path],
             }))
             else updateActivity(value => ({ ...finishActivityStep(value, id, event.approved ? 'completed' : 'cancelled',
               event.approved ? 'Approved' : 'Declined'), status: 'running' }))
           } else if (event.type === 'start') updateActivity(value => startActivityStep(value, {
-            id: `native:${event.call.id}`, parentId: parentTool.current, tool: event.call.name, kind: 'native',
+            id: `native:${event.call.id}`, tool: event.call.name, kind: 'native',
             status: 'running', startedAt: Date.now(), summary: `Native editor: ${event.call.name}`, targets: activityTargets(event.call.input), input: diagnosticText(event.call.input, 1200),
           }))
           else updateActivity(value => finishActivityStep(value, `native:${event.call.id}`, event.execution.isError ? 'failed' : 'completed', event.execution.summary, event.execution.output))
@@ -470,8 +468,12 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
       updateActivity(value => finishActivityStep(value, 'prepare.tools', knowledgeSkill.preparation.status === 'ready' ? 'completed' : knowledgeSkill.preparation.status === 'unavailable' ? 'failed' : 'skipped',
         knowledgeSkill.preparation.available ? 'MyAgent tools ready' : knowledgeSkill.preparation.status === 'unavailable' ? 'MyAgent tools unavailable' : 'MyAgent preparation not needed', knowledgeSkill.preparation))
       if (route.intent === 'overview' && preparedCatalog) {
-        const content = workbookOverviewMetadata(preparedCatalog.content, files.citationSnapshot().filter(citation => citation.path === route.target && citation.locator === 'spreadsheet_catalog_search'))
-        preparedCatalog = content ? { path: preparedCatalog.path, content } : undefined
+        let alreadyCompacted = false
+        try { alreadyCompacted = (JSON.parse(preparedCatalog.content) as { kind?: string }).kind === 'workbook-overview' } catch { /* raw catalog, compact below */ }
+        if (!alreadyCompacted) {
+          const content = workbookOverviewMetadata(preparedCatalog.content, files.citationSnapshot().filter(citation => citation.path === route.target && citation.locator === 'spreadsheet_catalog_search'))
+          preparedCatalog = content ? { path: preparedCatalog.path, content } : undefined
+        }
       }
       if (['table', 'overview'].includes(route.intent) && route.target && knowledgeSkill.tools.some(tool => tool.name === 'spreadsheet_catalog_search')) {
         updateActivity(value => startActivityStep(value, { id: 'prepare.dataset', tool: 'spreadsheet_catalog_search', kind: 'preparation', status: 'running', startedAt: Date.now(), summary: 'Preparing workbook metadata', targets: [route.target!] }))
@@ -516,7 +518,7 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
           onText: text => { if (current()) textFrames.current?.push(text) },
           onToolStart: call => {
             if (!current()) return
-            textFrames.current?.flush(); parentTool.current = call.id
+            textFrames.current?.flush()
             updateActivity(value => startActivityStep(value, { id: call.id, tool: activityToolName(call), kind: 'tool',
               status: 'running', startedAt: Date.now(), summary: `Running ${activityToolName(call)}`, targets: activityTargets(call.input), input: diagnosticText(call.input, 1200) }))
           },
@@ -527,7 +529,6 @@ function DirectoryChat({ folder, folderName, scopePaths, scopeDirs = [], onOpenF
                 status: 'running', startedAt: Date.now(), summary: call.name, targets: activityTargets(call.input), input: diagnosticText(call.input, 1200) })
               return finishActivityStep(value, call.id, execution.isError ? 'failed' : 'completed', execution.summary, execution.output)
             })
-            parentTool.current = undefined
           },
           onTurnEnd: () => {
             textFrames.current?.flush()

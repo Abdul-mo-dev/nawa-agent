@@ -132,7 +132,7 @@ it('uses a small metadata tool set and activates editing only through explicit d
   const parts = { reader: createDirectorySkill({ selection: scope, api: {} as any }), inspection: directoryInspectionSkill(client, scope), analytics: analyticsSkill(client), knowledge: myAgentKnowledgeSkill(client), mutation: directoryMutationSkill(client, scope) }
   const route = directoryRoute('list files in this directory', scope), skill = routedDirectorySkill(route, parts)
   expect(route.prepareKnowledge).toBe(false)
-  expect(skill.tools.map(t => t.name)).toEqual(['list_directory', 'list_files', 'search_files', 'discover_file_tools'])
+  expect(skill.tools.map(t => t.name)).toEqual(['list_directory', 'list_files', 'discover_file_tools'])
   expect(skill.systemPrompt).not.toContain('decimal accounting')
   await skill.executeTool({ id: 'activate', name: 'discover_file_tools', input: { capability: 'editing' } })
   expect(skill.tools.some(t => t.name === 'update_file')).toBe(true)

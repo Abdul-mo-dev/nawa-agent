@@ -190,7 +190,7 @@ export class DirectoryActionClient {
   private addCitation(value: DirectoryCitation): DirectoryCitation {
     const citation = { ...value, locator: value.locator.slice(0, 500), excerpt: value.excerpt?.slice(0, 1200) }
     this.citations.set(value.id, citation)
-    while (this.citations.size > 80) this.citations.delete(this.citations.keys().next().value!)
+    while (this.citations.size > 200) this.citations.delete(this.citations.keys().next().value!)
     return citation
   }
   citationSnapshot(): DirectoryCitation[] { return [...this.citations.values()] }

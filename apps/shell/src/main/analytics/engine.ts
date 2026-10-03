@@ -18,11 +18,18 @@ export class AnalyticsEngine {
   constructor(readonly databasePath:string,readonly roots:string[],readonly settings:AnalyticsSettings,readonly check:()=>void,readonly progress:(p:AnalyticsProgress)=>void=()=>{},storeOptions:StoreOptions={}){this.store=new AnalyticsStore(databasePath,storeOptions)}
   close():void{this.store.close()}
   private selected(paths:string[],path:string):boolean{return paths.some(p=>samePath(p,path))}
+  private exportsRoots():string[]{
+    // SQLite snapshots live beside embedding storage (userData/rag/exports),
+    // never inside the source folder. Keep the previous analytics/exports
+    // location readable for existing snapshots.
+    return [join(dirname(dirname(this.databasePath)),'rag','exports'),join(dirname(this.databasePath),'exports')]
+  }
+  private newExportsRoot():string{return this.exportsRoots()[0]}
   private async verifySqlite(snapshot:{path:string;hash:string}):Promise<void>{
-    // New snapshots live beside the local embedding/analytics stores. Keep older
-    // workspace exports readable until their recorded source versions change.
-    const exportsRoot=join(dirname(this.databasePath),'exports')
-    await regularFile(within(exportsRoot,snapshot.path)?[exportsRoot]:this.roots,snapshot.path,Number.MAX_SAFE_INTEGER);this.check()
+    const roots=this.exportsRoots()
+    const allowed=roots.find(root=>within(root,snapshot.path))
+    if(!allowed)throw new Error('Exported SQLite snapshot must live beside embedding storage. Prepare & export again before querying it.')
+    await regularFile([allowed],snapshot.path,Number.MAX_SAFE_INTEGER);this.check()
     if(await hashFile(snapshot.path)!==snapshot.hash)throw new Error('Exported SQLite snapshot changed. Prepare & export again before querying it.')
     this.check()
   }
@@ -102,7 +109,7 @@ export class AnalyticsEngine {
       for(const {data:d} of records)if(d.status!=='ready')issues.push({kind:d.preparationError?'blocked-table':'needs-review',path:d.path,name:d.name,sheet:d.sheet,datasetId:d.id,reason:d.preparationError??d.preparedPolicy?.notes?.join(' ')??'The table has no applied policy.'})
       for(const path of paths){const file=this.store.file(path);if(!TABLE_EXTENSIONS.has(extname(path).toLowerCase()))issues.push({kind:'unsupported-file',path,reason:'Unsupported analytical file type.'});else if(!file||file.state==='failed')issues.push({kind:'failed-file',path,reason:file?.error??'Source was not imported.'})}
       const preparation:AnalyticsPreparationSummary={selectedFileCount:paths.length,imported:0,unchanged:0,failedFiles:issues.filter(i=>i.kind==='failed-file').length,unsupportedFiles:issues.filter(i=>i.kind==='unsupported-file').length,approvedTables:records.filter(r=>r.data.status==='ready'&&r.data.approval?.by==='agent').length,alreadyReady:records.filter(r=>r.data.status==='ready'&&r.data.approval?.by!=='agent').length,readyTables:records.filter(r=>r.data.status==='ready').length,draftTables:records.filter(r=>r.data.status!=='ready'&&r.data.preparedPolicy).length,reviewTables:issues.filter(i=>i.kind==='needs-review').length,blockedTables:issues.filter(i=>i.kind==='blocked-table').length,issues:issues.slice(0,100),issuesTruncated:issues.length>100}
-      const result=await exportReadyTables({store:this.store,roots:this.roots,folder:job.folder,outputDirectory:join(dirname(this.databasePath),'exports'),paths,preparation,check:this.check,verify:sources=>this.verify(sources,paths),progress:(record,rows)=>this.progress({...emptyProgress(),running:true,folder:job.folder!,current:record.data.path,rows,message:`Exporting SQLite: ${record.data.name}, ${rows.toLocaleString()} rows`})})
+      const result=await exportReadyTables({store:this.store,roots:this.roots,folder:job.folder,outputDirectory:this.newExportsRoot(),paths,preparation,check:this.check,verify:sources=>this.verify(sources,paths),progress:(record,rows)=>this.progress({...emptyProgress(),running:true,folder:job.folder!,current:record.data.path,rows,message:`Exporting SQLite: ${record.data.name}, ${rows.toLocaleString()} rows`})})
       return {value:result,sources:result.sources} satisfies AnalyticsEnvelope
     }
     if(job.action==='prepare'||job.action==='propose-policy'){

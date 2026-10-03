@@ -148,11 +148,11 @@ it.each([
 it('advertises eight focused tools for an overview and retains native/SQL discovery fallbacks', async () => {
   const part = (names: string[]): AgentSkill => ({ id: names[0], systemPrompt: 'General capability guidance', tools: names.map(name => ({ name, description: '', inputSchema: {} })), executeTool: () => ({ output: '{}', summary: 'done' }) })
   const skill = routedDirectorySkill(directoryRoute('what is Survey data.xlsx about', overviewScope), {
-    reader: part(['list_directory', 'list_files', 'search_files', 'read_file']), inspection: part(['inspect_file', 'query_file']),
+    reader: part(['list_directory', 'list_files', 'read_file']), inspection: part(['inspect_file', 'query_file']),
     analytics: part(['discover_datasets']), mutation: part(['update_file']),
     knowledge: part(['discover_knowledge_tools', 'use_knowledge_tool', 'spreadsheet_catalog_search', 'spreadsheet_describe_dataset', 'spreadsheet_query_sql', 'word_read_sections', 'knowledge_search']),
   })
-  expect(skill.tools.map(tool => tool.name)).toEqual(['list_directory', 'list_files', 'search_files', 'discover_knowledge_tools', 'use_knowledge_tool', 'spreadsheet_catalog_search', 'spreadsheet_describe_dataset', 'discover_file_tools'])
+  expect(skill.tools.map(tool => tool.name)).toEqual(['list_directory', 'list_files', 'discover_knowledge_tools', 'use_knowledge_tool', 'spreadsheet_catalog_search', 'spreadsheet_describe_dataset', 'discover_file_tools'])
   expect(skill.systemPrompt).toContain('not respondent findings')
   await skill.executeTool({ id: 'read', name: 'discover_file_tools', input: { capability: 'reading' } })
   expect(skill.tools.some(tool => tool.name === 'inspect_file')).toBe(true)

@@ -67,7 +67,8 @@ export function directoryRoute(task: string, scope: DirectorySelection): Directo
   else if (isMetadataListing(text)) intent = 'metadata'
   else if (target && isWorkbookOverview(text, target)) intent = 'overview'
   else if (/\b(?:prepare|preparation)\b.*\b(?:analysis|analytics|tables?|datasets?|data|workbooks?|spreadsheets?)\b|\b(?:analysis|analytics|data|tables?|datasets?|workbooks?|spreadsheets?)\b.*\bpreparation\b/.test(text)) intent = 'reviewed'
-  else if (/\b(?:edit|update|create|delete|remove|convert|format|save|write|merge|rename|move|copy|duplicate)\b|عدّل|احذف|أنشئ|編集|作成/.test(text)) intent = 'edit'
+  else if (/\b(?:delete|remove|rename|move|copy|duplicate|convert|format|merge)\b|عدّل|احذف|أنشئ|編集|作成/.test(text)) intent = 'edit'
+  else if (/\b(?:edit|update|create|write|save)\b/.test(text) && (/\b(?:file|folder|directory|dir|document|workbook|spreadsheet|sheet|slide|table|dataset|pdf|docx|xlsx|pptx|md|html|txt|csv|json)\b|\.[\w]{2,4}\b/.test(text))) intent = 'edit'
   else if (/\b(?:reviewed|approved|exact decimal|accounting|correlation|variance|quantile|statistical)\b/.test(text)) intent = 'reviewed'
   else if (scope.files.length && /\b(?:insights?|analy[sz](?:e|is)|analytics|statistics?|stats|standard deviation|median|percentiles?|quartiles?|distributions?|outliers?|trends?)\b/.test(analyticalRequest)) intent = 'analysis'
   else if (scope.files.some(path => tableFile.test(path)) && /\b(?:how many|count|sum|total|average|join|group by|compare|percentage)\b|كم عدد|件数|何人|合計/.test(text)) intent = 'table'
@@ -99,19 +100,24 @@ export function routedDirectorySkill(route: DirectoryRoute, parts: { reader: Age
       systemPrompt: route.intent === 'overview' && !expandedKnowledge ? WORKBOOK_OVERVIEW_GUIDANCE + '\nDiscover MyAgent schemas with discover_knowledge_tools; use_knowledge_tool executes a discovered schema. Target the named selected workbook using _nawaFiles or paths. Discovery is metadata; execution requires current indexing only for its target. Never expand file access.' : parts.knowledge.systemPrompt,
       tools: parts.knowledge.tools.filter(t => expandedKnowledge ||
       ['discover_knowledge_tools', 'use_knowledge_tool'].includes(t.name) ||
-      (route.intent === 'overview' ? ['spreadsheet_catalog_search', 'spreadsheet_describe_dataset'].includes(t.name) :
-        ['table', 'analysis'].includes(route.intent) ? ['spreadsheet_query_sql', 'spreadsheet_catalog_search', 'spreadsheet_describe_dataset'].includes(t.name) : /search|read_neighbors|get_document/.test(t.name))) }] : []),
+      (route.intent === 'overview' ? ['spreadsheet_catalog_search', 'spreadsheet_describe_dataset'].includes(t.name)
+        : /search|read_neighbors|get_document/.test(t.name))) }] : []),
     ...(active.has('editing') ? [parts.mutation] : []),
   ]
-  const composed = () => composeSkills('directory', 'Use the smallest sufficient tool path. Tools can be activated with discover_file_tools if a capability is missing. Use existing native inspection for file structure and source evidence. For data insights, large-file aggregates or statistics, activate analysis when needed and calculate over the complete relevant table population; bounded reads and retrieval hits cannot establish whole-file statistics. Reuse prepared SQLite tables for follow-up questions. Prepare & export starts agent review and SQLite export in this chat; ordinary queries can reuse the prepared data without repeating preparation. Do not repeat identical reads when their evidence already answers the question. Cite returned RAG citation IDs as Markdown links; their registered source opens in the evidence viewer.', selectedParts())
+  const composed = () => composeSkills('directory', 'Use the smallest sufficient tool path. Tools can be activated with discover_file_tools if a capability is missing. Use existing native inspection for file structure and source evidence. For data insights, large-file aggregates or statistics, use native analysis (discover_datasets/describe_dataset/query_data/analyze_data/query_sql) over the complete relevant table population; bounded reads and retrieval hits cannot establish whole-file statistics. Reuse prepared SQLite tables for follow-up questions. Prepare & export starts agent review and SQLite export in this chat; ordinary queries can reuse the prepared data without repeating preparation. Do not repeat identical reads when their evidence already answers the question. Cite returned RAG citation IDs as Markdown links; their registered source opens in the evidence viewer.', selectedParts())
   const repetitions = new Map<string, number>()
+  const stableKey = (value: unknown): string => {
+    if (value === null || typeof value !== 'object') return JSON.stringify(value)
+    if (Array.isArray(value)) return `[${value.map(stableKey).join(',')}]`
+    return `{${Object.keys(value as Record<string, unknown>).sort().map(k => `${JSON.stringify(k)}:${stableKey((value as Record<string, unknown>)[k])}`).join(',')}}`
+  }
   return {
     id: 'directory',
     get systemPrompt() { return composed().systemPrompt },
     get tools() { return [...composed().tools, discover] },
     buildContext: () => composed().buildContext?.() ?? '',
     verifyResponse: (text, calls) => parts.analytics.verifyResponse?.(text, calls) ?? parts.mutation.verifyResponse?.(text, calls) ?? null,
-    canExecuteParallel: call => ['list_directory', 'list_files', 'search_files'].includes(call.name),
+    canExecuteParallel: call => ['list_directory', 'list_files'].includes(call.name),
     async executeTool(call, signal) {
       if (call.name === discover.name) {
         const capability = call.input?.capability
@@ -120,7 +126,7 @@ export function routedDirectorySkill(route: DirectoryRoute, parts: { reader: Age
         return { output: JSON.stringify({ capability, tools: composed().tools, guidance: composed().systemPrompt }), summary: `Enabled ${capability} tools`, mutated: false }
       }
       if (['read_file', 'search_contents', 'discover_datasets', 'describe_dataset', 'query_data', 'query_sql', 'analyze_data', 'inspect_file', 'query_file', 'use_knowledge_tool'].includes(call.name) || call.name.startsWith('spreadsheet_')) {
-        const key = JSON.stringify([call.name, call.input]), count = (repetitions.get(key) ?? 0) + 1
+        const key = `${call.name}:${stableKey(call.input)}`, count = (repetitions.get(key) ?? 0) + 1
         repetitions.set(key, count)
         if (count > 3) return { output: 'This identical read was already attempted three times. Use the evidence, change the query/range, or report the unresolved limitation.', summary: 'Repeated read stopped', isError: true }
       }
