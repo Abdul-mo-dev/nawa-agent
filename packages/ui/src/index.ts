@@ -17,6 +17,7 @@ export {
   type AiPanelSide,
 } from './ai-panel-prefs'
 export { applyAiPanelPrefs, useAiPanelPrefs, aiPanelWidthAtPointer } from './ai-panel-prefs-store'
+export { clampAiPanelWidth, useAiPanelWidth, type AiPanelWidth } from './use-ai-panel-width'
 export {
   ColorPicker,
   THEME_COLORS,

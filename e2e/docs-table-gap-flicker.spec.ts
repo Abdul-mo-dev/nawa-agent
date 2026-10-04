@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { launchShell, closeAndSaveVideo, waitForPageWithUrl } from './helpers'
+import { createNewFile, launchShell, closeAndSaveVideo, waitForPageWithUrl } from './helpers'
 
 /**
  * Regression net for the table page-gap flicker (#1088): a fixed-layout table
@@ -22,8 +22,7 @@ test.describe('docs table page-gap stability', () => {
     const launched = await launchShell({ onboardingSeen: true, videoDir: 'docs-table-gap-flicker' })
     const { app, page } = launched
     try {
-      await expect(page.locator('.quick-card').first()).toContainText('AI Docs')
-      await page.locator('.quick-card').first().click()
+      await createNewFile(page, 'Document')
       const editorPage = await waitForPageWithUrl(app, '://docs/')
       await editorPage.waitForFunction(
         () => Boolean((window as unknown as AidocsWindow).__aidocs?.editor),

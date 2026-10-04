@@ -6,11 +6,11 @@
  * and surfaces a stable, localizable message when the target stays locked.
  */
 import {
-  chmod,
   copyFile,
   mkdir,
   mkdtemp,
   readFile,
+  rename,
   rm,
   stat,
   truncate,
@@ -23,12 +23,23 @@ import { promoteFileAtomically } from '@genoffice/xlsx-gateway/gateway/xlsx-pack
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>()
-  return { ...actual, copyFile: vi.fn(actual.copyFile) }
+  return { ...actual, copyFile: vi.fn(actual.copyFile), rename: vi.fn(actual.rename) }
 })
 const copyFileMock = vi.mocked(copyFile)
+const renameMock = vi.mocked(rename)
 
 const scratches: string[] = []
 const actualCopyFile = copyFileMock.getMockImplementation()!
+const actualRename = renameMock.getMockImplementation()!
+
+function blockRename(temporary: string, target: string): void {
+  renameMock.mockImplementation(async (src, dest) => {
+    if (String(src) === temporary && String(dest) === target) {
+      throw Object.assign(new Error('EACCES: rename blocked'), { code: 'EACCES' })
+    }
+    return actualRename(src, dest)
+  })
+}
 
 async function scratchDir(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'genoffice-promote-test-'))
@@ -39,9 +50,9 @@ async function scratchDir(): Promise<string> {
 afterEach(async () => {
   copyFileMock.mockReset()
   copyFileMock.mockImplementation(actualCopyFile)
+  renameMock.mockReset()
+  renameMock.mockImplementation(actualRename)
   for (const dir of scratches.splice(0)) {
-    await chmod(dir, 0o755).catch(() => {})
-    for (const sub of ['locked']) await chmod(join(dir, sub), 0o755).catch(() => {})
     await rm(dir, { recursive: true, force: true })
   }
 })
@@ -66,11 +77,8 @@ describe('promoteFileAtomically', () => {
     const target = join(locked, 'book.xlsx')
     await writeFile(temporary, 'new-bytes')
     await writeFile(target, 'old-bytes')
-    // a read-only directory rejects the rename with the same retryable
-    // EACCES a Windows lock produces, while the target file stays writable
-    await chmod(locked, 0o555)
+    blockRename(temporary, target)
     await promoteFileAtomically(temporary, target)
-    await chmod(locked, 0o755)
     expect(await readFile(target, 'utf8')).toBe('new-bytes')
   }, 15_000)
 
@@ -82,14 +90,17 @@ describe('promoteFileAtomically', () => {
     const target = join(locked, 'book.xlsx')
     await writeFile(temporary, 'new-bytes')
     await writeFile(target, 'old-bytes')
-    // rename AND in-place copy both refused — the Excel-holds-the-file case
-    await chmod(target, 0o444)
-    await chmod(locked, 0o555)
+    // Rename and in-place copy both fail with the same codes as an Excel lock.
+    blockRename(temporary, target)
+    copyFileMock.mockImplementation(async (src, dest, mode) => {
+      if (String(src) === temporary && String(dest) === target) {
+        throw Object.assign(new Error('EBUSY: copy blocked'), { code: 'EBUSY' })
+      }
+      return actualCopyFile(src, dest, mode)
+    })
     await expect(promoteFileAtomically(temporary, target)).rejects.toThrow(
       'The save target is locked by another program',
     )
-    await chmod(locked, 0o755)
-    await chmod(target, 0o644)
     // the finished bytes survive the failure for the caller's cleanup/retry
     expect(await readFile(temporary, 'utf8')).toBe('new-bytes')
     expect(await readFile(target, 'utf8')).toBe('old-bytes')
@@ -103,7 +114,7 @@ describe('promoteFileAtomically', () => {
     const target = join(locked, 'book.xlsx')
     await writeFile(temporary, 'new-bytes')
     await writeFile(target, 'old-bytes')
-    await chmod(locked, 0o555)
+    blockRename(temporary, target)
     // the backup copy runs for real; the copy over the target truncates it
     // and then fails the way a lock acquired mid-write does
     copyFileMock.mockImplementation(async (src, dest, mode) => {
@@ -114,7 +125,6 @@ describe('promoteFileAtomically', () => {
     await expect(promoteFileAtomically(temporary, target)).rejects.toThrow(
       'The save target is locked by another program',
     )
-    await chmod(locked, 0o755)
     expect(await readFile(target, 'utf8')).toBe('old-bytes')
     expect(await readFile(temporary, 'utf8')).toBe('new-bytes')
   }, 15_000)
@@ -127,7 +137,7 @@ describe('promoteFileAtomically', () => {
     const target = join(locked, 'book.xlsx')
     await writeFile(temporary, 'new-bytes')
     await writeFile(target, 'old-bytes')
-    await chmod(locked, 0o555)
+    blockRename(temporary, target)
     const busy = () => Object.assign(new Error('EBUSY: resource busy'), { code: 'EBUSY' })
     copyFileMock.mockImplementation(async (src, dest, mode) => {
       if (String(src) === temporary) {
@@ -135,13 +145,13 @@ describe('promoteFileAtomically', () => {
         throw busy()
       }
       if (String(dest) === target) throw busy()
+      if (String(dest).startsWith(locked) && String(dest).includes('.recovered-')) throw busy()
       return actualCopyFile(src, dest, mode)
     })
     const failure = await promoteFileAtomically(temporary, target).catch((error: Error) => error)
-    await chmod(locked, 0o755)
     expect(failure?.message).toContain('preserved at: ')
     const survivor = failure!.message.split('preserved at: ')[1] ?? ''
-    // the read-only directory refuses the recovered copy, so the tmp backup stays
+    // A second lock refuses the recovered copy, so the tmp backup stays.
     expect(survivor.startsWith(tmpdir())).toBe(true)
     expect(basename(survivor)).toMatch(/^book\.recovered-[0-9a-f-]+\.xlsx$/)
     expect(await readFile(survivor, 'utf8')).toBe('old-bytes')

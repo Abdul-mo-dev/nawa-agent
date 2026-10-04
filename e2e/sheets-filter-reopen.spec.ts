@@ -1,9 +1,14 @@
 import { test, expect } from '@playwright/test'
-import { execSync } from 'node:child_process'
 import { mkdtemp, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { launchShell, closeAndSaveVideo, waitForPageWithUrl } from './helpers'
+import {
+  createNewFile,
+  launchShell,
+  closeAndSaveVideo,
+  waitForPageWithUrl,
+  zipText,
+} from './helpers'
 
 // the preload exposes window.__genofficeDebug only under this env var
 process.env.GENOFFICE_DEBUG_HOOKS = '1'
@@ -24,17 +29,13 @@ test.describe('sheets: filter criteria survive save and reopen', () => {
     const scratch = await mkdtemp(join(tmpdir(), 'genoffice-filter-reopen-'))
     const launched = await launchShell({
       onboardingSeen: true,
+      settings: { defaultSaveDir: join(scratch, 'GenOffice') },
       videoDir: 'sheets-filter-reopen',
     })
     let savedPath = ''
     try {
       const { app, page } = launched
-      await app.evaluate(({ app: electronApp }, dir) => {
-        electronApp.setPath('documents', dir)
-      }, scratch)
-
-      await expect(page.locator('.quick-card').nth(1)).toContainText('AI Sheets')
-      await page.locator('.quick-card').nth(1).click()
+      await createNewFile(page, 'Spreadsheet')
 
       const sheets = await waitForPageWithUrl(app, '://sheets/')
       await sheets.waitForFunction(() => document.body.textContent?.includes('Sheet1'), null, {
@@ -83,7 +84,7 @@ test.describe('sheets: filter criteria survive save and reopen', () => {
         const files = (await readdir(saveDir)).filter((f) => f.endsWith('.xlsx'))
         expect(files).toHaveLength(1)
         savedPath = join(saveDir, files[0])
-        const xml = execSync(`unzip -p "${savedPath}" xl/worksheets/sheet1.xml`).toString()
+        const xml = await zipText(savedPath, 'xl/worksheets/sheet1.xml')
         expect(xml).toContain('<autoFilter ref="A1:B5">')
         expect(xml).toContain('<filterColumn colId="1"><filters><filter val="keep"/></filters>')
         expect(xml).toMatch(/<row r="3"[^>]* hidden="1"/)

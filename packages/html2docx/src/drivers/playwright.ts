@@ -1,20 +1,29 @@
 /**
- * BrowserDriver over playwright-core driving a locally installed Chrome. Used
+ * BrowserDriver over playwright-core driving a compatible local Chromium. Used
  * by the tests and the CLI; the app uses the Electron driver instead. Not
  * re-exported from the package index so app bundles never pull in Playwright.
  */
 import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { chromium } from 'playwright-core'
 import type { Browser, BrowserContext, Page } from 'playwright-core'
 import type { BrowserDriver, ScreenshotOptions, Viewport } from '../driver'
 
 const CHROME_CANDIDATES = [
   process.env.CHROME_PATH,
+  // Match the browser to the installed Playwright protocol when available.
+  chromium.executablePath(),
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   '/usr/bin/google-chrome',
   '/usr/bin/google-chrome-stable',
   '/usr/bin/chromium',
   '/usr/bin/chromium-browser',
+  process.env.PROGRAMFILES &&
+    join(process.env.PROGRAMFILES, 'Google/Chrome/Application/chrome.exe'),
+  process.env.LOCALAPPDATA &&
+    join(process.env.LOCALAPPDATA, 'Google/Chrome/Application/chrome.exe'),
+  process.env['PROGRAMFILES(X86)'] &&
+    join(process.env['PROGRAMFILES(X86)'], 'Microsoft/Edge/Application/msedge.exe'),
 ].filter((p): p is string => Boolean(p))
 
 export function findChrome(): string {

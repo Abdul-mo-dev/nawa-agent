@@ -7,11 +7,12 @@
  * Build first: `npm run build:all`.
  */
 import { _electron as electron, type ElectronApplication, type Page } from '@playwright/test'
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createRequire } from 'node:module'
+import JSZip from 'jszip'
 
 export const SHELL_DIR = resolve(__dirname, '../apps/shell')
 export const ARTIFACTS_DIR = resolve(__dirname, 'artifacts')
@@ -174,6 +175,55 @@ export async function closeAndSaveVideo(
 
 export function screenshotPath(name: string): string {
   return join(ARTIFACTS_DIR, 'screenshots', `${name}.png`)
+}
+
+/** Create a blank file through the Explorer toolbar used by the current shell. */
+export async function createNewFile(
+  page: Page,
+  kind: 'Document' | 'Spreadsheet' | 'Presentation' | 'PDF' | 'Markdown' | 'HTML',
+): Promise<void> {
+  await page.locator('.ex-new-button').click()
+  await page
+    .getByRole('menu', { name: 'Explorer actions' })
+    .getByRole('menuitem', { name: kind, exact: true })
+    .click()
+}
+
+/** Read Office ZIP parts without relying on a platform-specific unzip command. */
+export async function zipEntry(archive: string, name: string): Promise<Buffer> {
+  const zip = await JSZip.loadAsync(await readFile(archive))
+  const entry = zip.file(name)
+  if (!entry) throw new Error(`Missing ${name} in ${archive}`)
+  return entry.async('nodebuffer')
+}
+
+export async function zipText(archive: string, name: string): Promise<string> {
+  return (await zipEntry(archive, name)).toString('utf8')
+}
+
+export async function zipListing(archive: string): Promise<string> {
+  const zip = await JSZip.loadAsync(await readFile(archive))
+  return Object.keys(zip.files).join('\n')
+}
+
+export async function zipDirectory(source: string, archive: string): Promise<void> {
+  const zip = new JSZip()
+  const visit = async (dir: string, prefix = ''): Promise<void> => {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const name = prefix ? `${prefix}/${entry.name}` : entry.name
+      const path = join(dir, entry.name)
+      if (entry.isDirectory()) await visit(path, name)
+      else if (entry.isFile()) zip.file(name, await readFile(path))
+    }
+  }
+  await visit(source)
+  await writeFile(archive, await zip.generateAsync({ type: 'nodebuffer' }))
+}
+
+export async function zipAddEntry(archive: string, name: string, data: string): Promise<void> {
+  const zip = await JSZip.loadAsync(await readFile(archive))
+  zip.file(name, data)
+  await writeFile(archive, await zip.generateAsync({ type: 'nodebuffer' }))
 }
 
 /**

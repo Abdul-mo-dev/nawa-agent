@@ -1,9 +1,10 @@
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { aiSettingsPath, proxyUrlFromEnv } from '../src/cloud'
 import { analysisText } from '../src/commands/media'
 import { resultCount } from '../src/commands/search'
-import { run } from './helpers'
+import { run, tempDir } from './helpers'
 
 describe('cloud command plumbing', () => {
   it('locates the shell ai-settings.json without Electron and honours the override', () => {
@@ -93,9 +94,13 @@ describe('cloud command plumbing', () => {
     expect((await run(['media', '--json'])).code).toBe(1)
     const missing = await run(['media', '/nonexistent/photo.jpg', '--json'])
     expect(missing.code).toBe(2)
-    const missingUrl = await run(['media', 'file:///nonexistent/photo.jpg', '--json'])
+    const missingUrl = await run([
+      'media',
+      pathToFileURL(join(tempDir(), 'nonexistent', 'photo.jpg')).href,
+      '--json',
+    ])
     expect(missingUrl.code).toBe(2)
-    expect(missingUrl.json().message).toContain('/nonexistent/photo.jpg')
+    expect(missingUrl.json().message).toContain('photo.jpg')
   })
 
   it('unwraps the Genspark per-file analysis map and leaves prose alone', () => {

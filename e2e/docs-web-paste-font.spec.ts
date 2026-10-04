@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { launchShell, closeAndSaveVideo, waitForPageWithUrl } from './helpers'
+import { createNewFile, launchShell, closeAndSaveVideo, waitForPageWithUrl } from './helpers'
 
 /**
  * Web-HTML paste fonts (r181): text copied from a website pasted into a
@@ -37,8 +37,7 @@ test.describe('docs web-HTML paste fonts', () => {
     const launched = await launchShell({ onboardingSeen: true, videoDir: 'docs-web-paste-font' })
     const { app, page } = launched
     try {
-      await expect(page.locator('.quick-card').first()).toContainText('AI Docs')
-      await page.locator('.quick-card').first().click()
+      await createNewFile(page, 'Document')
       const editorPage = await waitForPageWithUrl(app, '://docs/')
       await editorPage.waitForFunction(
         () => Boolean((window as unknown as AidocsWindow).__aidocs?.editor),

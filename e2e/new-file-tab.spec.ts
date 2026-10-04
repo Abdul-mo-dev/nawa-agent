@@ -1,14 +1,18 @@
 import { test, expect } from '@playwright/test'
-import { launchShell, closeAndSaveVideo, waitForPageWithUrl, screenshotPath } from './helpers'
+import {
+  createNewFile,
+  launchShell,
+  closeAndSaveVideo,
+  waitForPageWithUrl,
+  screenshotPath,
+} from './helpers'
 
 test.describe('new file from home', () => {
-  test('AI Docs quick card opens a docs editor tab', async () => {
+  test('Explorer New menu opens a docs editor tab', async () => {
     const launched = await launchShell({ onboardingSeen: true, videoDir: 'new-doc-tab' })
     const { app, page } = launched
     try {
-      await expect(page.locator('.quick-card').first()).toContainText('AI Docs')
-
-      await page.locator('.quick-card').first().click()
+      await createNewFile(page, 'Document')
 
       const editorTab = page.locator('.tab-bar .tab-item:not(.tab-home)')
       await expect(editorTab).toHaveCount(1)

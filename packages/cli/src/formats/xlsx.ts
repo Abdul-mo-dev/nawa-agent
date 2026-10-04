@@ -34,8 +34,8 @@ import {
   type StylesheetFormats,
 } from '@genoffice/xlsx-gateway/gateway/xlsx-style-read'
 import { readFile } from 'node:fs/promises'
-import { atomicWriteFile } from '../../../../apps/sheets/src/main/atomic-write'
-import { XlsxSidecarClient } from '../../../../apps/sheets/src/main/xlsx-sidecar-client'
+import { saveFileWithStaging } from '@genoffice/electron-utils/atomic-write'
+import { XlsxSidecarClient } from '@genoffice/xlsx-gateway/sidecar-client'
 import { CliError, EXIT } from '../result'
 import { sheetNotFoundHints } from '../suggest'
 import { xlsxSidecarPath } from '../resources'
@@ -1167,7 +1167,7 @@ export async function writeWorkbook(
       { reason: 'op_rejected' },
     )
   }
-  await atomicWriteFile(outputPath, first.buffer)
+  await saveFileWithStaging(outputPath, first.buffer, { onLockedRename: 'write-in-place' })
   const formulaCells = edits.filter((e) => e.cell.formula)
   const base = {
     cells: edits.length,
@@ -1186,7 +1186,7 @@ export async function writeWorkbook(
     const { values, uncached } = await evaluateFormulas(outputPath, formulaCells, renames)
     if (values.length) {
       const second = await save(values)
-      await atomicWriteFile(outputPath, second.buffer)
+      await saveFileWithStaging(outputPath, second.buffer, { onLockedRename: 'write-in-place' })
       if (uncached.length === 0) return { ...base, cachedValues: true }
       const shown = uncached.slice(0, 3).join(', ') + (uncached.length > 3 ? ', …' : '')
       return {

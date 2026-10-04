@@ -45,7 +45,7 @@ const brief: Brief = {
 describe('brief persistence', () => {
   it('round-trips through the meta tag with quotes and angle brackets escaped', () => {
     const tag = briefMetaTag(brief)
-    expect(tag.startsWith(`<meta name="genoffice:brief" content='`)).toBe(true)
+    expect(tag.startsWith(`<meta name="Nawa:brief" content='`)).toBe(true)
     expect(tag).not.toContain("here's") // the apostrophe inside the single-quoted attribute is escaped
     const back = parseBrief(`<html><head>${tag}</head></html>`)
     expect(back?.core_hook).toBe(brief.core_hook)
@@ -60,23 +60,31 @@ describe('brief persistence', () => {
     expect(parseBrief(`<head>${briefMetaTag(brief)}</head>`)?.alternatives).toBeUndefined()
   })
 
+  it('reads and upgrades a brief saved before the product rename', () => {
+    const legacy = briefMetaTag(brief).replace('Nawa:brief', 'genoffice:brief')
+    expect(parseBrief(`<head>${legacy}</head>`)?.core_hook).toBe(brief.core_hook)
+    const upgraded = injectBrief(`<head>${legacy}</head>`, brief)
+    expect(upgraded).toContain('Nawa:brief')
+    expect(upgraded).not.toContain('genoffice:brief')
+  })
+
   it('injects after <meta charset>, else after <head>, else creates a head, and refreshes in place', () => {
     const a = injectBrief('<html><head><meta charset="utf-8"><title>x</title></head></html>', brief)
-    expect(a).toMatch(/<meta charset="utf-8">\n<meta name="genoffice:brief"/)
+    expect(a).toMatch(/<meta charset="utf-8">\n<meta name="Nawa:brief"/)
     const b = injectBrief('<html><head><title>x</title></head></html>', brief)
-    expect(b).toMatch(/<head>\n<meta name="genoffice:brief"/)
+    expect(b).toMatch(/<head>\n<meta name="Nawa:brief"/)
     const c = injectBrief('<html><body></body></html>', brief)
-    expect(c).toMatch(/<html>\n<head><meta name="genoffice:brief"/)
+    expect(c).toMatch(/<html>\n<head><meta name="Nawa:brief"/)
     const d = injectBrief('<p>frag</p>', brief)
-    expect(d.startsWith('<meta name="genoffice:brief"')).toBe(true)
+    expect(d.startsWith('<meta name="Nawa:brief"')).toBe(true)
     const refreshed = injectBrief(a, { ...brief, core_hook: 'changed' })
-    expect((refreshed.match(/genoffice:brief/g) ?? []).length).toBe(1)
+    expect((refreshed.match(/Nawa:brief/g) ?? []).length).toBe(1)
     expect(parseBrief(refreshed)?.core_hook).toBe('changed')
   })
 
   it('ignores malformed meta and summarizes compactly', () => {
-    expect(parseBrief(`<meta name="genoffice:brief" content='{not json'>`)).toBeNull()
-    expect(parseBrief(`<meta name="genoffice:brief" content='{"core_hook":1}'>`)).toBeNull()
+    expect(parseBrief(`<meta name="Nawa:brief" content='{not json'>`)).toBeNull()
+    expect(parseBrief(`<meta name="Nawa:brief" content='{"core_hook":1}'>`)).toBeNull()
     const s = briefSummary(brief)
     expect(s).toContain('core hook: Q3 grew 40%')
     expect(s).toContain('style: Boardroom navy — executive')

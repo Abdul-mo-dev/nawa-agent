@@ -131,6 +131,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Check workspace boundaries
+        run: npm run check:boundaries
+
       - name: Regenerate test fixtures
         run: npm run fixtures
 

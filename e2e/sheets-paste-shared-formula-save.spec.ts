@@ -1,9 +1,14 @@
 import { test, expect } from '@playwright/test'
-import { execSync } from 'node:child_process'
 import { mkdtemp, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { launchShell, closeAndSaveVideo, waitForPageWithUrl } from './helpers'
+import {
+  createNewFile,
+  launchShell,
+  closeAndSaveVideo,
+  waitForPageWithUrl,
+  zipText,
+} from './helpers'
 
 // the preload exposes window.__genofficeDebug only under this env var
 process.env.GENOFFICE_DEBUG_HOOKS = '1'
@@ -20,16 +25,12 @@ test.describe('sheets: tiled paste of formulas survives save', () => {
     const scratch = await mkdtemp(join(tmpdir(), 'genoffice-paste-save-'))
     const launched = await launchShell({
       onboardingSeen: true,
+      settings: { defaultSaveDir: join(scratch, 'GenOffice') },
       videoDir: 'sheets-paste-shared-formula-save',
     })
     try {
       const { app, page } = launched
-      await app.evaluate(({ app: electronApp }, dir) => {
-        electronApp.setPath('documents', dir)
-      }, scratch)
-
-      await expect(page.locator('.quick-card').nth(1)).toContainText('AI Sheets')
-      await page.locator('.quick-card').nth(1).click()
+      await createNewFile(page, 'Spreadsheet')
 
       const sheets = await waitForPageWithUrl(app, '://sheets/')
       await sheets.waitForFunction(() => document.body.textContent?.includes('Sheet1'), null, {
@@ -100,9 +101,7 @@ test.describe('sheets: tiled paste of formulas survives save', () => {
       await expect(async () => {
         const files = (await readdir(saveDir)).filter((f) => f.endsWith('.xlsx'))
         expect(files).toHaveLength(1)
-        const xml = execSync(
-          `unzip -p "${join(saveDir, files[0])}" xl/worksheets/sheet1.xml`,
-        ).toString()
+        const xml = await zipText(join(saveDir, files[0]), 'xl/worksheets/sheet1.xml')
         // both pasted repetitions keep values and a row-shifted formula
         expect(xml).toContain('<c r="A2" s="1"><v>10</v></c>')
         expect(xml).toContain('<c r="A3" s="1"><v>10</v></c>')

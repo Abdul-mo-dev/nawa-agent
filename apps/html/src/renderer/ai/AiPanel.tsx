@@ -1,10 +1,21 @@
-import { registerDirectoryEditor, directoryWorkflowActive, directoryWorkflowSources, directoryModelSettings, directoryWorkflowTask, directoryWorkflowMessages, directoryProgress, directoryQuestions, directoryBrief, directoryPartial } from '@genoffice/agent-core'
+import {
+  registerDirectoryEditor,
+  directoryWorkflowActive,
+  directoryWorkflowSources,
+  directoryModelSettings,
+  directoryWorkflowTask,
+  directoryWorkflowMessages,
+  directoryProgress,
+  directoryQuestions,
+  directoryBrief,
+  directoryPartial,
+} from '@genoffice/agent-core'
 import { ChatModelPicker } from '@genoffice/ui'
 import { setRendererChatModel, getRendererChatModel } from '@genoffice/ai-provider/browser'
 import '@genoffice/ui/chat-model-picker.css'
-import { aiPanelWidthAtPointer, AiPanelSideButton } from '@genoffice/ui'
+import { AiPanelSideButton, useAiPanelWidth } from '@genoffice/ui'
 import { useEffect, useRef, useState } from 'react'
-import type { PointerEvent as ReactPointerEvent, ReactElement, ReactNode } from 'react'
+import type { ReactElement, ReactNode } from 'react'
 import { AgentLoop, composeSkills } from '@genoffice/agent-core'
 import type { AgentImage } from '@genoffice/agent-core'
 import type { AiSettings } from '@genoffice/ai-provider'
@@ -171,26 +182,8 @@ function AttachmentList({
 }
 
 const PANEL_WIDTH_KEY = 'html-ai-panel-width'
-const PANEL_WIDTH_DEFAULT = 360
-const PANEL_WIDTH_MIN = 280
 const MAX_SNAPSHOTS = 20
 const TOOL_OUTPUT_MAX_CHARS = 2000
-
-function clampPanelWidth(w: number): number {
-  // The viewport can be transiently tiny (a WebContentsView is 0×0 until the
-  // shell lays it out), so never let the ceiling drop below the minimum
-  const max = Math.max(PANEL_WIDTH_MIN, Math.min(720, Math.round(window.innerWidth * 0.6)))
-  return Math.min(Math.max(w, PANEL_WIDTH_MIN), max)
-}
-
-function loadPanelWidth(): number {
-  const saved = Number(localStorage.getItem(PANEL_WIDTH_KEY))
-  // static bounds only — clamping against the window here would bake a
-  // transiently small viewport into the restored preference
-  return Number.isFinite(saved) && saved > 0
-    ? Math.min(Math.max(saved, PANEL_WIDTH_MIN), 720)
-    : PANEL_WIDTH_DEFAULT
-}
 
 interface ToolActivity {
   name: string
@@ -464,19 +457,8 @@ export function AiPanel({
     const rel = ext === 'webp' ? null : await window.htmlApi.saveImage({ base64: img.base64, ext })
     return { ok: true, src: rel ?? `data:${img.mime};base64,${img.base64}` }
   }
-  // preferred = the user's chosen width (the only value persisted); panelWidth =
-  // what fits the current window. Deriving the display width from the preference
-  // means a transiently small window never permanently shrinks the panel.
-  const preferredWidthRef = useRef(loadPanelWidth())
-  const [panelWidth, setPanelWidth] = useState(() => clampPanelWidth(preferredWidthRef.current))
-  const [resizing, setResizing] = useState(false)
-  const asideRef = useRef<HTMLElement>(null)
+  const { asideRef, resizing, startResize } = useAiPanelWidth(PANEL_WIDTH_KEY)
   const mountedRef = useRef(true)
-
-  useEffect(() => {
-    const dock = asideRef.current?.closest('.ai-dock') as HTMLElement | null
-    dock?.style.setProperty('--ai-panel-width', `${panelWidth}px`)
-  }, [panelWidth])
 
   const settingsRef = useRef<AiSettings | null>(null)
   const langRef = useRef(lang)
@@ -608,11 +590,14 @@ export function AiPanel({
     // the draft stays visible while the user decides what to do with it
     depsRef.current.previewDraft(outcome.html)
     const keep = directoryWorkflowActive()
-      ? await directoryPartial('The writer stopped before finishing. Keep the partial draft or discard it?', signal)
+      ? await directoryPartial(
+          'The writer stopped before finishing. Keep the partial draft or discard it?',
+          signal,
+        )
       : await new Promise<boolean>((resolve) => {
-      partialResolverRef.current = resolve
-      setActivePartial({ lines: outcome.html.split('\n').length })
-    })
+          partialResolverRef.current = resolve
+          setActivePartial({ lines: outcome.html.split('\n').length })
+        })
     done()
     return keep
       ? { ok: true, html: outcome.html, truncated: true }
@@ -650,10 +635,18 @@ export function AiPanel({
   const loopRef = useRef<AgentLoop<DocSnapshot> | null>(null)
   const directoryEditorPath = useRef(filePath)
   directoryEditorPath.current = filePath
-  useEffect(() => registerDirectoryEditor(() => ({
-    kind: 'html', path: directoryEditorPath.current, loop: loopRef.current,
-    configure: options => { settingsRef.current = options.settings as AiSettings; },
-  })), [])
+  useEffect(
+    () =>
+      registerDirectoryEditor(() => ({
+        kind: 'html',
+        path: directoryEditorPath.current,
+        loop: loopRef.current,
+        configure: (options) => {
+          settingsRef.current = options.settings as AiSettings
+        },
+      })),
+    [],
+  )
   if (!loopRef.current) {
     loopRef.current = new AgentLoop<DocSnapshot>({
       transport: transportRef.current,
@@ -668,16 +661,20 @@ export function AiPanel({
             queueRunRef.current ? null : depsRef.current.access.getSelectedSid(),
           applyOps: (ops, label) => depsRef.current.access.applyOps(ops, label),
           replaceAll: (html, label) => depsRef.current.access.replaceAll(html, label),
-          askClarification: (questions) => directoryWorkflowActive() ? directoryQuestions(questions) :
-            new Promise((resolve) => {
-              clarifyResolverRef.current = resolve
-              setActiveClarify(questions)
-            }),
-          confirmBrief: (brief) => directoryWorkflowActive() ? directoryBrief(brief) :
-            new Promise((resolve) => {
-              briefResolverRef.current = resolve
-              setActiveBrief(brief)
-            }),
+          askClarification: (questions) =>
+            directoryWorkflowActive()
+              ? directoryQuestions(questions)
+              : new Promise((resolve) => {
+                  clarifyResolverRef.current = resolve
+                  setActiveClarify(questions)
+                }),
+          confirmBrief: (brief) =>
+            directoryWorkflowActive()
+              ? directoryBrief(brief)
+              : new Promise((resolve) => {
+                  briefResolverRef.current = resolve
+                  setActiveBrief(brief)
+                }),
           writePage: (spec, signal) => runPageWriterRef.current(spec, signal),
           planBrief: (spec, signal) => runBriefWriterRef.current(spec, signal),
           getInstruction: () => directoryWorkflowTask(runInstructionRef.current),
@@ -1061,51 +1058,6 @@ export function AiPanel({
     if (busy) return
     depsRef.current.restoreSnapshot(snapshot.doc)
     setSnapshots((prev) => prev.filter((s) => s !== snapshot))
-  }
-
-  // Re-derive the display width on window resize (max is 60% of the window);
-  // growing the window back restores the preferred width
-  useEffect(() => {
-    const onResize = (): void => setPanelWidth(clampPanelWidth(preferredWidthRef.current))
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-  }, [])
-
-  const resizeCleanupRef = useRef<(() => void) | null>(null)
-  useEffect(() => () => resizeCleanupRef.current?.(), [])
-
-  /** Drag the inner panel edge to resize from the selected window side. */
-  const startResize = (e: ReactPointerEvent<HTMLDivElement>): void => {
-    e.preventDefault()
-    const resizer = e.currentTarget
-    setResizing(true)
-    document.body.style.cursor = 'col-resize'
-    document.body.style.userSelect = 'none'
-    const onMove = (ev: PointerEvent): void => {
-      const w = clampPanelWidth(aiPanelWidthAtPointer(ev.clientX))
-      preferredWidthRef.current = w
-      setPanelWidth(w)
-    }
-    let done = false
-    const cleanup = (): void => {
-      if (done) return
-      done = true
-      resizeCleanupRef.current = null
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', cleanup)
-      window.removeEventListener('pointercancel', cleanup)
-      resizer.removeEventListener('lostpointercapture', cleanup)
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-      setResizing(false)
-      localStorage.setItem(PANEL_WIDTH_KEY, String(Math.round(preferredWidthRef.current)))
-    }
-    resizeCleanupRef.current = cleanup
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', cleanup)
-    window.addEventListener('pointercancel', cleanup)
-    resizer.addEventListener('lostpointercapture', cleanup)
-    resizer.setPointerCapture(e.pointerId)
   }
 
   const docEmpty = chat.length === 0 && isDocEmpty(deps.access.getText())
@@ -1509,7 +1461,12 @@ export function AiPanel({
           </div>
         )}
         {attachNotice && <div className="ai-attach-notice">{attachNotice}</div>}
-        <ChatModelPicker loadSettings={loadChatModelSettings} onChange={setRendererChatModel} initialId={getRendererChatModel()} disabled={busy} />
+        <ChatModelPicker
+          loadSettings={loadChatModelSettings}
+          onChange={setRendererChatModel}
+          initialId={getRendererChatModel()}
+          disabled={busy}
+        />
         <AiComposer
           value={prompt}
           busy={busy}

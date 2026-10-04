@@ -1,6 +1,7 @@
 import { act, createElement, type ReactElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { defaultAiSettings } from '@genoffice/ai-provider'
 
 vi.mock('@tiptap/react', async () => {
   const react = await import('react')
@@ -86,14 +87,13 @@ describe('CodeBlockView teardown', () => {
 
 describe('AiPanel teardown', () => {
   it('cancels an in-flight IPC stream when the panel/tab unmounts', async () => {
-    vi.useFakeTimers()
     const aiStream = vi.fn(async () => {})
     const aiStreamCancel = vi.fn(async () => {})
     const onAiStream = vi.fn(() => () => {})
     Object.defineProperty(window, 'markdownApi', {
       configurable: true,
       value: {
-        getAiSettings: vi.fn(async () => ({})),
+        getAiSettings: vi.fn(async () => defaultAiSettings()),
         aiStream,
         aiStreamCancel,
         onAiStream,
@@ -114,13 +114,11 @@ describe('AiPanel teardown', () => {
 
     await act(async () => {
       container.querySelector<HTMLButtonElement>('.ai-send-btn')!.click()
-      await Promise.resolve()
-      await Promise.resolve()
     })
-    expect(aiStream).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(aiStream).toHaveBeenCalledTimes(1))
 
     unmount(root)
 
-    expect(aiStreamCancel).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(aiStreamCancel).toHaveBeenCalledTimes(1))
   })
 })

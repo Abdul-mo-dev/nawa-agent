@@ -14,10 +14,7 @@ const localAlias = {
     __dirname,
     '../../packages/docx-engine/src/zip-splice.ts',
   ),
-  '@genoffice/docx-engine': resolve(
-    __dirname,
-    '../../packages/docx-engine/src/index.ts',
-  ),
+  '@genoffice/docx-engine': resolve(__dirname, '../../packages/docx-engine/src/index.ts'),
 }
 
 // Main/preload must resolve every @genoffice/* runtime import to this
@@ -37,6 +34,10 @@ const localAlias = {
 // instead of the actual generated-images.ts source file.
 const mainAlias = {
   // ── electron-utils subpath exports ──────────────────────────────────────
+  '@genoffice/electron-utils/atomic-write': resolve(
+    __dirname,
+    '../../packages/electron-utils/src/atomic-write.ts',
+  ),
   '@genoffice/electron-utils/drop-open': resolve(
     __dirname,
     '../../packages/electron-utils/src/drop-open.ts',
@@ -71,42 +72,18 @@ const mainAlias = {
     __dirname,
     '../../packages/ai-provider/src/codex-app-server.ts',
   ),
-  '@genoffice/ai-provider/browser': resolve(
-    __dirname,
-    '../../packages/ai-provider/src/browser.ts',
-  ),
+  '@genoffice/ai-provider/browser': resolve(__dirname, '../../packages/ai-provider/src/browser.ts'),
 
   ...localAlias,
 
   // Bare package aliases MUST remain after their subpath aliases.
-  '@genoffice/electron-utils': resolve(
-    __dirname,
-    '../../packages/electron-utils/src/index.ts',
-  ),
-  '@genoffice/ai-provider': resolve(
-    __dirname,
-    '../../packages/ai-provider/src/index.ts',
-  ),
-  '@genoffice/ai-search': resolve(
-    __dirname,
-    '../../packages/ai-search/src/index.ts',
-  ),
-  '@genoffice/file-parse': resolve(
-    __dirname,
-    '../../packages/file-parse/src/index.ts',
-  ),
-  '@genoffice/font-metrics': resolve(
-    __dirname,
-    '../../packages/font-metrics/src/index.ts',
-  ),
-  '@genoffice/i18n': resolve(
-    __dirname,
-    '../../packages/i18n/src/index.ts',
-  ),
-  '@genoffice/project-store': resolve(
-    __dirname,
-    '../../packages/project-store/src/index.ts',
-  ),
+  '@genoffice/electron-utils': resolve(__dirname, '../../packages/electron-utils/src/index.ts'),
+  '@genoffice/ai-provider': resolve(__dirname, '../../packages/ai-provider/src/index.ts'),
+  '@genoffice/ai-search': resolve(__dirname, '../../packages/ai-search/src/index.ts'),
+  '@genoffice/file-parse': resolve(__dirname, '../../packages/file-parse/src/index.ts'),
+  '@genoffice/font-metrics': resolve(__dirname, '../../packages/font-metrics/src/index.ts'),
+  '@genoffice/i18n': resolve(__dirname, '../../packages/i18n/src/index.ts'),
+  '@genoffice/project-store': resolve(__dirname, '../../packages/project-store/src/index.ts'),
 }
 
 export default defineConfig({

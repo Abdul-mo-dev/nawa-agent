@@ -2,9 +2,9 @@ import { registerDirectoryEditor, directoryModelSettings } from '@genoffice/agen
 import { ChatModelPicker } from '@genoffice/ui'
 import { setRendererChatModel, getRendererChatModel } from '@genoffice/ai-provider/browser'
 import '@genoffice/ui/chat-model-picker.css'
-import { aiPanelWidthAtPointer, AiPanelSideButton } from '@genoffice/ui'
+import { AiPanelSideButton, useAiPanelWidth } from '@genoffice/ui'
 import { useEffect, useRef, useState } from 'react'
-import type { PointerEvent as ReactPointerEvent, ReactElement } from 'react'
+import type { ReactElement } from 'react'
 import { AgentLoop } from '@genoffice/agent-core'
 import { imageGenerationAvailable, type AiSettings } from '@genoffice/ai-provider/browser'
 import { AiComposer, AiScopeQuote, AiTypingIndicator, type AiScopeQuoteData } from '@genoffice/ui'
@@ -28,24 +28,6 @@ function countWords(text: string): number {
 }
 
 const PANEL_WIDTH_KEY = 'pdf-ai-panel-width'
-const PANEL_WIDTH_DEFAULT = 360
-const PANEL_WIDTH_MIN = 280
-
-function clampPanelWidth(w: number): number {
-  // The viewport can be transiently tiny (a WebContentsView is 0×0 until the
-  // shell lays it out), so never let the ceiling drop below the minimum
-  const max = Math.max(PANEL_WIDTH_MIN, Math.min(720, Math.round(window.innerWidth * 0.6)))
-  return Math.min(Math.max(w, PANEL_WIDTH_MIN), max)
-}
-
-function loadPanelWidth(): number {
-  const saved = Number(localStorage.getItem(PANEL_WIDTH_KEY))
-  // static bounds only — clamping against the window here would bake a
-  // transiently small viewport into the restored preference
-  return Number.isFinite(saved) && saved > 0
-    ? Math.min(Math.max(saved, PANEL_WIDTH_MIN), 720)
-    : PANEL_WIDTH_DEFAULT
-}
 
 interface ToolActivity {
   name: string
@@ -238,20 +220,7 @@ export function AiPanel({
         /* silent */
       })
   }, [filePath])
-  // preferred = the user's chosen width (the only value persisted); panelWidth =
-  // what fits the current window. Deriving the display width from the preference
-  // means a transiently small window never permanently shrinks the panel.
-  const preferredWidthRef = useRef(loadPanelWidth())
-  const [panelWidth, setPanelWidth] = useState(() => clampPanelWidth(preferredWidthRef.current))
-  const [resizing, setResizing] = useState(false)
-  const asideRef = useRef<HTMLElement>(null)
-
-  // The .ai-dock wrapper owns the animated width (docs-style 180ms slide);
-  // it tracks the resizable panel width through this variable
-  useEffect(() => {
-    const dock = asideRef.current?.closest('.ai-dock') as HTMLElement | null
-    dock?.style.setProperty('--ai-panel-width', `${panelWidth}px`)
-  }, [panelWidth])
+  const { asideRef, resizing, startResize } = useAiPanelWidth(PANEL_WIDTH_KEY)
   const settingsRef = useRef<AiSettings | null>(null)
 
   /** gsk login state for the cloud-tools gate (refreshed on mount and window focus) */
@@ -321,10 +290,18 @@ export function AiPanel({
   const loopRef = useRef<AgentLoop | null>(null)
   const directoryEditorPath = useRef(filePath)
   directoryEditorPath.current = filePath
-  useEffect(() => registerDirectoryEditor(() => ({
-    kind: 'pdf', path: directoryEditorPath.current, loop: loopRef.current,
-    configure: options => { settingsRef.current = options.settings as AiSettings; },
-  })), [])
+  useEffect(
+    () =>
+      registerDirectoryEditor(() => ({
+        kind: 'pdf',
+        path: directoryEditorPath.current,
+        loop: loopRef.current,
+        configure: (options) => {
+          settingsRef.current = options.settings as AiSettings
+        },
+      })),
+    [],
+  )
   if (!loopRef.current) {
     const deps: PdfAiDeps = {
       doc: () => apiRef.current.doc(),
@@ -535,52 +512,6 @@ export function AiPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run once per nonce
   }, [preset?.nonce])
 
-  // Re-derive the display width on window resize (max is 60% of the window);
-  // growing the window back restores the preferred width
-  useEffect(() => {
-    const onResize = (): void => setPanelWidth(clampPanelWidth(preferredWidthRef.current))
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-  }, [])
-
-  const resizeCleanupRef = useRef<(() => void) | null>(null)
-  useEffect(() => () => resizeCleanupRef.current?.(), [])
-
-  /** Drag the inner panel edge to resize from the selected window side. */
-  const startResize = (e: ReactPointerEvent<HTMLDivElement>): void => {
-    e.preventDefault()
-    const resizer = e.currentTarget
-    setResizing(true)
-    document.body.style.cursor = 'col-resize'
-    document.body.style.userSelect = 'none'
-    const onMove = (ev: PointerEvent): void => {
-      const w = clampPanelWidth(aiPanelWidthAtPointer(ev.clientX))
-      preferredWidthRef.current = w
-      setPanelWidth(w)
-    }
-    let done = false
-    const cleanup = (): void => {
-      if (done) return
-      done = true
-      resizeCleanupRef.current = null
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', cleanup)
-      window.removeEventListener('pointercancel', cleanup)
-      resizer.removeEventListener('lostpointercapture', cleanup)
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-      setResizing(false)
-      localStorage.setItem(PANEL_WIDTH_KEY, String(Math.round(preferredWidthRef.current)))
-    }
-    resizeCleanupRef.current = cleanup
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', cleanup)
-    window.addEventListener('pointercancel', cleanup)
-    // lostpointercapture also fires if the resizer is unmounted mid-drag (panel collapse)
-    resizer.addEventListener('lostpointercapture', cleanup)
-    resizer.setPointerCapture(e.pointerId)
-  }
-
   const typingLabel =
     phase === 'replying' ? t('aiReplying') : phase === 'working' ? t('aiWorking') : t('aiThinking')
 
@@ -761,7 +692,12 @@ export function AiPanel({
       </div>
 
       <div className="ai-composer">
-        <ChatModelPicker loadSettings={loadChatModelSettings} onChange={setRendererChatModel} initialId={getRendererChatModel()} disabled={busy} />
+        <ChatModelPicker
+          loadSettings={loadChatModelSettings}
+          onChange={setRendererChatModel}
+          initialId={getRendererChatModel()}
+          disabled={busy}
+        />
         <AiComposer
           value={prompt}
           busy={busy}

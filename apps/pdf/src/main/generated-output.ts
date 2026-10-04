@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { join } from 'node:path'
 
 /** Pick a safe, unused PDF path inside the configured Nawa save directory. */
 export function uniqueGeneratedPdfPath(
@@ -10,7 +10,11 @@ export function uniqueGeneratedPdfPath(
   // Control characters are intentionally rejected from generated file names.
   // eslint-disable-next-line no-control-regex
   const invalidFileNameCharacters = /[/\\:*?"<>|\u0000-\u001f]/g
-  let fileName = basename(String(suggestedName || 'merged.pdf'))
+  // Strip path segments before replacing invalid characters. Node's basename
+  // interprets a colon as a drive separator on Windows and can lose the stem.
+  let fileName = String(suggestedName || 'merged.pdf')
+    .split(/[/\\]/)
+    .at(-1)!
     .replace(invalidFileNameCharacters, '_')
     .trim()
   if (!fileName || fileName === '.' || fileName === '..') fileName = 'merged.pdf'

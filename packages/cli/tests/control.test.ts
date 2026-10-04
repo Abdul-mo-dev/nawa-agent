@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -27,7 +28,7 @@ async function fakeShell(
   const requests: unknown[] = []
   const endpoint =
     process.platform === 'win32'
-      ? `\\\\.\\pipe\\genoffice-test-${process.pid}-${servers.length}`
+      ? `\\\\.\\pipe\\genoffice-test-${process.pid}-${randomUUID()}`
       : join(dir, 'control.sock')
   const server = createServer((socket) => {
     let buffer = ''

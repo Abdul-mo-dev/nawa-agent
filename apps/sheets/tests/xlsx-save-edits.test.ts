@@ -524,8 +524,10 @@ describe('large edit batches', () => {
     )
     expect(rewritten).not.toContain('<v>0</v>')
 
-    // Generous CI budget; the quadratic path this guards against took hours.
-    expect(performance.now() - started).toBeLessThan(30_000)
+    // Windows archive and crypto operations have more overhead; the quadratic
+    // path this guards against took hours on either platform.
+    const budgetMs = process.platform === 'win32' ? 45_000 : 30_000
+    expect(performance.now() - started).toBeLessThan(budgetMs)
   }, 60_000)
 })
 

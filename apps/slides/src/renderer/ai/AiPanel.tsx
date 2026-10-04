@@ -1,8 +1,18 @@
-import { registerDirectoryEditor, directoryWorkflowActive, directoryWorkflowSources, directoryModelSettings, directoryProgress, directoryQuestions, directoryConfirm, directoryWorkflowNetwork, directoryWorkflowMedia } from '@genoffice/agent-core'
+import {
+  registerDirectoryEditor,
+  directoryWorkflowActive,
+  directoryWorkflowSources,
+  directoryModelSettings,
+  directoryProgress,
+  directoryQuestions,
+  directoryConfirm,
+  directoryWorkflowNetwork,
+  directoryWorkflowMedia,
+} from '@genoffice/agent-core'
 import { ChatModelPicker } from '@genoffice/ui'
 import { setRendererChatModel, getRendererChatModel } from '@genoffice/ai-provider/browser'
 import '@genoffice/ui/chat-model-picker.css'
-import { aiPanelWidthAtPointer, AiPanelSideButton } from '@genoffice/ui'
+import { AiPanelSideButton, useAiPanelWidth } from '@genoffice/ui'
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import {
   AgentLoop,
@@ -336,19 +346,9 @@ function AiTypingIndicator({ label }: { readonly label: string }) {
 
 /** Resizable panel width: always opens at the default (drag-resize lasts for
  * the session only); min/max match the Excel panel */
-const PANEL_WIDTH_DEFAULT = 360
-const PANEL_WIDTH_MIN = 280
-
 // A persisted width used to be restored here; drop the stale key so old
 // (possibly bug-shrunken) values never come back
 localStorage.removeItem('slides-ai-panel-width')
-
-function clampPanelWidth(w: number): number {
-  // The viewport can be transiently tiny (a WebContentsView is 0×0 until the
-  // shell lays it out), so never let the ceiling drop below the minimum
-  const max = Math.max(PANEL_WIDTH_MIN, Math.min(720, Math.round(window.innerWidth * 0.6)))
-  return Math.min(Math.max(w, PANEL_WIDTH_MIN), max)
-}
 
 export function AiPanel({
   slides,
@@ -448,29 +448,8 @@ export function AiPanel({
     attachScrollFadeRef.current = window.setTimeout(() => el.classList.remove('is-scrolling'), 800)
   }
   const [dragOver, setDragOver] = useState(false)
-  // preferred = the user's chosen width (session only); panelWidth = what fits
-  // the current window. Deriving the display width from the preference means a
-  // transiently small window never permanently shrinks the panel.
-  const preferredWidthRef = useRef(PANEL_WIDTH_DEFAULT)
-  const [panelWidth, setPanelWidth] = useState(() => clampPanelWidth(preferredWidthRef.current))
-  const asideRef = useRef<HTMLElement>(null)
+  const { asideRef, resizing, startResize } = useAiPanelWidth(undefined, open)
 
-  // The .ai-dock wrapper owns the animated width (Excel-parity 180ms slide);
-  // it tracks the resizable panel width through this variable
-  // `open` dep: the aside ref only exists while expanded
-  useEffect(() => {
-    const dock = asideRef.current?.closest('.ai-dock') as HTMLElement | null
-    dock?.style.setProperty('--ai-panel-width', `${panelWidth}px`)
-  }, [panelWidth, open])
-  const [resizing, setResizing] = useState(false)
-
-  // Re-derive the display width on window resize (max is 60% of the window);
-  // growing the window back restores the preferred width
-  useEffect(() => {
-    const onResize = () => setPanelWidth(clampPanelWidth(preferredWidthRef.current))
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-  }, [])
   /* Answered clarify receipts (answered-state card): view-only record, not chat data */
   const [clarifyAnswers, setClarifyAnswers] = useState<
     Array<{ afterIdx: number; qa: Array<{ q: string; a: string }> }>
@@ -769,10 +748,18 @@ export function AiPanel({
   const loopRef = useRef<AgentLoop | null>(null)
   const directoryEditorPath = useRef(currentFilePath)
   directoryEditorPath.current = currentFilePath
-  useEffect(() => registerDirectoryEditor(() => ({
-    kind: 'slides', path: directoryEditorPath.current, loop: loopRef.current,
-    configure: options => { settingsRef.current = options.settings as AiSettings; },
-  })), [])
+  useEffect(
+    () =>
+      registerDirectoryEditor(() => ({
+        kind: 'slides',
+        path: directoryEditorPath.current,
+        loop: loopRef.current,
+        configure: (options) => {
+          settingsRef.current = options.settings as AiSettings
+        },
+      })),
+    [],
+  )
   if (!loopRef.current) {
     // The three slides generation steps (style/planning/per-page HTML) force the high-quality model (only with the anthropic provider;
     // other providers keep the user setting, avoiding passing nonexistent model names). Chat/fine-tuning still uses the user's configured model.
@@ -1298,7 +1285,14 @@ export function AiPanel({
         }
       },
       saveStyleTemplate: async (name, data) => {
-        if (directoryWorkflowActive() && !await directoryConfirm('Save reusable presentation style?', { name, note: 'This saves a template in the existing GenOffice style-template store, separately from the staged presentation.' })) return { ok: false, error: 'User declined template save.' }
+        if (
+          directoryWorkflowActive() &&
+          !(await directoryConfirm('Save reusable presentation style?', {
+            name,
+            note: 'This saves a template in the existing GenOffice style-template store, separately from the staged presentation.',
+          }))
+        )
+          return { ok: false, error: 'User declined template save.' }
         try {
           return await window.slidesApi.saveStyleTemplate(name, data)
         } catch {
@@ -1993,43 +1987,6 @@ export function AiPanel({
   const removeAttachment = (path: string) =>
     setAttachments((prev) => prev.filter((a) => a.path !== path))
 
-  const resizeCleanupRef = useRef<(() => void) | null>(null)
-  useEffect(() => () => resizeCleanupRef.current?.(), [])
-
-  /** Drag the inner panel edge to resize from the selected window side. */
-  const startResize = (e: React.PointerEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    const resizer = e.currentTarget
-    setResizing(true)
-    document.body.style.cursor = 'col-resize'
-    document.body.style.userSelect = 'none'
-    const onMove = (ev: PointerEvent) => {
-      const w = clampPanelWidth(aiPanelWidthAtPointer(ev.clientX))
-      preferredWidthRef.current = w
-      setPanelWidth(w)
-    }
-    let done = false
-    const cleanup = () => {
-      if (done) return
-      done = true
-      resizeCleanupRef.current = null
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', cleanup)
-      window.removeEventListener('pointercancel', cleanup)
-      resizer.removeEventListener('lostpointercapture', cleanup)
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-      setResizing(false)
-    }
-    resizeCleanupRef.current = cleanup
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', cleanup)
-    window.addEventListener('pointercancel', cleanup)
-    // lostpointercapture also fires if the resizer is unmounted mid-drag (panel collapse)
-    resizer.addEventListener('lostpointercapture', cleanup)
-    resizer.setPointerCapture(e.pointerId)
-  }
-
   // collapsed: rail only — after all hooks, so the instance and its state survive
   if (!open) {
     return (
@@ -2331,7 +2288,12 @@ export function AiPanel({
             />
           )}
           {attachNotice && <div className="ai-attach-notice">{attachNotice}</div>}
-          <ChatModelPicker loadSettings={loadChatModelSettings} onChange={setRendererChatModel} initialId={getRendererChatModel()} disabled={busy} />
+          <ChatModelPicker
+            loadSettings={loadChatModelSettings}
+            onChange={setRendererChatModel}
+            initialId={getRendererChatModel()}
+            disabled={busy}
+          />
           <div className="ai-input-box">
             {attachments.length > 0 && (
               <div className="ai-attachments" onScroll={onAttachmentsScroll}>

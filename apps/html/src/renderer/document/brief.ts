@@ -39,7 +39,8 @@ export interface Brief {
 
 export const BRIEF_META_NAME = 'Nawa:brief'
 
-const META_RE = /<meta\s+[^>]*name\s*=\s*["']Nawa:brief["'][^>]*>/i
+// Continue reading briefs from documents created before the product rename.
+const META_RE = /<meta\s+[^>]*name\s*=\s*["'](?:Nawa|genoffice):brief["'][^>]*>/i
 
 function decodeAttr(value: string): string {
   return value

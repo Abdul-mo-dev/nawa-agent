@@ -1,3 +1,4 @@
+import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
@@ -18,17 +19,17 @@ const request = (
   outPath = '/out/a.pdf',
   targetFormat: HeadlessExportRequest['targetFormat'] = 'pdf',
 ): HeadlessExportRequest => ({
-  input,
+  input: resolve(input),
   targetFormat,
-  outPath,
+  outPath: resolve(outPath),
   json: false,
 })
 
 /** Every path in `present` exists and is a file; everything else does not. */
-const fsWith = (present: readonly string[], isFile = true) => ({
-  exists: (path: string) => present.includes(path),
-  isFile: () => isFile,
-})
+const fsWith = (present: readonly string[], isFile = true) => {
+  const paths = new Set(present.map((path) => resolve(path)))
+  return { exists: (path: string) => paths.has(path), isFile: () => isFile }
+}
 
 function stubExporters(): { exporters: HeadlessExporters; calls: string[] } {
   const calls: string[] = []
@@ -52,8 +53,8 @@ describe('validateHeadlessPaths', () => {
     const result = validateHeadlessPaths(request('/docs/a.docx'), fsWith(['/docs/a.docx', '/out']))
     expect(result).toEqual({
       ok: true,
-      input: '/docs/a.docx',
-      outPath: '/out/a.pdf',
+      input: resolve('/docs/a.docx'),
+      outPath: resolve('/out/a.pdf'),
       module: 'docs',
     })
   })
@@ -72,7 +73,7 @@ describe('validateHeadlessPaths', () => {
     expect(validateHeadlessPaths(request('/nope.docx'), fsWith([]))).toEqual({
       ok: false,
       code: 2,
-      message: expect.stringContaining('/nope.docx'),
+      message: expect.stringContaining(resolve('/nope.docx')),
     })
   })
 
@@ -94,7 +95,11 @@ describe('validateHeadlessPaths', () => {
       request('/docs/a.docx', '/gone/a.pdf'),
       fsWith(['/docs/a.docx']),
     )
-    expect(result).toMatchObject({ ok: false, code: 1, message: expect.stringContaining('/gone') })
+    expect(result).toMatchObject({
+      ok: false,
+      code: 1,
+      message: expect.stringContaining(resolve('/gone')),
+    })
   })
 })
 
@@ -106,8 +111,12 @@ describe('runHeadlessExport', () => {
       exporters,
       fsWith(['/decks/a.pptx', '/out', '/out/a.pdf']),
     )
-    expect(calls).toEqual(['slides:/decks/a.pptx->/out/a.pdf:pdf'])
-    expect(outcome).toEqual({ ok: true, input: '/decks/a.pptx', outPath: '/out/a.pdf' })
+    expect(calls).toEqual([`slides:${resolve('/decks/a.pptx')}->${resolve('/out/a.pdf')}:pdf`])
+    expect(outcome).toEqual({
+      ok: true,
+      input: resolve('/decks/a.pptx'),
+      outPath: resolve('/out/a.pdf'),
+    })
   })
 
   it.each([
@@ -143,7 +152,7 @@ describe('runHeadlessExport', () => {
     expect(outcome).toMatchObject({
       ok: false,
       code: 3,
-      message: expect.stringContaining('/out/a.pdf'),
+      message: expect.stringContaining(resolve('/out/a.pdf')),
     })
   })
 

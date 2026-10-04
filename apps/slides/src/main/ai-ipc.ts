@@ -1,4 +1,7 @@
-import { assertDirectoryStageCapability, assertDirectoryStageLocalRead, assertDirectoryStageMedia } from '../../../../packages/electron-utils/src/directory-stage'
+import {
+  assertDirectoryStageCapability,
+  assertDirectoryStageMedia,
+} from '../../../../packages/electron-utils/src/directory-stage'
 /**
  * AI IPC for the slides main process, extracted from slides-main.ts:
  * settings persistence, the streaming proxy (main process does the networking
@@ -224,7 +227,7 @@ export function registerAiIpc(): void {
 
   // Search tools (content + images), Serper with DuckDuckGo fallback
   ipcMain.handle('ai:web-search', async (_event, query: string, maxResults?: number) => {
-      assertDirectoryStageCapability(_event.sender, 'network');
+    assertDirectoryStageCapability(_event.sender, 'network')
 
     try {
       return await webSearchTool(
@@ -238,7 +241,7 @@ export function registerAiIpc(): void {
   })
 
   ipcMain.handle('ai:image-search', async (_event, query: string, maxResults?: number) => {
-      assertDirectoryStageCapability(_event.sender, 'network');
+    assertDirectoryStageCapability(_event.sender, 'network')
 
     try {
       return await imageSearchTool(
@@ -272,7 +275,8 @@ export function registerSlidesOnlyAiIpc(): void {
         transparentBackground?: boolean
       },
     ) => {
-      assertDirectoryStageCapability(_event.sender, 'media'); assertDirectoryStageMedia(_event.sender, op.referenceImageUrls ?? []);
+      assertDirectoryStageCapability(_event.sender, 'media')
+      assertDirectoryStageMedia(_event.sender, op.referenceImageUrls ?? [])
 
       return generateImageTool(
         AI_SETTINGS_PATH(),
@@ -294,7 +298,8 @@ export function registerSlidesOnlyAiIpc(): void {
   ipcMain.handle(
     'ai:analyze-media',
     async (_event, op: { mediaUrls: string[]; requirements: string }) => {
-      assertDirectoryStageCapability(_event.sender, 'media'); assertDirectoryStageMedia(_event.sender, op.mediaUrls ?? []);
+      assertDirectoryStageCapability(_event.sender, 'media')
+      assertDirectoryStageMedia(_event.sender, op.mediaUrls ?? [])
 
       return analyzeMediaTool(
         AI_SETTINGS_PATH(),
@@ -342,7 +347,7 @@ export function registerSlidesOnlyAiIpc(): void {
         fitWidthPx: number
       },
     ) => {
-      if (!op.base64) assertDirectoryStageCapability(e.sender, 'network');
+      if (!op.base64) assertDirectoryStageCapability(e.sender, 'network')
 
       const session = sessions.get(e.sender.id)
       if (!session) return null

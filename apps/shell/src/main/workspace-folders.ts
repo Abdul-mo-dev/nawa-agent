@@ -1,9 +1,23 @@
 import { constants, existsSync, lstatSync, realpathSync, type Dirent } from 'node:fs'
-import { access, mkdir, open, readFile, readdir, realpath, rename, stat, unlink } from 'node:fs/promises'
+import {
+  access,
+  mkdir,
+  open,
+  readFile,
+  readdir,
+  realpath,
+  rename,
+  stat,
+  unlink,
+} from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { FolderRoot, FolderListing } from '../shared/home-api'
-import type { WorkspaceScope, WorkspaceScopeDirectory, WorkspaceScopeFile } from '../shared/workspace-api'
+import type {
+  WorkspaceScope,
+  WorkspaceScopeDirectory,
+  WorkspaceScopeFile,
+} from '../shared/workspace-api'
 
 const MAX_ROOTS = 32
 const MAX_ENTRIES = 10_000
@@ -11,13 +25,29 @@ const MAX_SCOPE_FILES = 256
 const MAX_SCOPE_DIRECTORIES = 512
 const MAX_SCOPE_DEPTH = 32
 const OFFICE_EXTENSIONS = new Set([
-  'docx', 'doc', 'xlsx', 'xlsm', 'xls', 'csv', 'pptx', 'ppt',
-  'pdf', 'md', 'markdown', 'html', 'htm',
+  'docx',
+  'doc',
+  'xlsx',
+  'xlsm',
+  'xls',
+  'csv',
+  'pptx',
+  'ppt',
+  'pdf',
+  'md',
+  'markdown',
+  'html',
+  'htm',
 ])
 
 function validPath(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0 && value.length <= 32_768 &&
-    !value.includes('\0') && isAbsolute(value)
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= 32_768 &&
+    !value.includes('\0') &&
+    isAbsolute(value)
+  )
 }
 
 /** path.relative handles filesystem roots and Windows drive/UNC boundaries correctly. */
@@ -32,11 +62,15 @@ function samePath(a: string, b: string): boolean {
 
 function hidden(dir: string, name: string, directory: boolean): boolean {
   const lower = name.toLowerCase()
-  return name.startsWith('.') || name.startsWith('~$') ||
+  return (
+    name.startsWith('.') ||
+    name.startsWith('~$') ||
     (directory
-      ? lower === 'node_modules' || lower === '__macosx' ||
+      ? lower === 'node_modules' ||
+        lower === '__macosx' ||
         (lower === 'assets' && existsSync(join(dir, name, '.genoffice-assets.json')))
       : lower === 'thumbs.db' || lower === 'desktop.ini')
+  )
 }
 
 function supported(name: string): boolean {
@@ -67,9 +101,17 @@ export class WorkspaceFolderStore {
   private async initialize(): Promise<void> {
     try {
       const data: unknown = JSON.parse(await readFile(this.options.statePath, 'utf8'))
-      if (!data || typeof data !== 'object' || !('roots' in data) ||
-          !Array.isArray(data.roots) || !('version' in data) || data.version !== 1) {
-        throw new Error('The workspace folder list is invalid. Restore its backup before adding folders.')
+      if (
+        !data ||
+        typeof data !== 'object' ||
+        !('roots' in data) ||
+        !Array.isArray(data.roots) ||
+        !('version' in data) ||
+        data.version !== 1
+      ) {
+        throw new Error(
+          'The workspace folder list is invalid. Restore its backup before adding folders.',
+        )
       }
       const roots: string[] = []
       for (const path of data.roots) {
@@ -78,7 +120,10 @@ export class WorkspaceFolderStore {
         if (!roots.some((root) => samePath(root, normalized))) roots.push(normalized)
       }
       if (roots.length > MAX_ROOTS) throw new Error('The workspace folder limit was exceeded.')
-      const consolidated = roots.filter((candidate, index) => !roots.some((parent, other) => other !== index && containsPath(parent, candidate)))
+      const consolidated = roots.filter(
+        (candidate, index) =>
+          !roots.some((parent, other) => other !== index && containsPath(parent, candidate)),
+      )
       if (consolidated.length !== roots.length) await this.persist(consolidated)
       this.roots = consolidated
     } catch (error) {
@@ -86,7 +131,11 @@ export class WorkspaceFolderStore {
       const oldRoot = this.options.initialRoot?.()
       let roots: string[] = []
       if (oldRoot) {
-        try { roots = [await this.canonicalDirectory(oldRoot)] } catch { /* no usable legacy root */ }
+        try {
+          roots = [await this.canonicalDirectory(oldRoot)]
+        } catch {
+          /* no usable legacy root */
+        }
       }
       await this.persist(roots)
       this.roots = roots
@@ -106,7 +155,8 @@ export class WorkspaceFolderStore {
   private async canonicalDirectory(path: string): Promise<string> {
     if (!validPath(path)) throw new Error('Choose an existing absolute folder path.')
     const canonical = await realpath(path)
-    if (!(await stat(canonical)).isDirectory()) throw new Error('The selected path is not a folder.')
+    if (!(await stat(canonical)).isDirectory())
+      throw new Error('The selected path is not a folder.')
     await access(canonical, constants.R_OK)
     return canonical
   }
@@ -119,13 +169,20 @@ export class WorkspaceFolderStore {
       try {
         await handle.writeFile(JSON.stringify({ version: 1, roots }, null, 2) + '\n', 'utf8')
         await handle.sync()
-      } finally { await handle.close() }
+      } finally {
+        await handle.close()
+      }
       await rename(temporary, this.options.statePath)
-    } finally { await unlink(temporary).catch(() => {}) }
+    } finally {
+      await unlink(temporary).catch(() => {})
+    }
   }
 
   private mutate<T>(action: () => Promise<T>): Promise<T> {
-    const result = this.writes.then(async () => { await this.ready(); return action() })
+    const result = this.writes.then(async () => {
+      await this.ready()
+      return action()
+    })
     this.writes = result.catch(() => {})
     return result
   }
@@ -135,7 +192,9 @@ export class WorkspaceFolderStore {
     try {
       // A root replaced by a symlink is not silently granted access to its new destination.
       usable = samePath(await this.canonicalDirectory(path), path)
-    } catch { /* Keep disconnected/missing roots visible so the user can detach them. */ }
+    } catch {
+      /* Keep disconnected/missing roots visible so the user can detach them. */
+    }
     return { path, name: basename(path) || path, usable }
   }
 
@@ -151,9 +210,9 @@ export class WorkspaceFolderStore {
       const existing = this.roots.find((root) => containsPath(root, canonical))
       // Return the picked child for navigation, but keep its already-mounted parent as the tree root.
       if (existing) return this.describe(canonical)
-      const remaining = this.roots.filter(root => !containsPath(canonical, root))
+      const remaining = this.roots.filter((root) => !containsPath(canonical, root))
       if (remaining.length >= MAX_ROOTS) throw new Error(`You can add up to ${MAX_ROOTS} folders.`)
-      const firstChild = this.roots.findIndex(root => containsPath(canonical, root))
+      const firstChild = this.roots.findIndex((root) => containsPath(canonical, root))
       const insertAt = firstChild < 0 ? remaining.length : Math.min(firstChild, remaining.length)
       const next = [...remaining.slice(0, insertAt), canonical, ...remaining.slice(insertAt)]
       await this.persist(next)
@@ -182,7 +241,9 @@ export class WorkspaceFolderStore {
         if (!containsPath(root, resolve(path)) || !containsPath(root, canonical)) return false
         return samePath(realpathSync.native(root), root)
       })
-    } catch { return false }
+    } catch {
+      return false
+    }
   }
 
   isRoot(path: string): boolean {
@@ -191,13 +252,17 @@ export class WorkspaceFolderStore {
 
   async authorize(folder: string, path = folder): Promise<string> {
     await this.ready()
-    if (!this.contains(folder) || !this.contains(path)) throw new Error('This folder is not in the workspace.')
-    if (!containsPath(resolve(folder), resolve(path))) throw new Error('The file is outside the selected chat folder.')
+    if (!this.contains(folder) || !this.contains(path))
+      throw new Error('This folder is not in the workspace.')
+    if (!containsPath(resolve(folder), resolve(path)))
+      throw new Error('The file is outside the selected chat folder.')
     const realFolder = await this.canonicalDirectory(folder)
     const canonical = await realpath(path)
-    if (!containsPath(realFolder, canonical)) throw new Error('The file is outside the selected chat folder.')
+    if (!containsPath(realFolder, canonical))
+      throw new Error('The file is outside the selected chat folder.')
     // Reject aliases below the selected directory, even when their target is also authorized.
-    if (!samePath(resolve(path), canonical)) throw new Error('Linked workspace entries are not supported.')
+    if (!samePath(resolve(path), canonical))
+      throw new Error('Linked workspace entries are not supported.')
     return canonical
   }
 
@@ -208,7 +273,8 @@ export class WorkspaceFolderStore {
       throw new Error('Choose a regular document, not a link or directory.')
     }
     if (info.size > 64 * 1024 * 1024) throw new Error('This file exceeds the 64 MiB chat limit.')
-    if (!supported(canonical)) throw new Error('This document format is not supported in folder chat.')
+    if (!supported(canonical))
+      throw new Error('This document format is not supported in folder chat.')
     return canonical
   }
 
@@ -221,15 +287,19 @@ export class WorkspaceFolderStore {
     } catch (error) {
       // A deleted/disconnected directory in a registered root is an ordinary Explorer state.
       // Keep unregistered paths and existing linked entries behind the authorization guard.
-      if (validPath(dir) && this.roots.some(root => containsPath(root, resolve(dir)))) {
-        let missing = false
-        try { missing = !(await stat(dir)).isDirectory() }
-        catch (cause) { missing = ['ENOENT', 'ENOTDIR'].includes((cause as NodeJS.ErrnoException).code || '') }
+      if (validPath(dir) && this.roots.some((root) => containsPath(root, resolve(dir)))) {
+        let missing: boolean
+        try {
+          missing = !(await stat(dir)).isDirectory()
+        } catch (cause) {
+          missing = ['ENOENT', 'ENOTDIR'].includes((cause as NodeJS.ErrnoException).code || '')
+        }
         if (missing) return { dir: resolve(dir), folders: [], files: [], missing: true }
       }
       throw error
     }
-    if (entries.length > MAX_ENTRIES) throw new Error('This directory has too many entries. Choose a smaller subfolder.')
+    if (entries.length > MAX_ENTRIES)
+      throw new Error('This directory has too many entries. Choose a smaller subfolder.')
     const folders: FolderListing['folders'] = []
     const files: FolderListing['files'] = []
     for (const entry of entries.sort(nameOrder)) {
@@ -243,10 +313,18 @@ export class WorkspaceFolderStore {
           // Lazy expansion also covers leaf directories containing documents, not just subfolders.
           folders.push({ path, name: entry.name, mtimeMs: info.mtimeMs, hasSubfolders: true })
         } else if (info.nlink === 1) {
-          files.push({ path, name: entry.name, ext: extname(path).slice(1).toLowerCase(),
-            mtimeMs: info.mtimeMs, sizeBytes: info.size, starred: starred.has(path) })
+          files.push({
+            path,
+            name: entry.name,
+            ext: extname(path).slice(1).toLowerCase(),
+            mtimeMs: info.mtimeMs,
+            sizeBytes: info.size,
+            starred: starred.has(path),
+          })
         }
-      } catch { /* A concurrent rename must not discard the rest of the listing. */ }
+      } catch {
+        /* A concurrent rename must not discard the rest of the listing. */
+      }
     }
     return { dir: canonical, folders, files }
   }
@@ -261,8 +339,13 @@ export class WorkspaceFolderStore {
     const ensureDir = (path: string, depth: number): WorkspaceScopeDirectory => {
       let entry = dirIndex.get(path)
       if (!entry) {
-        entry = { path, name: path === root ? basename(path) || path : basename(path),
-          depth, fileCount: 0, totalBytes: 0 }
+        entry = {
+          path,
+          name: path === root ? basename(path) || path : basename(path),
+          depth,
+          fileCount: 0,
+          totalBytes: 0,
+        }
         dirIndex.set(path, entry)
         directories.push(entry)
       }
@@ -278,29 +361,45 @@ export class WorkspaceFolderStore {
       await this.authorize(folder, current.path)
       const dirEntry = ensureDir(current.path, current.depth)
       let entries
-      try { entries = await readdir(current.path, { withFileTypes: true }) } catch {
+      try {
+        entries = await readdir(current.path, { withFileTypes: true })
+      } catch {
         truncated = true
         continue
       }
       if (entries.length > MAX_ENTRIES) truncated = true
       for (const entry of entries.sort(nameOrder).slice(0, MAX_ENTRIES)) {
-        if (entry.isSymbolicLink() || hidden(current.path, entry.name, entry.isDirectory())) continue
+        if (entry.isSymbolicLink() || hidden(current.path, entry.name, entry.isDirectory()))
+          continue
         const path = join(current.path, entry.name)
         if (entry.isDirectory()) {
           if (current.depth >= MAX_SCOPE_DEPTH || queue.length + visited >= MAX_SCOPE_DIRECTORIES) {
             truncated = true
-          } else { queue.push({ path, depth: current.depth + 1 }); ensureDir(path, current.depth + 1) }
+          } else {
+            queue.push({ path, depth: current.depth + 1 })
+            ensureDir(path, current.depth + 1)
+          }
         } else if (entry.isFile() && supported(entry.name)) {
-          if (paths.length >= MAX_SCOPE_FILES) { truncated = true; break }
+          if (paths.length >= MAX_SCOPE_FILES) {
+            truncated = true
+            break
+          }
           try {
             const info = await stat(path)
             if (!info.isFile() || info.nlink !== 1) continue
             paths.push(path)
-            files.push({ path, name: entry.name, ext: extname(entry.name).slice(1).toLowerCase(),
-              sizeBytes: info.size, mtimeMs: info.mtimeMs })
+            files.push({
+              path,
+              name: entry.name,
+              ext: extname(entry.name).slice(1).toLowerCase(),
+              sizeBytes: info.size,
+              mtimeMs: info.mtimeMs,
+            })
             dirEntry.fileCount += 1
             dirEntry.totalBytes += info.size
-          } catch { /* A concurrent rename must not discard the rest of the listing. */ }
+          } catch {
+            /* A concurrent rename must not discard the rest of the listing. */
+          }
         }
       }
     }
@@ -319,8 +418,7 @@ export class WorkspaceFolderStore {
     if (!needle) return []
     const cap = Math.max(1, Math.min(200, Math.floor(limit) || 50))
     const scope = await this.scope(folder)
-    const matches = (scope.files ?? []).filter((file) =>
-      file.name.toLowerCase().includes(needle))
+    const matches = (scope.files ?? []).filter((file) => file.name.toLowerCase().includes(needle))
     return matches.slice(0, cap)
   }
 }

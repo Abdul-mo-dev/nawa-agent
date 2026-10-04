@@ -7,6 +7,17 @@ import { createRoot, type Root } from 'react-dom/client'
 import { hashProtectionPassword, verifyProtectionPassword } from '@genoffice/docx-engine'
 import { ProtectDialog, type ProtectDialogResult } from '../src/renderer/components/ProtectDialog'
 
+// Dialog behavior is tested here; the engine suite covers the 100,000-round
+// default hash. Keep UI tests fast under the full parallel Docs test run.
+vi.mock('@genoffice/docx-engine', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@genoffice/docx-engine')>()
+  return {
+    ...actual,
+    hashProtectionPassword: (password: string, spinCount = 1000) =>
+      actual.hashProtectionPassword(password, spinCount),
+  }
+})
+
 type Props = Parameters<typeof ProtectDialog>[0]
 
 const DEFAULTS: Omit<Props, 'onApply' | 'onCancel'> = {

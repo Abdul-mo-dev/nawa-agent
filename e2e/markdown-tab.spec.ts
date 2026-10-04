@@ -2,16 +2,20 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test, expect } from '@playwright/test'
-import { launchShell, closeAndSaveVideo, waitForPageWithUrl, screenshotPath } from './helpers'
+import {
+  createNewFile,
+  launchShell,
+  closeAndSaveVideo,
+  waitForPageWithUrl,
+  screenshotPath,
+} from './helpers'
 
 test.describe('markdown editor', () => {
   test('AI Markdown quick card opens a markdown editor tab', async () => {
     const launched = await launchShell({ onboardingSeen: true, videoDir: 'new-markdown-tab' })
     const { app, page } = launched
     try {
-      const card = page.locator('.quick-card', { hasText: 'AI Markdown' })
-      await expect(card).toHaveCount(1)
-      await card.click()
+      await createNewFile(page, 'Markdown')
 
       const editorTab = page.locator('.tab-bar .tab-item:not(.tab-home)')
       await expect(editorTab).toHaveCount(1)
@@ -237,7 +241,6 @@ test.describe('markdown editor', () => {
       await expect(panel.locator('.find-count')).toHaveText('2/3')
 
       // Ctrl+F on an already-open panel must bring focus back to the query
-      await editor.click()
       await editorPage.keyboard.press('ControlOrMeta+f')
       await expect(panel.locator('.find-input').first()).toBeFocused()
 

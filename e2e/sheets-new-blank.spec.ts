@@ -1,9 +1,15 @@
 import { test, expect } from '@playwright/test'
-import { execSync } from 'node:child_process'
 import { mkdtemp, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { launchShell, closeAndSaveVideo, waitForPageWithUrl, screenshotPath } from './helpers'
+import {
+  createNewFile,
+  launchShell,
+  closeAndSaveVideo,
+  waitForPageWithUrl,
+  screenshotPath,
+  zipText,
+} from './helpers'
 
 /**
  * Regression for "new spreadsheet cannot be saved" (feedback 2368785): the
@@ -13,16 +19,14 @@ import { launchShell, closeAndSaveVideo, waitForPageWithUrl, screenshotPath } fr
 test.describe('sheets: new blank workbook', () => {
   test('quick-create writes a backing file and saves the first edit', async () => {
     const scratch = await mkdtemp(join(tmpdir(), 'genoffice-sheets-blank-'))
-    const launched = await launchShell({ onboardingSeen: true, videoDir: 'sheets-new-blank' })
+    const launched = await launchShell({
+      onboardingSeen: true,
+      settings: { defaultSaveDir: join(scratch, 'GenOffice') },
+      videoDir: 'sheets-new-blank',
+    })
     try {
       const { app, page } = launched
-      // keep the auto-created workbook out of the real ~/Documents/GenOffice
-      await app.evaluate(({ app: electronApp }, dir) => {
-        electronApp.setPath('documents', dir)
-      }, scratch)
-
-      await expect(page.locator('.quick-card').nth(1)).toContainText('AI Sheets')
-      await page.locator('.quick-card').nth(1).click()
+      await createNewFile(page, 'Spreadsheet')
 
       const sheets = await waitForPageWithUrl(app, '://sheets/')
       await sheets.waitForFunction(() => document.body.textContent?.includes('Sheet1'), null, {
@@ -54,8 +58,8 @@ test.describe('sheets: new blank workbook', () => {
         const wc = webContents.getAllWebContents().find((w) => w.getURL().includes('://sheets/'))
         wc?.send('menu:action', 'save')
       })
-      await expect(() => {
-        const xml = execSync(`unzip -p "${workbook}" xl/worksheets/sheet1.xml`).toString()
+      await expect(async () => {
+        const xml = await zipText(workbook, 'xl/worksheets/sheet1.xml')
         expect(xml).toContain('<v>42</v>')
       }).toPass({ timeout: 15_000 })
     } finally {

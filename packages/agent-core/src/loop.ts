@@ -64,8 +64,10 @@ export interface AgentLoopOptions<TSnapshot = unknown> {
   /** capture rollback state; invoked right before tools run (see snapshotBefore) */
   captureSnapshot?(): TSnapshot
   /** Optional remote verifier for delegated native skills. Failures abort the run. */
-  verifyResponse?(text: string, executed: readonly ExecutedToolCall[]):
-    string | null | Promise<string | null>
+  verifyResponse?(
+    text: string,
+    executed: readonly ExecutedToolCall[],
+  ): string | null | Promise<string | null>
   /** Mandatory integrity check on EVERY accepted terminal response, independent of claim retries. */
   validateResponse?(text: string, executed: readonly ExecutedToolCall[]): void | Promise<void>
   /** Optional task-specific error budget; editor defaults remain unchanged. */
@@ -240,13 +242,19 @@ export class AgentLoop<TSnapshot = unknown> {
   }
 
   /** Trusted directory staging bridge reuses the exact editor skill. */
-  get directorySkill(): AgentSkill { return this.options.skill }
+  get directorySkill(): AgentSkill {
+    return this.options.skill
+  }
 
   /** Only tool lifecycle hooks run here: never normal-chat onDone/autosave hooks. */
   private directoryExecuting = false
   private directoryMutated = false
-  get directorySystemSuffix(): string { return this.options.systemSuffix?.() ?? '' }
-  resetDirectorySession(): void { this.directoryMutated = false }
+  get directorySystemSuffix(): string {
+    return this.options.systemSuffix?.() ?? ''
+  }
+  resetDirectorySession(): void {
+    this.directoryMutated = false
+  }
   async executeDirectoryTool(call: AgentToolCall, signal?: AbortSignal): Promise<ToolExecution> {
     if (this.busy || signal?.aborted) throw new Error('Native editor is busy or cancelled.')
     this.directoryExecuting = true
@@ -255,14 +263,27 @@ export class AgentLoop<TSnapshot = unknown> {
       events?.onToolStart?.(call)
       const snapshot = !this.directoryMutated ? captureSnapshot?.() : undefined
       let execution: ToolExecution
-      try { execution = await skill.executeTool(call, signal) }
-      catch (cause) { execution = { output: cause instanceof Error ? cause.message : String(cause), summary: call.name, isError: true } }
+      try {
+        execution = await skill.executeTool(call, signal)
+      } catch (cause) {
+        execution = {
+          output: cause instanceof Error ? cause.message : String(cause),
+          summary: call.name,
+          isError: true,
+        }
+      }
       if (signal?.aborted) throw new Error('Native editor task was cancelled.')
       const firstMutation = !!execution.mutated && !this.directoryMutated
       if (execution.mutated) this.directoryMutated = true
-      events?.onToolExecuted?.({ call, execution, snapshotBefore: firstMutation ? snapshot : undefined })
+      events?.onToolExecuted?.({
+        call,
+        execution,
+        snapshotBefore: firstMutation ? snapshot : undefined,
+      })
       return execution
-    } finally { this.directoryExecuting = false }
+    } finally {
+      this.directoryExecuting = false
+    }
   }
 
   get busy(): boolean {
@@ -659,7 +680,9 @@ export class AgentLoop<TSnapshot = unknown> {
         if (!this.cancelled) {
           this.running = false
           this.rollbackFailedRun()
-          events?.onError?.(`Response verification failed: ${cause instanceof Error ? cause.message : String(cause)}`)
+          events?.onError?.(
+            `Response verification failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+          )
           return
         }
       }
@@ -682,12 +705,16 @@ export class AgentLoop<TSnapshot = unknown> {
     if (toolCalls.length === 0 || this.cancelled || this.finalizing) {
       if (!this.cancelled && this.options.validateResponse) {
         const generation = this.generation
-        try { await this.options.validateResponse(this.turnText, [...this.executedCalls]) }
-        catch (cause) {
+        try {
+          await this.options.validateResponse(this.turnText, [...this.executedCalls])
+        } catch (cause) {
           if (generation !== this.generation) return
           if (!this.cancelled) {
-            this.running = false; this.rollbackFailedRun()
-            events?.onError?.(`Response validation failed: ${cause instanceof Error ? cause.message : String(cause)}`)
+            this.running = false
+            this.rollbackFailedRun()
+            events?.onError?.(
+              `Response validation failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+            )
             return
           }
         }
@@ -804,12 +831,24 @@ export class AgentLoop<TSnapshot = unknown> {
       })
     }
     for (let index = 0; index < toolCalls.length;) {
-      const start = index, first = toolCalls[index++]
-      const independent = (call: AgentToolCall) => !call.truncated && !call.inputError && skill.canExecuteParallel?.(call) === true
-      if (independent(first)) while (index < toolCalls.length && index - start < 4 && independent(toolCalls[index])) index++
+      const start = index
+      const first = toolCalls[index]
+      if (!first) break
+      index++
+      const independent = (call: AgentToolCall) =>
+        !call.truncated && !call.inputError && skill.canExecuteParallel?.(call) === true
+      if (independent(first)) {
+        while (index < toolCalls.length && index - start < 4) {
+          const next = toolCalls[index]
+          if (!next || !independent(next)) break
+          index++
+        }
+      }
       // Contiguous independent reads share a bounded batch. Mutations, native sessions,
       // discovery, and approvals are barriers; result order remains the model's order.
-      await Promise.all(toolCalls.slice(start, index).map((call, offset) => executeOne(call, start + offset)))
+      await Promise.all(
+        toolCalls.slice(start, index).map((call, offset) => executeOne(call, start + offset)),
+      )
       if (generation !== this.generation) return
     }
     this.history.push({ role: 'tool', results })

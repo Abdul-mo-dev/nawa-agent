@@ -60,9 +60,10 @@ describe('writeOutput', () => {
     const file = join(tempDir(), 'doc.bin')
     writeFileSync(file, 'old')
     chmodSync(file, 0o600)
+    const originalMode = statSync(file).mode & 0o777
     writeOutput(file, 'new content')
     expect(readFileSync(file, 'utf-8')).toBe('new content')
-    expect(statSync(file).mode & 0o777).toBe(0o600)
+    expect(statSync(file).mode & 0o777).toBe(originalMode)
     const fresh = join(tempDir(), 'fresh.bin')
     writeOutput(fresh, Buffer.from([1, 2, 3]))
     expect(readFileSync(fresh)).toEqual(Buffer.from([1, 2, 3]))

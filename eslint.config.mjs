@@ -15,6 +15,7 @@ export default tseslint.config(
       '**/release/**',
       '**/target/**',
       '**/coverage/**',
+      '.task/**',
       'scripts/drivers/**',
       'apps/*/build/**',
       'packages/*/src/vendor/**',
@@ -40,7 +41,23 @@ export default tseslint.config(
       ],
       // Empty catch = deliberate fail-open; other empty blocks still flagged.
       'no-empty': ['error', { allowEmptyCatch: true }],
+      '@typescript-eslint/no-unused-expressions': [
+        'error',
+        { allowShortCircuit: true, allowTernary: true },
+      ],
     },
+  },
+  {
+    // These sanitizers deliberately match NUL and other control characters.
+    files: [
+      'apps/browser/server/workspace.mjs',
+      'apps/shell/src/main/directory-actions/file-safety.ts',
+      'apps/shell/src/renderer/src/directory-actions/controller.ts',
+      'apps/shell/src/renderer/src/directory-actions/filesystem-tools.ts',
+      'apps/shell/src/renderer/src/explorer/model.ts',
+      'packages/file-parse/src/rag-text.ts',
+    ],
+    rules: { 'no-control-regex': 'off' },
   },
   {
     // tsc already checks undefined identifiers with full type info; eslint's
@@ -77,6 +94,17 @@ export default tseslint.config(
     rules: {
       '@typescript-eslint/no-require-imports': 'off',
     },
+  },
+  {
+    // MyAgent errors are redacted before rethrow; retaining the raw cause can
+    // expose connection credentials through diagnostics.
+    files: ['apps/shell/src/main/myagent/service.ts'],
+    rules: { 'preserve-caught-error': 'off' },
+  },
+  {
+    // These review scripts execute callbacks in a browser page.
+    files: ['tools/myagent-settings-review/test.mjs', 'tools/sidebar-review/activity-test.mjs'],
+    languageOptions: { globals: { ...globals.browser } },
   },
   {
     // The dependency-free mounted-folder workspace is browser code, not Node.

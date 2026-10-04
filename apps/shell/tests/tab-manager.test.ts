@@ -62,7 +62,10 @@ function makeFakeView(): FakeView {
   }
 }
 
-vi.mock('electron', () => ({ BrowserWindow: class {} }))
+vi.mock('electron', () => ({
+  BrowserWindow: class {},
+  ipcMain: { on: vi.fn(), removeListener: vi.fn() },
+}))
 
 const createDocsView = vi.fn(() => makeFakeView())
 const docsQueryDirty = vi.fn(() => Promise.resolve(false))
@@ -130,7 +133,8 @@ const WINDOW_HEIGHT = 600
 
 interface FakeShellWindow {
   on: ReturnType<typeof vi.fn>
-  webContents: { once: ReturnType<typeof vi.fn> }
+  once: ReturnType<typeof vi.fn>
+  webContents: { on: ReturnType<typeof vi.fn>; once: ReturnType<typeof vi.fn> }
   isDestroyed: ReturnType<typeof vi.fn>
   getContentBounds: () => { x: number; y: number; width: number; height: number }
   contentView: {
@@ -142,7 +146,8 @@ interface FakeShellWindow {
 function makeShellWindow(): FakeShellWindow {
   return {
     on: vi.fn(),
-    webContents: { once: vi.fn() },
+    once: vi.fn(),
+    webContents: { on: vi.fn(), once: vi.fn() },
     isDestroyed: vi.fn(() => false),
     getContentBounds: () => ({ x: 0, y: 0, width: WINDOW_WIDTH, height: WINDOW_HEIGHT }),
     contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },

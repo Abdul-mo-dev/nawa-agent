@@ -1,5 +1,11 @@
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
-import { launchShell, closeAndSaveVideo, waitForPageWithUrl, screenshotPath } from './helpers'
+import {
+  createNewFile,
+  launchShell,
+  closeAndSaveVideo,
+  waitForPageWithUrl,
+  screenshotPath,
+} from './helpers'
 
 async function findShellPage(app: ElectronApplication, timeoutMs = 15_000): Promise<Page> {
   const deadline = Date.now() + timeoutMs
@@ -26,7 +32,7 @@ test('slides chrome darkens while the slide canvas stays paper-white', async () 
   const launched = await launchShell({ onboardingSeen: true, videoDir: 'theme-visual-slides' })
   try {
     const shellPage = await findShellPage(launched.app)
-    await shellPage.locator('.quick-card', { hasText: 'AI Slides' }).click()
+    await createNewFile(shellPage, 'Presentation')
     const editorPage = await waitForPageWithUrl(launched.app, '://slides/')
     await editorPage.waitForSelector('.stage-wrap canvas', { timeout: 20_000 })
 

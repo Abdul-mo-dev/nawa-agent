@@ -2,16 +2,20 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test, expect } from '@playwright/test'
-import { launchShell, closeAndSaveVideo, waitForPageWithUrl, screenshotPath } from './helpers'
+import {
+  createNewFile,
+  launchShell,
+  closeAndSaveVideo,
+  waitForPageWithUrl,
+  screenshotPath,
+} from './helpers'
 
 test.describe('html editor', () => {
   test('AI HTML quick card opens an html editor tab in preview view with a ribbon', async () => {
     const launched = await launchShell({ onboardingSeen: true, videoDir: 'new-html-tab' })
     const { app, page } = launched
     try {
-      const card = page.locator('.quick-card', { hasText: 'AI HTML' })
-      await expect(card).toHaveCount(1)
-      await card.click()
+      await createNewFile(page, 'HTML')
 
       const editorTab = page.locator('.tab-bar .tab-item:not(.tab-home)')
       await expect(editorTab).toHaveCount(1)
@@ -177,7 +181,7 @@ test.describe('html editor', () => {
       await editorPage.locator('.rb-view', { hasText: /Source/ }).click()
       await editorPage.locator('.source-editor .cm-content').click()
       await editorPage.keyboard.press('ControlOrMeta+s')
-      await expect(editorPage.locator('.status-save')).toHaveText(/Saved/)
+      await expect(editorPage.getByRole('button', { name: 'Save (Ctrl+S)' })).toBeDisabled()
       expect(await readFile(htmlPath, 'utf8')).toBe(source)
     } finally {
       await closeAndSaveVideo(launched, 'html-identity-save')
@@ -463,7 +467,20 @@ test.describe('html editor', () => {
       await expect(undoBtn).toBeDisabled()
 
       // Delete inside the frame removes the element; the frame reloads without it
-      await frame.locator('p.note').click()
+      const note = frame.locator('p.note')
+      await frame.locator('body').click({ position: { x: 2, y: 2 } })
+      // Select the element without starting inline editing on its text.
+      await note.dispatchEvent('click')
+      await expect(editorPage.locator('.hx-float')).toBeVisible()
+      await frame.locator('body').evaluate(() => {
+        document.body.tabIndex = -1
+        document.body.focus()
+      })
+      await expect
+        .poll(() =>
+          frame.locator('body').evaluate((body) => body.ownerDocument.activeElement === body),
+        )
+        .toBe(true)
       await frame.locator('body').press('Delete')
       await expect(frame.locator('p.note')).toHaveCount(0)
       await expect(undoBtn).toBeEnabled()
