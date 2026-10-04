@@ -121,6 +121,10 @@ export interface AiSearchSettings {
 }
 
 export interface AiSettings {
+  /** Request-only identity; main resolves the saved profile and its credential. */
+  selectedChatModelId?: string | undefined
+  /** Revision of the protected settings file; saves must compare it before replacing the file. */
+  settingsRevision?: string | undefined
   /** Named profiles persisted with existing settings, not in browser storage. */
   chatModels?: import('./chat-models').AiChatModel[] | undefined
   defaultChatModelId?: string | undefined

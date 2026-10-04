@@ -45,27 +45,115 @@ try {
   await page.goto(server.resolvedUrls.local[0] + 'tools/sidebar-review/', { timeout: 60000 })
   await page.getByRole('textbox', { name: 'Message Nawa' }).waitFor()
   check('Check again is visible', await visible(page.getByRole('button', { name: 'Check again' })))
-  const newChatBounds = await page.getByRole('button', { name: 'New chat', exact: true }).boundingBox()
-  const exportBounds = await page.getByRole('button', { name: 'Prepare & export', exact: true }).boundingBox()
-  check('Prepare/export is immediately to the right of New chat', exportBounds.x > newChatBounds.x + newChatBounds.width && Math.abs(exportBounds.y - newChatBounds.y) < 2)
+  const newChatBounds = await page
+    .getByRole('button', { name: 'New chat', exact: true })
+    .boundingBox()
+  const exportBounds = await page
+    .getByRole('button', { name: 'Prepare & export', exact: true })
+    .boundingBox()
+  check(
+    'Prepare/export is immediately to the right of New chat',
+    exportBounds.x > newChatBounds.x + newChatBounds.width &&
+      Math.abs(exportBounds.y - newChatBounds.y) < 2,
+  )
   const beforeExportModels = await page.evaluate(() => window.sidebarFixture.state.requests.length)
   await page.getByRole('button', { name: 'Prepare & export', exact: true }).click()
   await page.getByText('SQLite export complete:', { exact: false }).waitFor()
-  check('Export click invokes the existing chat agent with scoped preparation authority', await page.evaluate(before => window.sidebarFixture.state.exportRequests.length === 1 && window.sidebarFixture.state.exportRequests[0].paths.length === 2 && window.sidebarFixture.state.requests.length > before && window.sidebarFixture.state.beginScopes.at(-1).prepareTables === true, beforeExportModels))
-  check('Export stays in the conversation and reports remaining decisions', await page.evaluate(() => window.sidebarFixture.messages().at(-1).text.includes('1 table needs a header decision') && window.sidebarFixture.messages().at(-1).text.includes('tables.sqlite3')))
-  check('No separate preparation dialog or settings opt-in is required', await page.evaluate(() => !document.querySelector('dialog[open]') && window.sidebarFixture.analyticsSettings().allowAgentPreparation === false))
+  check(
+    'Export click invokes the existing chat agent with scoped preparation authority',
+    await page.evaluate(
+      (before) =>
+        window.sidebarFixture.state.exportRequests.length === 1 &&
+        window.sidebarFixture.state.exportRequests[0].paths.length === 2 &&
+        window.sidebarFixture.state.requests.length > before &&
+        window.sidebarFixture.state.beginScopes.at(-1).prepareTables === true,
+      beforeExportModels,
+    ),
+  )
+  check(
+    'Export shows a concise user action while the agent receives the detailed instruction',
+    await page.evaluate(
+      () =>
+        window.sidebarFixture
+          .messages()
+          .some(
+            (message) =>
+              message.role === 'user' && message.text === 'Prepare & export selected files',
+          ) &&
+        window.sidebarFixture.state.requests.some((request) =>
+          JSON.stringify(request.messages).includes('Inspect every table and its source evidence'),
+        ) &&
+        !document
+          .querySelector('.ws-chat-log')
+          ?.textContent.includes('Inspect every table and its source evidence'),
+    ),
+  )
+  check(
+    'Export stays in the conversation and reports remaining decisions',
+    await page.evaluate(
+      () =>
+        window.sidebarFixture.messages().at(-1).text.includes('1 table needs a header decision') &&
+        window.sidebarFixture.messages().at(-1).text.includes('tables.sqlite3'),
+    ),
+  )
+  check(
+    'No separate preparation dialog or settings opt-in is required',
+    await page.evaluate(
+      () =>
+        !document.querySelector('dialog[open]') &&
+        window.sidebarFixture.analyticsSettings().allowAgentPreparation === false,
+    ),
+  )
   await shot('prepare-export-result-360')
   await page.getByRole('button', { name: '300px', exact: true }).click()
-  check('Prepare/export fits the 300px sidebar beside New chat', (await bounds()).overflow.length === 0)
+  check(
+    'Prepare/export fits the 300px sidebar beside New chat',
+    (await bounds()).overflow.length === 0,
+  )
   await shot('prepare-export-button-300')
   await page.getByRole('button', { name: '360px', exact: true }).click()
   await page.getByRole('textbox', { name: 'Message Nawa' }).fill('Retained draft')
+  await page.evaluate(() => window.sidebarFixture.select(['C:\\External folder\\outside.xlsx']))
+  await page
+    .getByText('A selected path is outside the opened workspace folders.', { exact: false })
+    .waitFor()
+  check(
+    'External recent files cannot be sent as Chat scope',
+    (await page.getByRole('button', { name: 'Send', exact: true }).isDisabled()) &&
+      (await page.getByRole('button', { name: 'Prepare & export', exact: true }).isDisabled()),
+  )
+  await page.getByRole('button', { name: 'Add / open folder', exact: true }).click()
+  check(
+    'External scope offers a folder action',
+    await page.evaluate(() => window.sidebarFixture.state.addFolderRequests === 1),
+  )
+  await page.getByText('Selected files', { exact: true }).click()
+  check(
+    'External files are labeled outside workspace',
+    await page.getByText('Outside workspace', { exact: true }).isVisible(),
+  )
+  await page.evaluate(() => window.sidebarFixture.restoreSelection())
+  await page.waitForFunction(
+    () => document.querySelector('.ws-chat-footer button[aria-label="Send"]')?.disabled === false,
+  )
+  check(
+    'Restoring valid scope keeps the Chat draft',
+    (await page.getByRole('button', { name: 'Send', exact: true }).isEnabled()) &&
+      (await page.getByRole('textbox', { name: 'Message Nawa' }).inputValue()) === 'Retained draft',
+  )
   await shot('chat-360')
   const transcript = await page.locator('.ws-chat-scroll').boundingBox()
   check('Chat has room for the transcript', transcript.height > 250)
   await page.getByRole('tab', { name: 'Models', exact: true }).click()
   await page.locator('input[id$="-set-ai-model"]').waitFor()
   check('Profiles start collapsed', (await page.locator('.nawa-model-card[open]').count()) === 0)
+  check(
+    'Saved API keys stay out of Models fields',
+    (await page.locator('input[id$="-set-ai-key"]').inputValue()) === '' &&
+      (await page.locator('input[id$="-set-ai-key"]').getAttribute('placeholder'))?.includes(
+        'Saved key',
+      ),
+  )
   await page.locator('input[id$="-set-ai-model"]').fill('edited-model')
   await page.getByRole('button', { name: 'Close sidebar', exact: true }).click()
   await page.getByRole('button', { name: 'Open sidebar', exact: true }).click()
@@ -95,6 +183,12 @@ try {
   })
   await page.getByRole('button', { name: 'Save', exact: true }).click()
   await page.waitForFunction(() => window.sidebarFixture.state.saved === 1)
+  check(
+    'Saving a model edit retains the protected key',
+    await page.evaluate(
+      () => window.sidebarFixture.settings().providers.custom.apiKey === 'fixture-key',
+    ),
+  )
   await page.locator('input[id$="-set-ai-model"]').fill('discard-this')
   await page.getByRole('button', { name: 'Discard changes', exact: true }).click()
   check(
@@ -158,7 +252,7 @@ try {
   await page.locator('.nawa-capability-status').first().filter({ hasText: 'Enabled' }).waitFor()
   check(
     'Knowledge opens Files with a single Setup destination',
-    await visible(page.getByRole('region', { name: 'File search actions', exact: true })) &&
+    (await visible(page.getByRole('region', { name: 'File search actions', exact: true }))) &&
       !(await visible(page.getByRole('region', { name: 'Knowledge setup', exact: true }))),
   )
   await shot('knowledge-300')
@@ -185,68 +279,148 @@ try {
   )
   check('Search settings controls fit 300px sidebar', (await bounds()).overflow.length === 0)
   await page.getByLabel('RAG backend', { exact: true }).selectOption('myagent')
-  check('MyAgent URL is shown', await visible(page.getByLabel('MyAgent server URL', { exact: true })))
-  check('connection setup shows fields without the long introductory descriptions', !(await visible(page.getByText('MyAgent manages extraction, embeddings and its shared index. Test connection to see its configured document folders.', { exact: true }))))
-  check('Local embedding controls are hidden for MyAgent', !(await visible(page.getByLabel('Embedding model ID / server alias'))))
+  check(
+    'MyAgent URL is shown',
+    await visible(page.getByLabel('MyAgent server URL', { exact: true })),
+  )
+  check(
+    'connection setup shows fields without the long introductory descriptions',
+    !(await visible(
+      page.getByText(
+        'MyAgent manages extraction, embeddings and its shared index. Test connection to see its configured document folders.',
+        { exact: true },
+      ),
+    )),
+  )
+  check(
+    'Local embedding controls are hidden for MyAgent',
+    !(await visible(page.getByLabel('Embedding model ID / server alias'))),
+  )
   await page.getByLabel('MyAgent server URL', { exact: true }).fill('http://127.0.0.1:5187')
   await page.getByRole('button', { name: 'Save search settings', exact: true }).click()
-  check('MyAgent clear action only forgets mappings', (await page.getByRole('button', { name: 'Forget file mappings', exact: true, includeHidden: true }).count()) === 1)
+  check(
+    'MyAgent clear action only forgets mappings',
+    (await page
+      .getByRole('button', { name: 'Forget file mappings', exact: true, includeHidden: true })
+      .count()) === 1,
+  )
   check('MyAgent controls fit 300px sidebar', (await bounds()).overflow.length === 0)
   await shot('myagent-search-settings-300')
-  check('tool discovery does not run when viewing connection settings', await page.evaluate(() => window.sidebarFixture.state.toolCatalogRequests.length === 0))
+  check(
+    'tool discovery does not run when viewing connection settings',
+    await page.evaluate(() => window.sidebarFixture.state.toolCatalogRequests.length === 0),
+  )
   await page.getByLabel('Settings area', { exact: true }).selectOption('tools')
   await page.getByText('spreadsheet_catalog_search', { exact: true }).waitFor()
-  check('tool catalog filters by selected file types without indexing', await page.evaluate(() => JSON.stringify(window.sidebarFixture.state.toolCatalogRequests[0].extensions) === '[".xlsx"]'))
-  check('tool explanations start collapsed', await page.locator('.nawa-document-tool-list>li>details[open]').count() === 0)
+  check(
+    'tool catalog filters by selected file types without indexing',
+    await page.evaluate(
+      () =>
+        JSON.stringify(window.sidebarFixture.state.toolCatalogRequests[0].extensions) ===
+        '[".xlsx"]',
+    ),
+  )
+  check(
+    'tool explanations start collapsed',
+    (await page.locator('.nawa-document-tool-list>li>details[open]').count()) === 0,
+  )
   await page.getByRole('button', { name: 'Load more tools', exact: true }).click()
   await page.getByText('spreadsheet_query_sql', { exact: true }).waitFor()
-  check('tool catalog supports pagination', await page.locator('.nawa-document-tool-list>li').count() === 3)
+  check(
+    'tool catalog supports pagination',
+    (await page.locator('.nawa-document-tool-list>li').count()) === 3,
+  )
   await page.getByLabel('Tool scope', { exact: true }).selectOption('server')
   await page.getByLabel('Find a tool', { exact: true }).fill('pdf')
   await page.getByRole('button', { name: 'Search tools', exact: true }).click()
   await page.getByText('pdf_read_pages', { exact: true }).waitFor()
-  check('server tool search does not require selected file IDs', await page.evaluate(() => { const request = window.sidebarFixture.state.toolCatalogRequests.at(-1); return request.query === 'pdf' && !('extensions' in request) && !('documentIds' in request) }))
+  check(
+    'server tool search does not require selected file IDs',
+    await page.evaluate(() => {
+      const request = window.sidebarFixture.state.toolCatalogRequests.at(-1)
+      return request.query === 'pdf' && !('extensions' in request) && !('documentIds' in request)
+    }),
+  )
   await shot('myagent-document-tools-300')
   await page.getByLabel('Settings area', { exact: true }).selectOption('models')
   await page.getByLabel('MyAgent chat model', { exact: true }).fill('retained-server-model')
-  check('directory setup has exactly one MyAgent connection form', await page.getByLabel('MyAgent server URL', { exact: true }).count() === 1)
-  check('models show only the current settings area', !(await visible(page.getByLabel('Tesseract OCR executable path', { exact: true }))))
+  check(
+    'directory setup has exactly one MyAgent connection form',
+    (await page.getByLabel('MyAgent server URL', { exact: true }).count()) === 1,
+  )
+  check(
+    'models show only the current settings area',
+    !(await visible(page.getByLabel('Tesseract OCR executable path', { exact: true }))),
+  )
   await page.getByLabel('Settings area', { exact: true }).selectOption('extraction')
-  check('extraction settings start in collapsed groups', !(await visible(page.getByLabel('Tesseract OCR executable path', { exact: true }))) && !(await visible(page.getByLabel('Visual extraction mode', { exact: true }))))
+  check(
+    'extraction settings start in collapsed groups',
+    !(await visible(page.getByLabel('Tesseract OCR executable path', { exact: true }))) &&
+      !(await visible(page.getByLabel('Visual extraction mode', { exact: true }))),
+  )
   await shot('knowledge-extraction-groups-300')
   await page.getByText('OCR and Office', { exact: true }).click()
-  await page.getByLabel('Tesseract OCR executable path', { exact: true }).fill('C:\\OCR\\tesseract.exe')
+  await page
+    .getByLabel('Tesseract OCR executable path', { exact: true })
+    .fill('C:\\OCR\\tesseract.exe')
   check('extraction fields fit 300px sidebar', (await bounds()).overflow.length === 0)
   await shot('knowledge-extraction-300')
   await page.getByRole('button', { name: 'Files', exact: true }).click()
   await page.getByRole('button', { name: 'Setup · Unsaved MyAgent settings', exact: true }).click()
-  check('hidden server edits remain reachable', await visible(page.getByLabel('Tesseract OCR executable path', { exact: true })))
+  check(
+    'hidden server edits remain reachable',
+    await visible(page.getByLabel('Tesseract OCR executable path', { exact: true })),
+  )
   await page.getByLabel('Settings area', { exact: true }).selectOption('models')
-  check('changing settings areas preserves the shared server draft', await page.getByLabel('MyAgent chat model', { exact: true }).inputValue() === 'retained-server-model')
+  check(
+    'changing settings areas preserves the shared server draft',
+    (await page.getByLabel('MyAgent chat model', { exact: true }).inputValue()) ===
+      'retained-server-model',
+  )
   await page.getByRole('button', { name: 'Save server settings', exact: true }).click()
   await page.waitForFunction(() => window.sidebarFixture.state.serverSaves === 1)
   await page.getByLabel('Settings area', { exact: true }).selectOption('status')
-  check('opening setup does not probe provider readiness', await page.evaluate(() => window.sidebarFixture.state.readinessChecks === 0))
+  check(
+    'opening setup does not probe provider readiness',
+    await page.evaluate(() => window.sidebarFixture.state.readinessChecks === 0),
+  )
   await page.getByRole('button', { name: 'Check readiness', exact: true }).click()
   await page.getByRole('status').filter({ hasText: 'Chat model ready' }).waitFor()
   await shot('knowledge-server-status-300')
   await page.getByLabel('Settings area', { exact: true }).selectOption('analysis')
-  const preparationConsent = page.getByRole('checkbox', { name: 'Allow agent preparation', exact: true })
-  const automaticApproval = page.getByRole('checkbox', { name: 'Automatically approve clear tables', exact: true })
+  const preparationConsent = page.getByRole('checkbox', {
+    name: 'Allow agent preparation',
+    exact: true,
+  })
+  const automaticApproval = page.getByRole('checkbox', {
+    name: 'Automatically approve clear tables',
+    exact: true,
+  })
   check('Agent preparation starts without storage consent', !(await preparationConsent.isChecked()))
-  check('Automatic approval starts off and requires preparation', !(await automaticApproval.isChecked()) && await automaticApproval.isDisabled())
+  check(
+    'Automatic approval starts off and requires preparation',
+    !(await automaticApproval.isChecked()) && (await automaticApproval.isDisabled()),
+  )
   await preparationConsent.check()
   await automaticApproval.check()
   await page.getByRole('button', { name: 'Save analytics settings', exact: true }).click()
   await page.getByRole('status').filter({ hasText: 'Analytics settings saved' }).waitFor()
-  check('Automatic approval persists only through saved settings', await page.evaluate(() => window.sidebarFixture.analyticsSettings().allowAgentApproval === true))
+  check(
+    'Automatic approval persists only through saved settings',
+    await page.evaluate(
+      () => window.sidebarFixture.analyticsSettings().allowAgentApproval === true,
+    ),
+  )
   const preparationBounds = await bounds()
   check('Preparation settings fit the narrow sidebar', preparationBounds.overflow.length === 0)
   await shot('agent-preparation-settings-300')
   await automaticApproval.scrollIntoViewIfNeeded()
   await shot('automatic-approval-settings-300')
   await page.getByRole('button', { name: 'Files', exact: true }).click()
-  check('whole-directory indexing is collapsed for MyAgent', !(await page.locator('.nawa-directory-indexing').evaluate(element => element.open)))
+  check(
+    'whole-directory indexing is collapsed for MyAgent',
+    !(await page.locator('.nawa-directory-indexing').evaluate((element) => element.open)),
+  )
   await page.getByRole('button', { name: 'Check selected files', exact: true }).click()
   await page.getByText('Needs indexing', { exact: true }).first().waitFor()
   await shot('knowledge-selected-files-300')
@@ -255,20 +429,38 @@ try {
   const review = page.getByRole('dialog', { name: /Review table/ })
   await review.waitFor()
   check('Table review uses a wide modal', (await review.boundingBox()).width > 900)
-  const approveTable = review.getByRole('button', { name: 'Validate and approve table', exact: true })
+  const approveTable = review.getByRole('button', {
+    name: 'Validate and approve table',
+    exact: true,
+  })
   const rowDescription = review.getByLabel('What does one row represent? (required)')
   const confirmTable = review.getByRole('checkbox', { name: /I confirm/ })
-  check('Approval action stays available before required fields are completed', await approveTable.isEnabled())
+  check(
+    'Approval action stays available before required fields are completed',
+    await approveTable.isEnabled(),
+  )
   await approveTable.click()
   await review.getByRole('alert').filter({ hasText: 'Describe what one row represents' }).waitFor()
-  check('Missing row description receives focus', await rowDescription.evaluate(element => element === document.activeElement))
+  check(
+    'Missing row description receives focus',
+    await rowDescription.evaluate((element) => element === document.activeElement),
+  )
   await review.getByLabel('What does one row represent? (required)').fill('One invoice')
   await approveTable.click()
   await review.getByRole('alert').filter({ hasText: 'Select the confirmation checkbox' }).waitFor()
-  check('Missing confirmation receives focus', await confirmTable.evaluate(element => element === document.activeElement))
+  check(
+    'Missing confirmation receives focus',
+    await confirmTable.evaluate((element) => element === document.activeElement),
+  )
   await confirmTable.check()
-  check('Confirmation clears the prompt and keeps approval available', await approveTable.isEnabled() && await review.getByRole('alert').count() === 0)
-  check('Incomplete review never calls approval', await page.evaluate(() => window.sidebarFixture.state.reviewed) === 0)
+  check(
+    'Confirmation clears the prompt and keeps approval available',
+    (await approveTable.isEnabled()) && (await review.getByRole('alert').count()) === 0,
+  )
+  check(
+    'Incomplete review never calls approval',
+    (await page.evaluate(() => window.sidebarFixture.state.reviewed)) === 0,
+  )
   await shot('table-review')
   await page.keyboard.press('Escape')
   check(
@@ -315,16 +507,23 @@ try {
   await page.evaluate(() => window.sidebarFixture.preparePolicy())
   await page.getByText('Agent-prepared policy', { exact: false }).waitFor()
   await page.getByRole('button', { name: 'Review table', exact: true }).click()
-  check('Agent draft prefills row meaning', await rowDescription.inputValue() === 'One invoice')
+  check('Agent draft prefills row meaning', (await rowDescription.inputValue()) === 'One invoice')
   check('Agent draft still needs user confirmation', !(await confirmTable.isChecked()))
   await approveTable.click()
   await review.getByRole('alert').filter({ hasText: 'Select the confirmation checkbox' }).waitFor()
-  check('Agent draft never auto-approves', await page.evaluate(() => window.sidebarFixture.state.reviewed) === 0)
+  check(
+    'Agent draft never auto-approves',
+    (await page.evaluate(() => window.sidebarFixture.state.reviewed)) === 0,
+  )
   await shot('agent-prepared-table-review')
   await review.getByRole('button', { name: 'Close', exact: true }).click()
   await page.evaluate(() => window.sidebarFixture.approvePolicy())
   await page.getByText('Approved by agent', { exact: false }).waitFor()
-  check('Agent-approved tables show Ready with their approval origin', (await page.locator('.nawa-data-catalog-heading').textContent()).includes('Ready') && await page.evaluate(() => window.sidebarFixture.state.reviewed === 0))
+  check(
+    'Agent-approved tables show Ready with their approval origin',
+    (await page.locator('.nawa-data-catalog-heading').textContent()).includes('Ready') &&
+      (await page.evaluate(() => window.sidebarFixture.state.reviewed === 0)),
+  )
   await shot('agent-approved-table-300')
   await page.evaluate(() => window.sidebarFixture.job(true))
   await page.getByRole('tab', { name: 'Chat', exact: true }).click()
@@ -365,16 +564,25 @@ try {
   await page.getByRole('button', { name: '560px', exact: true }).click()
   await page.getByRole('button', { name: 'Open sidebar', exact: true }).click()
   await page.getByRole('tab', { name: 'Models', exact: true }).click()
-  check('560px model form stays within the panel', (await bounds()).width === 560 && (await bounds()).overflow.length === 0)
+  check(
+    '560px model form stays within the panel',
+    (await bounds()).width === 560 && (await bounds()).overflow.length === 0,
+  )
   await page.setViewportSize({ width: 720, height: 450 })
   await page.locator('.nawa-workspace-control-panel.is-drawer').waitFor()
   const saveBounds = await page.getByRole('button', { name: 'Save', exact: true }).boundingBox()
-  check('Short windows keep save actions on screen', saveBounds.y >= 0 && saveBounds.y + saveBounds.height <= 450)
+  check(
+    'Short windows keep save actions on screen',
+    saveBounds.y >= 0 && saveBounds.y + saveBounds.height <= 450,
+  )
   await shot('models-short-window')
   await page.getByRole('tab', { name: 'Knowledge', exact: true }).click()
   await page.getByRole('button', { name: 'Stop import', exact: true }).focus()
   await page.keyboard.press('Escape')
-  check('Escape works from Knowledge controls in the drawer', !(await page.locator('.nawa-workspace-control-panel').isVisible()))
+  check(
+    'Escape works from Knowledge controls in the drawer',
+    !(await page.locator('.nawa-workspace-control-panel').isVisible()),
+  )
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.getByRole('button', { name: '300px', exact: true }).click()
   await page.getByRole('button', { name: 'Arabic dark', exact: true }).click()
@@ -419,6 +627,46 @@ try {
     'Model load failure can be retried',
     (await page.locator('input[id$="-set-ai-model"]').inputValue()) === 'local-model',
   )
+  await page.locator('input[id$="-set-ai-model"]').fill('draft-model')
+  await page.evaluate(() => window.sidebarFixture.externalModelChange('newer-model'))
+  const savesBeforeConflict = await page.evaluate(() => window.sidebarFixture.state.saved)
+  await page.getByRole('button', { name: 'Save', exact: true }).click()
+  await page
+    .getByRole('alert')
+    .filter({ hasText: 'Model settings changed in another editor' })
+    .waitFor()
+  check(
+    'Stale Models form cannot overwrite a newer save',
+    (await page.evaluate(
+      (before) => window.sidebarFixture.state.saved === before,
+      savesBeforeConflict,
+    )) && (await page.locator('input[id$="-set-ai-model"]').inputValue()) === 'draft-model',
+  )
+  await page.getByRole('button', { name: 'Reload current settings', exact: true }).click()
+  check(
+    'Conflict reload shows the newer model',
+    (await page.locator('input[id$="-set-ai-model"]').inputValue()) === 'newer-model',
+  )
+  const hiddenPolls = await page.evaluate(() => ({
+    rag: window.sidebarFixture.state.ragProgressCalls,
+    analytics: window.sidebarFixture.state.analyticsProgressCalls,
+  }))
+  await page.waitForTimeout(2300)
+  check(
+    'Hidden Knowledge stops passive progress polling',
+    await page.evaluate(
+      (before) =>
+        window.sidebarFixture.state.ragProgressCalls === before.rag &&
+        window.sidebarFixture.state.analyticsProgressCalls === before.analytics,
+      hiddenPolls,
+    ),
+  )
+  await page.getByRole('tab', { name: 'Knowledge', exact: true }).click()
+  await page.waitForFunction(
+    (before) => window.sidebarFixture.state.ragProgressCalls > before,
+    hiddenPolls.rag,
+  )
+  check('Returning to Knowledge refreshes file progress', true)
   check('No renderer errors', errors.length === 0)
   console.log(`Screenshots: ${output}`)
 } finally {

@@ -150,9 +150,12 @@ test('rejects incomplete or malformed source before mutation', () => {
   assert.throws(() => transformExplorer(ts, 'export function ExplorerHome(){return <'))
   assert.throws(() => transformSources(ts, new Map()), /missing/)
 })
-test('retains all old panel preferences and restores both new tabs', () => {
-  for (const pane of ['ai', 'details', 'rag', 'analytics', 'none'])
+test('retains current panels and migrates prior knowledge preferences', () => {
+  for (const pane of ['ai', 'ragAnalytics', 'provider', 'none'])
     assert.equal(parsePreferences(JSON.stringify({ pane })).pane, pane)
+  for (const pane of ['rag', 'analytics'])
+    assert.equal(parsePreferences(JSON.stringify({ pane })).pane, 'ragAnalytics')
+  assert.equal(parsePreferences('{"pane":"details"}').pane, 'ai')
 })
 test('unknown panel preferences fall back safely', () => {
   assert.equal(parsePreferences('{"pane":"unknown"}').pane, 'ai')

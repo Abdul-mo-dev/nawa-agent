@@ -14,6 +14,8 @@ const stagedPathFor = (filePath: string) =>
 export interface StagedSaveOptions {
   /** Keep the existing Windows save fallback for editors that already use it. */
   onLockedRename?: 'fail' | 'write-in-place'
+  /** Restrict a newly created settings file, and tighten an existing one on replacement. */
+  mode?: number
 }
 
 /** The completed staged copy remains on disk if committing the save fails. */
@@ -82,7 +84,7 @@ export function saveFileWithStagingSync(
   options: StagedSaveOptions = {},
 ): void {
   const stagedPath = stagedPathFor(filePath)
-  const mode = existsSync(filePath) ? statSync(filePath).mode & 0o7777 : undefined
+  const mode = options.mode ?? (existsSync(filePath) ? statSync(filePath).mode & 0o7777 : undefined)
 
   try {
     writeFileSync(stagedPath, data, {

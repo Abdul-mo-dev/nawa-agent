@@ -3,55 +3,70 @@ import { useI18n } from '../locale'
 /** English is the fallback for untranslated copy, as in the Explorer catalog. */
 export const sidebarArabic: Record<string, string> = {
   'Prepare & export': 'تجهيز وتصدير',
-  'Ask the agent to prepare and review selected tables, then export SQLite. Source files are kept unchanged.': 'اطلب من الوكيل تجهيز الجداول المحددة ومراجعتها، ثم تصدير قاعدة SQLite. تبقى ملفات المصدر دون تغيير.',
-  'Use Prepare & export in Chat to let the agent review selected tables and export SQLite. Manual import and review are available here when needed.': 'استخدم «تجهيز وتصدير» في المحادثة ليقوم الوكيل بمراجعة الجداول المحددة وتصدير SQLite. يتوفر الاستيراد والمراجعة اليدويان هنا عند الحاجة.',
+  'Ask the agent to prepare and review selected tables, then export SQLite. Source files are kept unchanged.':
+    'اطلب من الوكيل تجهيز الجداول المحددة ومراجعتها، ثم تصدير قاعدة SQLite. تبقى ملفات المصدر دون تغيير.',
+  'Use Prepare & export in Chat to let the agent review selected tables and export SQLite. Manual import and review are available here when needed.':
+    'استخدم «تجهيز وتصدير» في المحادثة ليقوم الوكيل بمراجعة الجداول المحددة وتصدير SQLite. يتوفر الاستيراد والمراجعة اليدويان هنا عند الحاجة.',
   'Preparing…': 'جارٍ التجهيز…',
   'Prepare and export tables': 'تجهيز الجداول وتصديرها',
   'Select individual table files first.': 'حدد ملفات الجداول أولاً.',
   'Select at most 256 files.': 'حدد 256 ملفاً كحد أقصى.',
   'Rebuild and restart Nawa to enable table export.': 'أعد بناء Nawa وتشغيله لتفعيل تصدير الجداول.',
-  'Prepare clear selected tables locally and export complete tables as CSV. Source files are kept unchanged.': 'جهّز الجداول المحددة الواضحة محلياً وصدّر جميع صفوفها بصيغة CSV. تبقى ملفات المصدر دون تغيير.',
-  'Preparing selected tables and exporting Ready tables…': 'جارٍ تجهيز الجداول المحددة وتصدير الجداول الجاهزة…',
+  'Prepare clear selected tables locally and export complete tables as CSV. Source files are kept unchanged.':
+    'جهّز الجداول المحددة الواضحة محلياً وصدّر جميع صفوفها بصيغة CSV. تبقى ملفات المصدر دون تغيير.',
+  'Preparing selected tables and exporting Ready tables…':
+    'جارٍ تجهيز الجداول المحددة وتصدير الجداول الجاهزة…',
   '{tables} tables exported · {rows} rows': 'تم تصدير {tables} جدولاً · {rows} صفاً',
-  '{approved} automatically approved · {ready} already Ready · {pending} need a decision': 'تم اعتماد {approved} تلقائياً · {ready} جاهزة مسبقاً · {pending} تحتاج إلى قرار',
-  '{unsupported} unsupported files · {failed} failed files': '{unsupported} ملفات غير مدعومة · {failed} ملفات تعذر تجهيزها',
+  '{approved} automatically approved · {ready} already Ready · {pending} need a decision':
+    'تم اعتماد {approved} تلقائياً · {ready} جاهزة مسبقاً · {pending} تحتاج إلى قرار',
+  '{unsupported} unsupported files · {failed} failed files':
+    '{unsupported} ملفات غير مدعومة · {failed} ملفات تعذر تجهيزها',
   'Show exports': 'عرض الملفات المصدّرة',
-  'CSV files contain every included row. The manifest records source versions, policies and skipped tables.': 'تحتوي ملفات CSV على جميع الصفوف المشمولة. يسجل ملف البيان إصدارات المصادر والسياسات والجداول التي لم تُصدّر.',
+  'CSV files contain every included row. The manifest records source versions, policies and skipped tables.':
+    'تحتوي ملفات CSV على جميع الصفوف المشمولة. يسجل ملف البيان إصدارات المصادر والسياسات والجداول التي لم تُصدّر.',
   'Tables and files needing attention': 'جداول وملفات تحتاج إلى معالجة',
-  'See the manifest for the complete table status and policies.': 'راجع ملف البيان للاطلاع على حالة جميع الجداول وسياساتها.',
+  'See the manifest for the complete table status and policies.':
+    'راجع ملف البيان للاطلاع على حالة جميع الجداول وسياساتها.',
   'File limits': 'حدود الملفات',
   'OCR and Office': 'التعرف على النصوص وOffice',
   'Visual extraction': 'استخراج المحتوى المرئي',
   'Timeouts and retries': 'المهلة وإعادة المحاولة',
   'Connection details': 'تفاصيل الاتصال',
-  'Help': 'المساعدة',
-  'Parameters': 'المعاملات',
+  Help: 'المساعدة',
+  Parameters: 'المعاملات',
   'Document tools': 'أدوات المستندات',
-  'Browse the document tools available from the connected MyAgent server.': 'تصفّح أدوات المستندات المتاحة من خادم MyAgent المتصل.',
+  'Browse the document tools available from the connected MyAgent server.':
+    'تصفّح أدوات المستندات المتاحة من خادم MyAgent المتصل.',
   'Available MyAgent document tools': 'أدوات مستندات MyAgent المتاحة',
   'Enable file search': 'تفعيل البحث في الملفات',
   'Refresh details': 'تفاصيل التحديث',
   'Tool scope': 'نطاق الأدوات',
   'Selected file types': 'أنواع الملفات المحددة',
   'All server document tools': 'جميع أدوات مستندات الخادم',
-  'Select individual files in Explorer, or choose all server document tools.': 'حدّد ملفات فردية في المستكشف، أو اختر جميع أدوات مستندات الخادم.',
+  'Select individual files in Explorer, or choose all server document tools.':
+    'حدّد ملفات فردية في المستكشف، أو اختر جميع أدوات مستندات الخادم.',
   'Find a tool': 'البحث عن أداة',
   'Search tool names or descriptions': 'ابحث في أسماء الأدوات أو أوصافها',
   'Search tools': 'البحث عن الأدوات',
   'Refresh tools': 'تحديث الأدوات',
   'Load more tools': 'تحميل المزيد من الأدوات',
-  'Save or discard the connection changes before loading tools.': 'احفظ تغييرات الاتصال أو تجاهلها قبل تحميل الأدوات.',
+  'Save or discard the connection changes before loading tools.':
+    'احفظ تغييرات الاتصال أو تجاهلها قبل تحميل الأدوات.',
   'Loading tool definitions…': 'جارٍ تحميل تعريفات الأدوات…',
   '{shown} of {total} tools': '{shown} من {total} أداة',
-  'No tools match this search or file-type filter.': 'لا توجد أدوات تطابق البحث أو مرشح أنواع الملفات.',
+  'No tools match this search or file-type filter.':
+    'لا توجد أدوات تطابق البحث أو مرشح أنواع الملفات.',
   'Using these tools': 'استخدام هذه الأدوات',
-  'Browse the tools this MyAgent server exposes to Nawa. This lists definitions and does not read file contents or require indexing.': 'تصفّح الأدوات التي يتيحها خادم MyAgent لـ Nawa. تعرض هذه القائمة التعريفات دون قراءة محتوى الملفات أو اشتراط فهرستها.',
-  'Ask the assistant in Chat; it chooses tools for the selected files. Reading content requires a current index. This catalog does not verify file readiness; use Files → Check selected files.': 'اطلب من المساعد في المحادثة؛ فهو يختار الأدوات للملفات المحددة. تتطلب قراءة المحتوى فهرسًا حديثًا. لا تتحقق هذه القائمة من جاهزية الملفات؛ استخدم الملفات ← فحص الملفات المحددة.',
-  'The tool catalog changed. Refresh the list before loading more.': 'تغيّرت قائمة الأدوات. حدّث القائمة قبل تحميل المزيد.',
-  'Files': 'الملفات',
-  'Tables': 'الجداول',
-  'Setup': 'الإعداد',
-  'Enabled': 'مفعّل',
+  'Browse the tools this MyAgent server exposes to Nawa. This lists definitions and does not read file contents or require indexing.':
+    'تصفّح الأدوات التي يتيحها خادم MyAgent لـ Nawa. تعرض هذه القائمة التعريفات دون قراءة محتوى الملفات أو اشتراط فهرستها.',
+  'Ask the assistant in Chat; it chooses tools for the selected files. Reading content requires a current index. This catalog does not verify file readiness; use Files → Check selected files.':
+    'اطلب من المساعد في المحادثة؛ فهو يختار الأدوات للملفات المحددة. تتطلب قراءة المحتوى فهرسًا حديثًا. لا تتحقق هذه القائمة من جاهزية الملفات؛ استخدم الملفات ← فحص الملفات المحددة.',
+  'The tool catalog changed. Refresh the list before loading more.':
+    'تغيّرت قائمة الأدوات. حدّث القائمة قبل تحميل المزيد.',
+  Files: 'الملفات',
+  Tables: 'الجداول',
+  Setup: 'الإعداد',
+  Enabled: 'مفعّل',
   'Knowledge navigation': 'التنقل في المعرفة',
   'File search actions': 'إجراءات البحث في الملفات',
   'Table analysis actions': 'إجراءات تحليل الجداول',
@@ -68,30 +83,46 @@ export const sidebarArabic: Record<string, string> = {
   'Configure file search': 'إعداد البحث في الملفات',
   'Configure and enable file search in Setup.': 'اضبط البحث في الملفات وفعّله من قسم الإعداد.',
   'Index the whole directory': 'فهرسة المجلد بالكامل',
-  'Use this to prepare all supported files in this directory. It does not select those files for chat.': 'استخدم هذا لتجهيز جميع الملفات المدعومة في هذا المجلد. لا يتم تحديد هذه الملفات للمحادثة.',
-  'Select files in Explorer, check their index, then refresh the files that need it. Only selected files can be read by the assistant.': 'حدّد الملفات في المستكشف، وافحص فهرستها، ثم حدّث الملفات التي تحتاج إلى ذلك. يستطيع المساعد قراءة الملفات المحددة فقط.',
-  'Choose a search backend, save its connection, and set retrieval limits.': 'اختر خدمة البحث، واحفظ اتصالها، واضبط حدود الاسترجاع.',
-  'Check MyAgent readiness or start, stop, and restart its server.': 'افحص جاهزية MyAgent أو شغّل خادمه وأوقفه وأعد تشغيله.',
-  'Configure the models MyAgent uses for indexing and classification. Nawa’s chat model is separate.': 'اضبط النماذج التي يستخدمها MyAgent للفهرسة والتصنيف. نموذج محادثة Nawa مستقل.',
-  'Choose the directories MyAgent can index. This does not select files for the assistant.': 'اختر المجلدات التي يستطيع MyAgent فهرستها. لا يتم تحديد ملفات للمساعد بذلك.',
-  'Set supported formats, OCR paths, visual extraction, and indexing limits.': 'اضبط الصيغ المدعومة ومسارات OCR والاستخراج البصري وحدود الفهرسة.',
-  'Choose the installed Windows service or a local MyAgent executable.': 'اختر خدمة Windows المثبتة أو برنامج MyAgent محليًا.',
-  'Configure Nawa’s local table imports and analytical limits.': 'اضبط استيراد الجداول محليًا في Nawa وحدود التحليل.',
+  'Use this to prepare all supported files in this directory. It does not select those files for chat.':
+    'استخدم هذا لتجهيز جميع الملفات المدعومة في هذا المجلد. لا يتم تحديد هذه الملفات للمحادثة.',
+  'Select files in Explorer, check their index, then refresh the files that need it. Only selected files can be read by the assistant.':
+    'حدّد الملفات في المستكشف، وافحص فهرستها، ثم حدّث الملفات التي تحتاج إلى ذلك. يستطيع المساعد قراءة الملفات المحددة فقط.',
+  'Choose a search backend, save its connection, and set retrieval limits.':
+    'اختر خدمة البحث، واحفظ اتصالها، واضبط حدود الاسترجاع.',
+  'Check MyAgent readiness or start, stop, and restart its server.':
+    'افحص جاهزية MyAgent أو شغّل خادمه وأوقفه وأعد تشغيله.',
+  'Configure the models MyAgent uses for indexing and classification. Nawa’s chat model is separate.':
+    'اضبط النماذج التي يستخدمها MyAgent للفهرسة والتصنيف. نموذج محادثة Nawa مستقل.',
+  'Choose the directories MyAgent can index. This does not select files for the assistant.':
+    'اختر المجلدات التي يستطيع MyAgent فهرستها. لا يتم تحديد ملفات للمساعد بذلك.',
+  'Set supported formats, OCR paths, visual extraction, and indexing limits.':
+    'اضبط الصيغ المدعومة ومسارات OCR والاستخراج البصري وحدود الفهرسة.',
+  'Choose the installed Windows service or a local MyAgent executable.':
+    'اختر خدمة Windows المثبتة أو برنامج MyAgent محليًا.',
+  'Configure Nawa’s local table imports and analytical limits.':
+    'اضبط استيراد الجداول محليًا في Nawa وحدود التحليل.',
   'Check readiness': 'فحص الجاهزية',
   'Readiness diagnostics': 'تشخيص الجاهزية',
   'Checked at': 'وقت الفحص',
   'Chat model starts on demand': 'يبدأ نموذج المحادثة عند الطلب',
   'Chat model ready': 'نموذج المحادثة جاهز',
   'Chat model needs attention': 'يحتاج نموذج المحادثة إلى مراجعة',
-  'Check the chat provider URL/model below, or inspect its managed runtime in MyAgent.Server.UI.': 'راجع عنوان مزود المحادثة والنموذج أدناه، أو افحص تشغيله المُدار في MyAgent.Server.UI.',
-  'Provider readiness could not be checked. Verify the connection and server status.': 'تعذّر فحص جاهزية المزود. تحقّق من الاتصال وحالة الخادم.',
-  'Set the LibreOffice path in extraction settings, or install LibreOffice using MyAgent.Server.UI Setup.': 'حدّد مسار LibreOffice في إعدادات الاستخراج، أو ثبّته من تبويب Setup في MyAgent.Server.UI.',
-  'Configure an embedding model below, then refresh the affected files.': 'حدّد نموذج تضمين أدناه، ثم حدّث فهرسة الملفات المتأثرة.',
-  'Check this component in MyAgent.Server.UI before retrying the affected operation.': 'افحص هذا المكوّن في MyAgent.Server.UI قبل إعادة محاولة العملية المتأثرة.',
-  'This checks MyAgent’s provider and reported components. Embedding connectivity and OCR availability are checked when indexing or extraction runs.': 'يفحص هذا مزود MyAgent والمكوّنات التي يبلغ عنها. يتم فحص اتصال التضمين وتوفر OCR عند الفهرسة أو الاستخراج.',
+  'Check the chat provider URL/model below, or inspect its managed runtime in MyAgent.Server.UI.':
+    'راجع عنوان مزود المحادثة والنموذج أدناه، أو افحص تشغيله المُدار في MyAgent.Server.UI.',
+  'Provider readiness could not be checked. Verify the connection and server status.':
+    'تعذّر فحص جاهزية المزود. تحقّق من الاتصال وحالة الخادم.',
+  'Set the LibreOffice path in extraction settings, or install LibreOffice using MyAgent.Server.UI Setup.':
+    'حدّد مسار LibreOffice في إعدادات الاستخراج، أو ثبّته من تبويب Setup في MyAgent.Server.UI.',
+  'Configure an embedding model below, then refresh the affected files.':
+    'حدّد نموذج تضمين أدناه، ثم حدّث فهرسة الملفات المتأثرة.',
+  'Check this component in MyAgent.Server.UI before retrying the affected operation.':
+    'افحص هذا المكوّن في MyAgent.Server.UI قبل إعادة محاولة العملية المتأثرة.',
+  'This checks MyAgent’s provider and reported components. Embedding connectivity and OCR availability are checked when indexing or extraction runs.':
+    'يفحص هذا مزود MyAgent والمكوّنات التي يبلغ عنها. يتم فحص اتصال التضمين وتوفر OCR عند الفهرسة أو الاستخراج.',
   'Copy readiness diagnostics': 'نسخ تشخيص الجاهزية',
   'Readiness diagnostics copied.': 'تم نسخ تشخيص الجاهزية.',
-  'Blank extractor paths use MyAgent’s installed defaults. These settings do not install software. After saving, restart if requested and refresh affected files.': 'تستخدم مسارات الاستخراج الفارغة إعدادات MyAgent الافتراضية المثبتة. هذه الإعدادات لا تثبّت البرامج. بعد الحفظ، أعد التشغيل إن طُلب، وحدّث فهرسة الملفات المتأثرة.',
+  'Blank extractor paths use MyAgent’s installed defaults. These settings do not install software. After saving, restart if requested and refresh affected files.':
+    'تستخدم مسارات الاستخراج الفارغة إعدادات MyAgent الافتراضية المثبتة. هذه الإعدادات لا تثبّت البرامج. بعد الحفظ، أعد التشغيل إن طُلب، وحدّث فهرسة الملفات المتأثرة.',
   'Tesseract OCR executable path': 'مسار برنامج Tesseract OCR',
   'LibreOffice executable path': 'مسار برنامج LibreOffice',
   'Maximum pages per file (0 = unlimited)': 'الحد الأقصى للصفحات لكل ملف (0 = بلا حد)',
@@ -102,7 +133,8 @@ export const sidebarArabic: Record<string, string> = {
   'Visual extraction retries': 'عدد محاولات الاستخراج البصري',
   'Selected-file readiness': 'جاهزية الملفات المحددة',
   '{count} individual files selected': '{count} ملفات محددة بشكل فردي',
-  'Select individual files in Explorer to check or refresh them. Selected folders are not expanded.': 'حدّد ملفات فردية في المستكشف لفحصها أو تحديث فهرستها. لا يتم توسيع المجلدات المحددة.',
+  'Select individual files in Explorer to check or refresh them. Selected folders are not expanded.':
+    'حدّد ملفات فردية في المستكشف لفحصها أو تحديث فهرستها. لا يتم توسيع المجلدات المحددة.',
   'Select at most 256 files for one refresh.': 'حدّد 256 ملفًا كحد أقصى لكل عملية تحديث.',
   'Check selected files': 'فحص الملفات المحددة',
   'Checking selected files…': 'جارٍ فحص الملفات المحددة…',
@@ -110,33 +142,41 @@ export const sidebarArabic: Record<string, string> = {
   'Needs attention': 'يحتاج إلى مراجعة',
   'Needs indexing': 'يحتاج إلى فهرسة',
   'Indexed — not verified': 'مفهرس — لم يتم التحقق',
-  'Refresh this file to create its MyAgent mapping and index.': 'حدّث فهرسة هذا الملف لإنشاء ربطه وفهرسه في MyAgent.',
+  'Refresh this file to create its MyAgent mapping and index.':
+    'حدّث فهرسة هذا الملف لإنشاء ربطه وفهرسه في MyAgent.',
   'Local bytes and the indexed snapshot match.': 'يتطابق محتوى الملف المحلي مع النسخة المفهرسة.',
-  'Content tools verify this file again when used.': 'تتحقق أدوات المحتوى من هذا الملف مجددًا عند استخدامه.',
-  'I allow MyAgent to read these selected files and refresh their shared index using its configured processing services.': 'أسمح لـ MyAgent بقراءة هذه الملفات المحددة وتحديث فهرسها المشترك باستخدام خدمات المعالجة المضبوطة لديه.',
+  'Content tools verify this file again when used.':
+    'تتحقق أدوات المحتوى من هذا الملف مجددًا عند استخدامه.',
+  'I allow MyAgent to read these selected files and refresh their shared index using its configured processing services.':
+    'أسمح لـ MyAgent بقراءة هذه الملفات المحددة وتحديث فهرسها المشترك باستخدام خدمات المعالجة المضبوطة لديه.',
   'Refresh selected files': 'تحديث فهرسة الملفات المحددة',
   'Retry failed files': 'إعادة محاولة الملفات الفاشلة',
-  'Only the files chosen when this action starts are refreshed. Selection changes affect the next action. Refresh also reapplies extraction settings to unchanged files.': 'يتم تحديث فهرسة الملفات المحددة عند بدء الإجراء فقط. تغييرات التحديد تؤثر على الإجراء التالي. يعيد التحديث تطبيق إعدادات الاستخراج حتى على الملفات التي لم تتغير.',
+  'Only the files chosen when this action starts are refreshed. Selection changes affect the next action. Refresh also reapplies extraction settings to unchanged files.':
+    'يتم تحديث فهرسة الملفات المحددة عند بدء الإجراء فقط. تغييرات التحديد تؤثر على الإجراء التالي. يعيد التحديث تطبيق إعدادات الاستخراج حتى على الملفات التي لم تتغير.',
   'Latest selected-file refresh': 'آخر تحديث لفهرسة الملفات المحددة',
-  'Refreshed': 'تم التحديث',
+  Refreshed: 'تم التحديث',
   'MyAgent settings': 'إعدادات MyAgent',
   'MyAgent connection': 'اتصال MyAgent',
-  'Connection': 'الاتصال',
+  Connection: 'الاتصال',
   'Save connection': 'حفظ الاتصال',
   'Generate new service key': 'إنشاء مفتاح خدمة جديد',
-  'Connect to MyAgent and manage its server, models, and shared document folders. Nawa’s chat model is configured separately.': 'اتصل بـ MyAgent وأدر خادمه ونماذجه ومجلدات المستندات المشتركة. يتم إعداد نموذج محادثة Nawa بشكل منفصل.',
-  'Saving this connection switches file search to MyAgent. Enter its service key; the local embedding key will not be reused.': 'حفظ هذا الاتصال يحوّل البحث في الملفات إلى MyAgent. أدخل مفتاح خدمته؛ لن يُستخدم مفتاح التضمين المحلي.',
+  'Connect to MyAgent and manage its server, models, and shared document folders. Nawa’s chat model is configured separately.':
+    'اتصل بـ MyAgent وأدر خادمه ونماذجه ومجلدات المستندات المشتركة. يتم إعداد نموذج محادثة Nawa بشكل منفصل.',
+  'Saving this connection switches file search to MyAgent. Enter its service key; the local embedding key will not be reused.':
+    'حفظ هذا الاتصال يحوّل البحث في الملفات إلى MyAgent. أدخل مفتاح خدمته؛ لن يُستخدم مفتاح التضمين المحلي.',
   'Managing MyAgent…': 'جارٍ إدارة MyAgent…',
   'Unsaved MyAgent settings': 'إعدادات MyAgent غير محفوظة',
   'Server status': 'حالة الخادم',
   'Refresh status': 'تحديث الحالة',
-  'Connected': 'متصل',
-  'Not connected. Save the connection, then start or refresh the server.': 'غير متصل. احفظ الاتصال، ثم شغّل الخادم أو حدّث حالته.',
+  Connected: 'متصل',
+  'Not connected. Save the connection, then start or refresh the server.':
+    'غير متصل. احفظ الاتصال، ثم شغّل الخادم أو حدّث حالته.',
   'Start server': 'تشغيل الخادم',
   'Stop server': 'إيقاف الخادم',
   'Restart server': 'إعادة تشغيل الخادم',
   'Confirm server action': 'تأكيد إجراء الخادم',
-  'Stopping or restarting MyAgent interrupts its active chats, indexing, and model requests, including other clients.': 'إيقاف MyAgent أو إعادة تشغيله يقطع المحادثات والفهرسة وطلبات النماذج النشطة، بما فيها طلبات العملاء الآخرين.',
+  'Stopping or restarting MyAgent interrupts its active chats, indexing, and model requests, including other clients.':
+    'إيقاف MyAgent أو إعادة تشغيله يقطع المحادثات والفهرسة وطلبات النماذج النشطة، بما فيها طلبات العملاء الآخرين.',
   'Confirm stop': 'تأكيد الإيقاف',
   'Confirm restart': 'تأكيد إعادة التشغيل',
   'Restart required': 'إعادة التشغيل مطلوبة',
@@ -145,11 +185,13 @@ export const sidebarArabic: Record<string, string> = {
   'Chat API base URL': 'عنوان API للمحادثة',
   'MyAgent chat model': 'نموذج محادثة MyAgent',
   'Managed chat runtime': 'بيئة نموذج المحادثة المُدارة',
-  'Runtime selection controls startup. Enter that runtime’s API URL and served model alias in the fields above.': 'اختيار البيئة يتحكم في تشغيلها. أدخل عنوان API واسم النموذج الذي توفره هذه البيئة في الحقول أعلاه.',
+  'Runtime selection controls startup. Enter that runtime’s API URL and served model alias in the fields above.':
+    'اختيار البيئة يتحكم في تشغيلها. أدخل عنوان API واسم النموذج الذي توفره هذه البيئة في الحقول أعلاه.',
   'External API / manual endpoint': 'API خارجي / عنوان يدوي',
   'Chat provider API key': 'مفتاح API لمزوّد المحادثة',
   'Embedding provider API key': 'مفتاح API لمزوّد التضمين',
-  'Stored on MyAgent — blank keeps the current key': 'محفوظ في MyAgent — اتركه فارغًا للاحتفاظ بالمفتاح',
+  'Stored on MyAgent — blank keeps the current key':
+    'محفوظ في MyAgent — اتركه فارغًا للاحتفاظ بالمفتاح',
   'Optional provider key': 'مفتاح المزوّد الاختياري',
   'Remove stored key': 'إزالة المفتاح المحفوظ',
   'Context window tokens (0 = automatic)': 'رموز نافذة السياق (0 = تلقائي)',
@@ -157,15 +199,18 @@ export const sidebarArabic: Record<string, string> = {
   'Chat request timeout (seconds)': 'مهلة طلب المحادثة بالثواني',
   'Concurrent chat requests': 'طلبات المحادثة المتزامنة',
   'Embedding model': 'نموذج التضمين',
-  'After changing embedding or extraction settings, index / refresh the affected files in Knowledge.': 'بعد تغيير إعدادات التضمين أو الاستخراج، افهرس الملفات المتأثرة أو حدّث فهرستها من تبويب المعرفة.',
+  'After changing embedding or extraction settings, index / refresh the affected files in Knowledge.':
+    'بعد تغيير إعدادات التضمين أو الاستخراج، افهرس الملفات المتأثرة أو حدّث فهرستها من تبويب المعرفة.',
   'MyAgent embedding API URL': 'عنوان API للتضمين في MyAgent',
   'MyAgent embedding model': 'نموذج تضمين MyAgent',
   'Managed embedding runtime': 'بيئة نموذج التضمين المُدارة',
-  'Allow sending indexed text to a remote embedding provider': 'السماح بإرسال النص المفهرس إلى مزوّد تضمين بعيد',
+  'Allow sending indexed text to a remote embedding provider':
+    'السماح بإرسال النص المفهرس إلى مزوّد تضمين بعيد',
   'Embedding batch size': 'حجم دفعة التضمين',
   'Embedding timeout (seconds)': 'مهلة التضمين بالثواني',
   'Shared RAG folders': 'مجلدات RAG المشتركة',
-  'MyAgent can index files inside these folders. The assistant can read only files selected in Nawa. Folder changes require a server restart.': 'يمكن لـ MyAgent فهرسة الملفات داخل هذه المجلدات. يستطيع المساعد قراءة الملفات المحددة في Nawa فقط. تغيير المجلدات يتطلب إعادة تشغيل الخادم.',
+  'MyAgent can index files inside these folders. The assistant can read only files selected in Nawa. Folder changes require a server restart.':
+    'يمكن لـ MyAgent فهرسة الملفات داخل هذه المجلدات. يستطيع المساعد قراءة الملفات المحددة في Nawa فقط. تغيير المجلدات يتطلب إعادة تشغيل الخادم.',
   'Folder ID': 'معرّف المجلد',
   'Folder display name': 'اسم المجلد المعروض',
   'Shared folder path': 'مسار المجلد المشترك',
@@ -183,7 +228,8 @@ export const sidebarArabic: Record<string, string> = {
   'Server settings loaded': 'تم تحميل إعدادات الخادم',
   'Discard server changes': 'تجاهل تغييرات الخادم',
   'Save server settings': 'حفظ إعدادات الخادم',
-  'Server settings saved. Restart MyAgent to apply these changes.': 'تم حفظ إعدادات الخادم. أعد تشغيل MyAgent لتطبيق التغييرات.',
+  'Server settings saved. Restart MyAgent to apply these changes.':
+    'تم حفظ إعدادات الخادم. أعد تشغيل MyAgent لتطبيق التغييرات.',
   'Server settings saved and applied.': 'تم حفظ إعدادات الخادم وتطبيقها.',
   'Server settings saved.': 'تم حفظ إعدادات الخادم.',
   'Managed model runtimes': 'بيئات النماذج المُدارة',
@@ -208,13 +254,14 @@ export const sidebarArabic: Record<string, string> = {
   'Metadata-only response': 'إجابة من بيانات الملفات الوصفية فقط',
   'No file sources to recheck': 'لا توجد مصادر ملفات لإعادة التحقق',
   'Skipped preparation': 'تجهيز لم يكن مطلوبًا',
-  'Incomplete': 'غير مكتمل',
-  'Skipped': 'تم التخطي',
+  Incomplete: 'غير مكتمل',
+  Skipped: 'تم التخطي',
   'Continue answer': 'متابعة الإجابة',
   'Source evidence': 'دليل المصدر',
   'Checking source version…': 'جارٍ التحقق من نسخة المصدر…',
   'Source version matches this evidence.': 'نسخة المصدر مطابقة لهذا الدليل.',
-  'The source changed or is unavailable. This is an earlier excerpt.': 'تغيّر المصدر أو أصبح غير متاح. هذا مقتطف سابق.',
+  'The source changed or is unavailable. This is an earlier excerpt.':
+    'تغيّر المصدر أو أصبح غير متاح. هذا مقتطف سابق.',
   'Check saved files on demand': 'تحقق من الملفات المحفوظة عند الحاجة',
   'Verifying answer sources': 'جارٍ التحقق من مصادر الإجابة',
   'Answer sources verified': 'تم التحقق من مصادر الإجابة',
@@ -230,13 +277,13 @@ export const sidebarArabic: Record<string, string> = {
   'Operation summary': 'ملخص العملية',
   'Request activity': 'نشاط الطلب',
   'Review action': 'مراجعة الإجراء',
-  'Working': 'جارٍ العمل',
-  'Worked': 'اكتمل العمل',
-  'Activity': 'النشاط',
-  'Running': 'جارٍ التنفيذ',
-  'Completed': 'مكتمل',
-  'Failed': 'فشل',
-  'Stopped': 'متوقف',
+  Working: 'جارٍ العمل',
+  Worked: 'اكتمل العمل',
+  Activity: 'النشاط',
+  Running: 'جارٍ التنفيذ',
+  Completed: 'مكتمل',
+  Failed: 'فشل',
+  Stopped: 'متوقف',
   'Waiting for you': 'بانتظارك',
   'Request failed': 'فشل الطلب',
   '{count} steps': '{count} خطوات',
@@ -248,9 +295,10 @@ export const sidebarArabic: Record<string, string> = {
   'Result details': 'تفاصيل النتيجة',
   'Debug details': 'تفاصيل التشخيص',
   'Copy diagnostics': 'نسخ بيانات التشخيص',
-  'Copied': 'نُسخت',
+  Copied: 'نُسخت',
   'Could not copy. Select details below.': 'تعذر النسخ. حدد التفاصيل أدناه.',
-  'Local, bounded tool details. May include file content. Review before sharing.': 'تفاصيل أدوات محلية ومحدودة الحجم. قد تتضمن محتوى الملفات. راجعها قبل المشاركة.',
+  'Local, bounded tool details. May include file content. Review before sharing.':
+    'تفاصيل أدوات محلية ومحدودة الحجم. قد تتضمن محتوى الملفات. راجعها قبل المشاركة.',
   'Checking saved files': 'جارٍ التحقق من الملفات المحفوظة',
   'Saved files checked': 'تم التحقق من الملفات المحفوظة',
   'File check incomplete': 'التحقق من الملفات غير مكتمل',
@@ -261,17 +309,20 @@ export const sidebarArabic: Record<string, string> = {
   'Review changes before saving': 'مراجعة التغييرات قبل الحفظ',
   'Approve preparation': 'الموافقة على التحضير',
   'Approve file action': 'الموافقة على إجراء الملف',
-  'Approved': 'تمت الموافقة',
-  'Declined': 'مرفوض',
+  Approved: 'تمت الموافقة',
+  Declined: 'مرفوض',
   'Response did not complete': 'لم تكتمل الاستجابة',
   'Calling chat model': 'جارٍ استدعاء نموذج المحادثة',
   'Model response received': 'تم استلام استجابة النموذج',
   'Model request failed': 'فشل طلب النموذج',
   'Model request stopped': 'توقف طلب النموذج',
   'MyAgent document tools': 'أدوات المستندات في MyAgent',
-  'The assistant can read pages, sections and slides, inspect visuals, query spreadsheets and classify text in selected indexed files. Nawa keeps its editing and reviewed-table tools.': 'يمكن للمساعد قراءة الصفحات والأقسام والشرائح، وفحص المحتوى المرئي، والاستعلام عن الجداول وتصنيف النص في الملفات المحددة والمفهرسة. يحتفظ Nawa بأدوات التحرير وتحليل الجداول المُراجعة.',
-  'Visual analysis and text classification use MyAgent’s configured models, which may be remote. Classifications are saved on the server. Document-tool calls allow at least 3 minutes; classification allows at least 10 minutes. Stop in chat cancels the request.': 'يستخدم التحليل المرئي وتصنيف النص نماذج MyAgent المُعدّة، وقد تكون بعيدة. تُحفظ التصنيفات على الخادم. مهلة أدوات المستندات 3 دقائق على الأقل، والتصنيف 10 دقائق على الأقل. يتيح زر الإيقاف في المحادثة إلغاء الطلب.',
-  'Chats using “Default” follow this setting. A specific model selected in Chat stays with that conversation.': 'تتبع المحادثات التي تستخدم «الافتراضي» هذا الإعداد. يبقى النموذج المحدد صراحةً في تبويب المحادثة مرتبطًا بتلك المحادثة.',
+  'The assistant can read pages, sections and slides, inspect visuals, query spreadsheets and classify text in selected indexed files. Nawa keeps its editing and reviewed-table tools.':
+    'يمكن للمساعد قراءة الصفحات والأقسام والشرائح، وفحص المحتوى المرئي، والاستعلام عن الجداول وتصنيف النص في الملفات المحددة والمفهرسة. يحتفظ Nawa بأدوات التحرير وتحليل الجداول المُراجعة.',
+  'Visual analysis and text classification use MyAgent’s configured models, which may be remote. Classifications are saved on the server. Document-tool calls allow at least 3 minutes; classification allows at least 10 minutes. Stop in chat cancels the request.':
+    'يستخدم التحليل المرئي وتصنيف النص نماذج MyAgent المُعدّة، وقد تكون بعيدة. تُحفظ التصنيفات على الخادم. مهلة أدوات المستندات 3 دقائق على الأقل، والتصنيف 10 دقائق على الأقل. يتيح زر الإيقاف في المحادثة إلغاء الطلب.',
+  'Chats using “Default” follow this setting. A specific model selected in Chat stays with that conversation.':
+    'تتبع المحادثات التي تستخدم «الافتراضي» هذا الإعداد. يبقى النموذج المحدد صراحةً في تبويب المحادثة مرتبطًا بتلك المحادثة.',
   'Use form': 'استخدام النموذج',
   'Advanced policy JSON': 'سياسة JSON المتقدمة',
   'Settings saved. Re-index files after changing the embedding model or chunking.':
@@ -288,6 +339,22 @@ export const sidebarArabic: Record<string, string> = {
   'This chat’s saved model was removed. Choose a model before sending.':
     'أُزيل النموذج المحفوظ لهذه المحادثة. اختر نموذجًا قبل الإرسال.',
   'Provider connection': 'اتصال المزود',
+  'Nawa chat model': 'نموذج محادثة ناوا',
+  'Saved key · enter a replacement': 'مفتاح محفوظ · أدخل مفتاحًا بديلًا',
+  'Remove saved key': 'إزالة المفتاح المحفوظ',
+  'A selected path is outside the opened workspace folders. Add its folder to use it in Chat.':
+    'يوجد مسار محدد خارج مجلدات مساحة العمل المفتوحة. أضف مجلده لاستخدامه في المحادثة.',
+  '{count} selected paths are outside the opened workspace folders. Add their folders to use them in Chat.':
+    'يوجد {count} من المسارات المحددة خارج مجلدات مساحة العمل المفتوحة. أضف مجلداتها لاستخدامها في المحادثة.',
+  'Select at most 256 files and folders for one request.':
+    'حدّد 256 ملفًا ومجلدًا كحد أقصى لكل طلب.',
+  'Outside workspace': 'خارج مساحة العمل',
+  'Prepare & export selected files': 'تجهيز الملفات المحددة وتصديرها',
+  'Model settings changed in another editor. Reload the current settings before saving.':
+    'تغيرت إعدادات النموذج في محرر آخر. أعد تحميل الإعدادات الحالية قبل الحفظ.',
+  'Reload current settings': 'إعادة تحميل الإعدادات الحالية',
+  'Media settings are unavailable. Reload the current settings.':
+    'إعدادات الوسائط غير متاحة. أعد تحميل الإعدادات الحالية.',
   'Advanced model settings': 'إعدادات النموذج المتقدمة',
   'Loading model settings…': 'جارٍ تحميل إعدادات النموذج…',
   'Unsaved model settings': 'إعدادات نموذج غير محفوظة',
@@ -400,8 +467,10 @@ export const sidebarArabic: Record<string, string> = {
     'وضّح ما يمثله الصف الواحد قبل اعتماد الجدول، مثل بند فاتورة واحد أو عميل واحد.',
   'The row description must be at most 1,000 characters.': 'يجب ألا يتجاوز وصف الصف 1,000 حرف.',
   'The row description contains an invalid character.': 'يحتوي وصف الصف على حرف غير صالح.',
-  'Enter valid policy JSON before approving the table.': 'أدخل سياسة بصيغة JSON صالحة قبل اعتماد الجدول.',
-  'Select the confirmation checkbox after reviewing the table policy.': 'حدّد مربع التأكيد بعد مراجعة سياسة الجدول.',
+  'Enter valid policy JSON before approving the table.':
+    'أدخل سياسة بصيغة JSON صالحة قبل اعتماد الجدول.',
+  'Select the confirmation checkbox after reviewing the table policy.':
+    'حدّد مربع التأكيد بعد مراجعة سياسة الجدول.',
   'One invoice line, one customer, one sensor observation…': 'بند فاتورة أو عميل أو قراءة مستشعر…',
   'Table description': 'وصف الجدول',
   'First data row': 'أول صف بيانات',
@@ -539,17 +608,26 @@ export const sidebarArabic: Record<string, string> = {
   'Allow agent preparation': 'السماح للوكيل بإعداد البيانات',
   'Automatically approve clear tables': 'الموافقة تلقائيًا على الجداول الواضحة',
   'Approved by agent': 'وافق عليها الوكيل',
-  'Set limits for local table imports and analysis. Choose manual review or automatic approval of clear tables.': 'حدد حدود استيراد الجداول وتحليلها محليًا. اختر المراجعة اليدوية أو الموافقة التلقائية على الجداول الواضحة.',
-  'The assistant may import individually selected files and prepare table policies. File snapshots, table records and analysis results are stored locally without encryption.': 'يمكن للمساعد استيراد الملفات المحددة بشكل فردي وإعداد سياسات الجداول. تُحفظ نسخ الملفات وسجلات الجداول ونتائج التحليل محليًا دون تشفير.',
-  'Clear tables become Ready after every included row is validated. Formulas, hidden rows, possible subtotals and changed row ranges remain for review. Unknown units stay unspecified. With this setting off, you approve each draft manually.': 'تصبح الجداول الواضحة جاهزة بعد التحقق من كل صف مشمول. تبقى الصيغ والصفوف المخفية والإجماليات المحتملة ونطاقات الصفوف المعدّلة للمراجعة. تبقى الوحدات المجهولة غير محددة. عند إيقاف هذا الإعداد، توافق على كل مسودة يدويًا.',
-  'Import CSV, TSV, JSON, JSONL or Excel files. Review tables manually, or enable automatic approval of clear tables in Table settings and ask the agent to prepare them.': 'استورد ملفات CSV أو TSV أو JSON أو JSONL أو Excel. راجع الجداول يدويًا، أو فعّل الموافقة التلقائية على الجداول الواضحة في إعدادات الجداول واطلب من الوكيل إعدادها.',
-  'The assistant may import individually selected files and prepare table policies. File snapshots, table records and analysis results are stored locally without encryption. You still confirm and approve each policy before it is applied.': 'يمكن للمساعد استيراد الملفات المحددة بشكل فردي وإعداد سياسات الجداول. تُحفظ نسخ الملفات وسجلات الجداول ونتائج التحليل محليًا دون تشفير. يبقى تأكيد كل سياسة والموافقة عليها بيدك قبل تطبيقها.',
+  'Set limits for local table imports and analysis. Choose manual review or automatic approval of clear tables.':
+    'حدد حدود استيراد الجداول وتحليلها محليًا. اختر المراجعة اليدوية أو الموافقة التلقائية على الجداول الواضحة.',
+  'The assistant may import individually selected files and prepare table policies. File snapshots, table records and analysis results are stored locally without encryption.':
+    'يمكن للمساعد استيراد الملفات المحددة بشكل فردي وإعداد سياسات الجداول. تُحفظ نسخ الملفات وسجلات الجداول ونتائج التحليل محليًا دون تشفير.',
+  'Clear tables become Ready after every included row is validated. Formulas, hidden rows, possible subtotals and changed row ranges remain for review. Unknown units stay unspecified. With this setting off, you approve each draft manually.':
+    'تصبح الجداول الواضحة جاهزة بعد التحقق من كل صف مشمول. تبقى الصيغ والصفوف المخفية والإجماليات المحتملة ونطاقات الصفوف المعدّلة للمراجعة. تبقى الوحدات المجهولة غير محددة. عند إيقاف هذا الإعداد، توافق على كل مسودة يدويًا.',
+  'Import CSV, TSV, JSON, JSONL or Excel files. Review tables manually, or enable automatic approval of clear tables in Table settings and ask the agent to prepare them.':
+    'استورد ملفات CSV أو TSV أو JSON أو JSONL أو Excel. راجع الجداول يدويًا، أو فعّل الموافقة التلقائية على الجداول الواضحة في إعدادات الجداول واطلب من الوكيل إعدادها.',
+  'The assistant may import individually selected files and prepare table policies. File snapshots, table records and analysis results are stored locally without encryption. You still confirm and approve each policy before it is applied.':
+    'يمكن للمساعد استيراد الملفات المحددة بشكل فردي وإعداد سياسات الجداول. تُحفظ نسخ الملفات وسجلات الجداول ونتائج التحليل محليًا دون تشفير. يبقى تأكيد كل سياسة والموافقة عليها بيدك قبل تطبيقها.',
   'Agent-prepared policy': 'سياسة أعدّها الوكيل',
   'Preparation needs attention': 'إعداد البيانات يتطلب الانتباه',
-  'Row meaning is provisional. Confirm the business meaning of one row before approval.': 'معنى الصف مبدئي. أكّد المعنى العملي لكل صف قبل الموافقة.',
-  'Some units are unspecified. Confirm units and currencies before treating these columns as business measures.': 'بعض الوحدات غير محددة. أكّد الوحدات والعملات قبل التعامل مع هذه الأعمدة كمقاييس أعمال.',
-  'No unique business key is declared. Single-table analysis is available after approval; combining exports or joining tables requires a verified key.': 'لم يُحدَّد مفتاح أعمال فريد. تحليل الجدول الواحد متاح بعد الموافقة؛ يتطلب دمج الصادرات أو ربط الجداول مفتاحًا تم التحقق منه.',
-  'Agent-prepared policy: {count} data rows validated. Review the proposed settings, then confirm to apply them.': 'سياسة أعدّها الوكيل: تم التحقق من {count} صفوف بيانات. راجع الإعدادات المقترحة، ثم أكّد تطبيقها.',
+  'Row meaning is provisional. Confirm the business meaning of one row before approval.':
+    'معنى الصف مبدئي. أكّد المعنى العملي لكل صف قبل الموافقة.',
+  'Some units are unspecified. Confirm units and currencies before treating these columns as business measures.':
+    'بعض الوحدات غير محددة. أكّد الوحدات والعملات قبل التعامل مع هذه الأعمدة كمقاييس أعمال.',
+  'No unique business key is declared. Single-table analysis is available after approval; combining exports or joining tables requires a verified key.':
+    'لم يُحدَّد مفتاح أعمال فريد. تحليل الجدول الواحد متاح بعد الموافقة؛ يتطلب دمج الصادرات أو ربط الجداول مفتاحًا تم التحقق منه.',
+  'Agent-prepared policy: {count} data rows validated. Review the proposed settings, then confirm to apply them.':
+    'سياسة أعدّها الوكيل: تم التحقق من {count} صفوف بيانات. راجع الإعدادات المقترحة، ثم أكّد تطبيقها.',
   'Table preview': 'معاينة الجدول',
   'Columns and units': 'الأعمدة والوحدات',
   'Validate and approve table': 'التحقق من الجدول والموافقة عليه',

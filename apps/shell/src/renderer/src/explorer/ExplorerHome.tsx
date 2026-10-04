@@ -1468,6 +1468,10 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
               <WorkspaceChat
                 folder={folder}
                 folderName={folder ? basename(folder) : 'Selected items'}
+                registeredRoots={roots.map((root) => root.path)}
+                onAddFolder={() => {
+                  void addRoot()
+                }}
                 scopePaths={selectedItems
                   .filter((item) => item.kind === 'file')
                   .map((item) => item.path)}

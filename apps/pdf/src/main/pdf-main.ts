@@ -13,7 +13,7 @@ import {
 import { readFile, writeFile } from 'node:fs/promises'
 import { userInfo } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
-import { BrowserWindow, WebContentsView, app, dialog, ipcMain, shell } from 'electron'
+import { BrowserWindow, WebContentsView, app, dialog, ipcMain, safeStorage, shell } from 'electron'
 import type { WebContents } from 'electron'
 import {
   buildPrintableHtml,
@@ -29,6 +29,13 @@ import {
   rendererUrl,
 } from '@genoffice/electron-utils'
 import { createI18n, getUiLang } from '@genoffice/i18n'
+import {
+  defaultAiSettings,
+  resolveAiSettings,
+  type AiSettings,
+  type LegacyAiSettings,
+} from '@genoffice/ai-provider'
+import { createAiSettingsStore } from '@genoffice/electron-utils/ai-settings-store'
 import { generateImageTool } from '@genoffice/ai-search'
 import { PDF_CHANNELS } from '../shared/ipc'
 import type {
@@ -88,6 +95,15 @@ import {
 } from './signature-store'
 import { uniqueGeneratedPdfPath } from './generated-output'
 import { validateRedactionRegions } from './redaction'
+
+const toolAiSettings = () =>
+  resolveAiSettings(
+    createAiSettingsStore(safeStorage).read<Partial<AiSettings> & LegacyAiSettings>(
+      join(app.getPath('userData'), 'ai-settings.json'),
+      {},
+    ),
+    defaultAiSettings(),
+  )
 
 const tDlg = createI18n({
   zh: {
@@ -1478,11 +1494,13 @@ function registerPdfIpc(): void {
   // slides' ai:generate-image is only registered once a slides view exists, so pdf needs its own
   ipcMain.handle(
     PDF_CHANNELS.generateImage,
-    (_e, op: { prompt?: unknown; aspectRatio?: unknown }) =>
-      { assertDirectoryStageCapability(_e.sender, 'media'); return generateImageTool(join(app.getPath('userData'), 'ai-settings.json'), {
+    (_e, op: { prompt?: unknown; aspectRatio?: unknown }) => {
+      assertDirectoryStageCapability(_e.sender, 'media')
+      return generateImageTool(toolAiSettings(), {
         prompt: String(op?.prompt ?? ''),
         aspectRatio: op?.aspectRatio ? String(op.aspectRatio) : undefined,
-      }) },
+      })
+    },
   )
 
   ipcMain.handle(PDF_CHANNELS.listSignatures, () => withSignatures(async (list) => list))

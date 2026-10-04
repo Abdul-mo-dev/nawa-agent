@@ -21,6 +21,7 @@ import {
   ipcMain,
   nativeImage,
   nativeTheme,
+  safeStorage,
   session,
   shell,
   webContents,
@@ -68,6 +69,14 @@ import {
   registerRendererScheme,
 } from '@genoffice/electron-utils'
 import { readAppSettings, writeAppSetting, writeAppSettings } from './app-settings'
+import { createAiSettingsStore } from '@genoffice/electron-utils/ai-settings-store'
+import {
+  activeProvider,
+  defaultAiSettings,
+  resolveAiSettings,
+  type AiSettings,
+  type LegacyAiSettings,
+} from '@genoffice/ai-provider'
 import { OPEN_DOCUMENTS_FILE, clearOpenDocuments, publishOpenDocuments } from './open-documents'
 import { startControlServer, type ControlServer } from './control-server'
 import { controlHandler } from './control-handlers'
@@ -309,8 +318,8 @@ import { isUpdateChannel, type UpdateChannel } from '../shared/update-api'
 // share the installed app's userData or single-instance lock — otherwise a dev
 // run silently quits and forwards its argv to the running installed Nawa.
 // GENOFFICE_USER_DATA: test drivers point this at a scratch dir so an
-// automated instance can run alongside the dev instance (separate lock).
-if (!app.isPackaged)
+// automated instance can run alongside the user's installed app (separate lock).
+if (process.env.GENOFFICE_USER_DATA || !app.isPackaged)
   app.setPath(
     'userData',
     process.env.GENOFFICE_USER_DATA ?? join(app.getPath('appData'), 'GenOffice Dev'),
@@ -323,13 +332,14 @@ if (!app.isPackaged)
  * headless flag before it registers anything.
  */
 const headlessArgv = parseHeadlessExportArgv(process.argv)
-if (headlessArgv.kind !== 'none') {
+const headlessAiSettings = process.argv.includes('--headless-ai-settings')
+if (headlessArgv.kind !== 'none' || headlessAiSettings) {
   setHeadlessMode(true)
   app.dock?.hide()
 }
 
 // The product rename from "AI Office" to Nawa changed the userData path; migrate old user data once
-if (app.isPackaged) {
+if (app.isPackaged && !process.env.GENOFFICE_USER_DATA) {
   const oldDir = join(app.getPath('appData'), 'AI Office')
   const newDir = app.getPath('userData')
   const newEmpty = !existsSync(newDir) || readdirSync(newDir).length === 0
@@ -3073,6 +3083,31 @@ async function runHeadlessExportEntry(
   app.exit(headlessExitCode(outcome))
 }
 
+/** One-shot local bridge for the CLI: the app decrypts its own OS-protected keys. */
+async function runHeadlessAiSettingsEntry(): Promise<void> {
+  let envelope: { status: 'ok'; settings: AiSettings } | { status: 'error'; error: string }
+  try {
+    const path = join(app.getPath('userData'), 'ai-settings.json')
+    const stored = createAiSettingsStore(safeStorage).read<Partial<AiSettings> & LegacyAiSettings>(
+      path,
+      {},
+    )
+    const settings = resolveAiSettings(stored, defaultAiSettings())
+    settings.provider = activeProvider(settings)
+    envelope = { status: 'ok', settings }
+  } catch (error) {
+    envelope = { status: 'error', error: error instanceof Error ? error.message : String(error) }
+  }
+  await new Promise<void>((resolve) => {
+    const bail = setTimeout(resolve, 2000)
+    process.stdout.write(JSON.stringify(envelope) + '\n', () => {
+      clearTimeout(bail)
+      resolve()
+    })
+  })
+  app.exit(envelope.status === 'ok' ? 0 : 3)
+}
+
 app.whenReady().then(async () => {
   installRendererProtocol({
     docs: join(DOCS_OUT, 'renderer'),
@@ -3082,6 +3117,10 @@ app.whenReady().then(async () => {
     markdown: join(MARKDOWN_OUT, 'renderer'),
     html: join(HTML_OUT, 'renderer'),
   })
+  if (headlessAiSettings) {
+    await runHeadlessAiSettingsEntry()
+    return
+  }
   if (headlessArgv.kind !== 'none') {
     await runHeadlessExportEntry(headlessArgv)
     return
@@ -3297,7 +3336,7 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => {
   // A headless export destroys its hidden window between documents; only
   // runHeadlessExportEntry decides when that run is over.
-  if (headlessArgv.kind !== 'none') return
+  if (headlessArgv.kind !== 'none' || headlessAiSettings) return
   if (process.platform !== 'darwin') app.quit()
 })
 

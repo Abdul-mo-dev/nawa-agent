@@ -74,8 +74,12 @@ if (winArm64 && !process.env.ELECTRON_BUILDER_7Z_FILTER) {
   process.env.ELECTRON_BUILDER_7Z_FILTER = 'BCJ'
 }
 const winArch = winArm64 ? 'arm64' : 'x64'
-const winSidecarTarget = winArm64 ? 'aarch64-pc-windows-msvc' : 'x86_64-pc-windows-gnu'
-const WIN_SIDECAR = `../sheets/native/xlsx-engine/target/${winSidecarTarget}/release/xlsx-sidecar.exe`
+const winSidecarTarget = winArm64 ? 'aarch64-pc-windows-msvc' : 'x86_64-pc-windows-msvc'
+// The standard sheets build uses the host MSVC target and writes target/release.
+// ARM64 is cross-compiled into its target-specific directory.
+const WIN_SIDECAR = winArm64
+  ? `../sheets/native/xlsx-engine/target/${winSidecarTarget}/release/xlsx-sidecar.exe`
+  : '../sheets/native/xlsx-engine/target/release/xlsx-sidecar.exe'
 
 // The gsk CLI tree below is copied verbatim from node_modules, and the
 // nested commander path depends on npm's current hoisting layout — fail the
@@ -479,9 +483,8 @@ const config = {
       },
     ],
   },
-  // Unlike win (which cross-compiles the sidecar to an explicit target
-  // triple), linux takes it from cargo's host-native target/release/ — the
-  // same source mac uses. So no `arch` is pinned here: electron-builder
+  // Linux takes the sidecar from cargo's host-native target/release/, as do
+  // macOS and Windows x64. No `arch` is pinned here: electron-builder
   // defaults to the build host's architecture, which is the only one the
   // sidecar was actually built for. Packaging arm64 on an x64 host, or the
   // reverse, needs a matching `cargo build --target` first.
@@ -576,7 +579,7 @@ const config = {
     }
     if (context.electronPlatformName === 'win32' && !existsSync(join(__dirname, WIN_SIDECAR))) {
       throw new Error(
-        `win extraResources source missing: ${WIN_SIDECAR} (cargo build --target ${winSidecarTarget} first)`,
+        `win extraResources source missing: ${WIN_SIDECAR} (run npm run native:build -w @genoffice/sheets first)`,
       )
     }
   },

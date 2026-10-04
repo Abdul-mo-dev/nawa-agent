@@ -20,6 +20,7 @@ import {
   ipcMain,
   net,
   protocol,
+  safeStorage,
   shell,
   webContents,
 } from 'electron'
@@ -40,6 +41,13 @@ import {
   rendererUrl,
 } from '@genoffice/electron-utils'
 import { createI18n, getUiLang } from '@genoffice/i18n'
+import {
+  defaultAiSettings,
+  resolveAiSettings,
+  type AiSettings,
+  type LegacyAiSettings,
+} from '@genoffice/ai-provider'
+import { createAiSettingsStore } from '@genoffice/electron-utils/ai-settings-store'
 import { generateImageTool } from '@genoffice/ai-search'
 import { parseFileToText } from '@genoffice/file-parse'
 import { convertHtmlToDocx } from '../../../../packages/html2docx/src'
@@ -88,6 +96,15 @@ import type {
   SaveHtmlResult,
   SaveMode,
 } from '../shared/ipc'
+
+const toolAiSettings = () =>
+  resolveAiSettings(
+    createAiSettingsStore(safeStorage).read<Partial<AiSettings> & LegacyAiSettings>(
+      join(app.getPath('userData'), 'ai-settings.json'),
+      {},
+    ),
+    defaultAiSettings(),
+  )
 
 const tDlg = createI18n({
   zh: {
@@ -1523,11 +1540,13 @@ function registerHtmlIpc(): void {
   // shell-registered, but image generation is gated per app
   ipcMain.handle(
     HTML_CHANNELS.aiGenerateImage,
-    (_e, op: { prompt?: unknown; aspectRatio?: unknown }) =>
-      { assertDirectoryStageCapability(_e.sender, 'media'); return generateImageTool(join(app.getPath('userData'), 'ai-settings.json'), {
+    (_e, op: { prompt?: unknown; aspectRatio?: unknown }) => {
+      assertDirectoryStageCapability(_e.sender, 'media')
+      return generateImageTool(toolAiSettings(), {
         prompt: String(op?.prompt ?? ''),
         aspectRatio: op?.aspectRatio ? String(op.aspectRatio) : undefined,
-      }) },
+      })
+    },
   )
 
   const MIME_BY_EXT: Record<string, ImageData['mime']> = {
@@ -1556,7 +1575,7 @@ function registerHtmlIpc(): void {
   // remote pictures (AI-generated or hot-linked) are downloaded here: the frame's fetch is
   // CORS-bound, and fetchRemoteImage refuses private/link-local targets
   ipcMain.handle(HTML_CHANNELS.fetchImage, async (_e, url: unknown): Promise<ImageData | null> => {
-      assertDirectoryStageCapability(_e.sender, 'network');
+    assertDirectoryStageCapability(_e.sender, 'network')
 
     if (typeof url !== 'string' || !/^https?:/i.test(url)) return null
     try {

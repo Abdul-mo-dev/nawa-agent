@@ -1,6 +1,6 @@
 /**
- * ai:web-search / ai:image-search for the editors' main processes: reads
- * ai-settings.json live and turns the search provider choice into
+ * ai:web-search / ai:image-search for the editors' main processes: accepts
+ * current main-process settings (or a CLI settings path) and turns the search provider choice into
  * SearchOptions — Genspark keeps the historic chain (gsk when signed in and
  * cloud tools are on, then env keys, then DuckDuckGo); a user Serper / Tavily
  * key runs first and skips gsk.
@@ -24,12 +24,28 @@ export function searchOptionsFromSettings(settings: AiSettings): SearchOptions {
     : { useGsk: false, serperKey: key }
 }
 
-export function webSearchTool(settingsPath: string, query: string, maxResults = 6) {
-  return webSearch(query, maxResults, searchOptionsFromSettings(readAiSettingsFile(settingsPath)))
+export function webSearchTool(settingsSource: string | AiSettings, query: string, maxResults = 6) {
+  return webSearch(
+    query,
+    maxResults,
+    searchOptionsFromSettings(
+      typeof settingsSource === 'string' ? readAiSettingsFile(settingsSource) : settingsSource,
+    ),
+  )
 }
 
-export function imageSearchTool(settingsPath: string, query: string, maxResults = 8) {
-  return imageSearch(query, maxResults, searchOptionsFromSettings(readAiSettingsFile(settingsPath)))
+export function imageSearchTool(
+  settingsSource: string | AiSettings,
+  query: string,
+  maxResults = 8,
+) {
+  return imageSearch(
+    query,
+    maxResults,
+    searchOptionsFromSettings(
+      typeof settingsSource === 'string' ? readAiSettingsFile(settingsSource) : settingsSource,
+    ),
+  )
 }
 
 /** settings-UI test: one minimal query against the given key must be answered by that backend */

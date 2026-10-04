@@ -8,7 +8,7 @@ import {
  * to avoid renderer CORS), search tools, and the slides-only ai:* channels
  * (image generation, media analysis, style templates).
  */
-import { app, ipcMain, nativeImage, net, shell } from 'electron'
+import { app, ipcMain, nativeImage, net, safeStorage, shell } from 'electron'
 import {
   appendFileSync,
   existsSync,
@@ -27,6 +27,9 @@ import {
   isAiOverloadedError,
   defaultAiSettings,
   activeProvider,
+  applyChatModel,
+  redactAiSettings,
+  restoreRedactedAiKeys,
   maxOutputTokensOf,
   resolveAiSettings,
   setAiUserAgent,
@@ -40,6 +43,8 @@ import {
 } from '@genoffice/ai-provider'
 import { shutdownCodexAppServers } from '@genoffice/ai-provider/codex-app-server'
 import { fetchRemoteImage } from '@genoffice/electron-utils'
+import { saveFileWithStagingSync } from '@genoffice/electron-utils/atomic-write'
+import { createAiSettingsStore } from '@genoffice/electron-utils/ai-settings-store'
 import {
   webSearchTool,
   imageSearchTool,
@@ -61,6 +66,15 @@ import { pushHistory, rebuildSlide, scheduleHistoryNotify, sessions } from './se
 // ---- AI settings + streaming proxy (the main process does the networking to avoid renderer CORS; implementation shared via @genoffice/ai-provider) ----
 
 const AI_SETTINGS_PATH = () => join(app.getPath('userData'), 'ai-settings.json')
+const aiSettingsStore = createAiSettingsStore(safeStorage)
+const readAiSettings = () =>
+  aiSettingsStore.read<Partial<AiSettings> & LegacyAiSettings>(AI_SETTINGS_PATH(), {})
+const toolAiSettings = () => resolveAiSettings(readAiSettings(), defaultAiSettings())
+const chatAiSettings = (selectedId?: string) => {
+  const settings = toolAiSettings()
+  settings.provider = activeProvider(settings)
+  return applyChatModel(settings, selectedId)
+}
 
 function readJson<T>(path: string, fallback: T): T {
   try {
@@ -73,7 +87,7 @@ function readJson<T>(path: string, fallback: T): T {
 
 function writeJson(path: string, value: unknown): void {
   mkdirSync(join(path, '..'), { recursive: true })
-  writeFileSync(path, JSON.stringify(value, null, 2))
+  saveFileWithStagingSync(path, JSON.stringify(value, null, 2))
 }
 
 const activeAiStreams = new Map<string, AbortController>()
@@ -112,11 +126,12 @@ export function registerAiIpc(): void {
   setAiUserAgent(`Nawa/${app.getVersion()}`)
 
   ipcMain.handle('ai:get-settings', (): AiSettings => {
-    const stored = readJson<Partial<AiSettings> & LegacyAiSettings>(AI_SETTINGS_PATH(), {})
+    const stored = readAiSettings()
     const settings = resolveAiSettings(stored, defaultAiSettings())
     // a stored BYOK provider is honored when usable; half-filled configs fall back to genspark
     settings.provider = activeProvider(settings)
-    return settings
+    settings.settingsRevision = aiSettingsStore.revision(AI_SETTINGS_PATH())
+    return redactAiSettings(settings)
   })
 
   // Genspark account (gsk login state): the auth source for AI features; when logged out the frontend uses this to guide login
@@ -135,7 +150,12 @@ export function registerAiIpc(): void {
   })
 
   ipcMain.handle('ai:set-settings', (_event, settings: AiSettings) => {
-    writeJson(AI_SETTINGS_PATH(), settings)
+    if (!settings?.settingsRevision) throw new Error('Reload AI settings before saving.')
+    aiSettingsStore.write(
+      AI_SETTINGS_PATH(),
+      restoreRedactedAiKeys(settings, toolAiSettings()),
+      settings.settingsRevision,
+    )
   })
 
   ipcMain.handle('ai:log-run-failure', (_event, entry: AiRunFailure) => {
@@ -143,7 +163,8 @@ export function registerAiIpc(): void {
   })
 
   ipcMain.handle('ai:stream', async (event, request: AiStreamRequest) => {
-    const { requestId, settings, system, messages } = request
+    const { requestId, system, messages } = request
+    const settings = chatAiSettings(request.settings?.selectedChatModelId)
     const tools = request.tools ?? []
     const maxTokens = request.maxTokens ?? maxOutputTokensOf(settings)
     const provider = settings.provider
@@ -231,7 +252,7 @@ export function registerAiIpc(): void {
 
     try {
       return await webSearchTool(
-        AI_SETTINGS_PATH(),
+        toolAiSettings(),
         String(query),
         typeof maxResults === 'number' ? maxResults : 6,
       )
@@ -245,7 +266,7 @@ export function registerAiIpc(): void {
 
     try {
       return await imageSearchTool(
-        AI_SETTINGS_PATH(),
+        toolAiSettings(),
         String(query),
         typeof maxResults === 'number' ? maxResults : 8,
       )
@@ -279,7 +300,7 @@ export function registerSlidesOnlyAiIpc(): void {
       assertDirectoryStageMedia(_event.sender, op.referenceImageUrls ?? [])
 
       return generateImageTool(
-        AI_SETTINGS_PATH(),
+        toolAiSettings(),
         {
           prompt: String(op.prompt),
           model: op.model ? String(op.model) : undefined,
@@ -302,7 +323,7 @@ export function registerSlidesOnlyAiIpc(): void {
       assertDirectoryStageMedia(_event.sender, op.mediaUrls ?? [])
 
       return analyzeMediaTool(
-        AI_SETTINGS_PATH(),
+        toolAiSettings(),
         {
           mediaUrls: (op.mediaUrls ?? []).map(String),
           requirements: String(op.requirements ?? ''),

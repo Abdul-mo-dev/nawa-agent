@@ -1,6 +1,6 @@
 /**
- * generate_image / analyze_media for the five editors' main processes: one
- * place that reads ai-settings.json live, routes to the BYOK media provider
+ * generate_image / analyze_media for the editors' main processes: one
+ * place that accepts protected settings loaded by the main process, routes to the BYOK media provider
  * when one is configured, and otherwise to the Genspark CLI behind the usual
  * login + cloud-tools gate. BYOK providers answer with bytes; those land in
  * the local generated-image store and come back as a file:// URL that the
@@ -24,6 +24,7 @@ import {
 import { readGeneratedImage, storeGeneratedImage } from '@genoffice/electron-utils/generated-images'
 import { fetchRemoteImage } from '@genoffice/electron-utils/remote-image'
 import { fetchWithSsrfGuard } from '@genoffice/electron-utils/safe-remote-url'
+import { withoutProtectedAiKeys } from '@genoffice/electron-utils/ai-settings-store'
 import { gskAnalyzeMedia, gskGenerateImage, hasGskAuth, type GskGenerateImageOptions } from './gsk'
 
 export const GSK_NOT_LOGGED_IN_ERROR =
@@ -65,7 +66,7 @@ export function readAiSettingsFile(path: string): AiSettings {
   } catch {
     /* corrupted settings file: defaults */
   }
-  return resolveAiSettings(stored, defaultAiSettings())
+  return resolveAiSettings(withoutProtectedAiKeys(stored), defaultAiSettings())
 }
 
 type Gate = { error: string } | null
@@ -148,13 +149,14 @@ export type GenerateImageToolOp = GskGenerateImageOptions & {
 }
 
 export async function generateImageTool(
-  settingsPath: string,
+  settingsSource: string | AiSettings,
   op: GenerateImageToolOp,
   options: MediaToolOptions = {},
 ): Promise<{ url?: string; error?: string }> {
   const prompt = String(op.prompt ?? '').trim()
   if (!prompt) return { error: 'prompt must not be empty' }
-  const settings = readAiSettingsFile(settingsPath)
+  const settings =
+    typeof settingsSource === 'string' ? readAiSettingsFile(settingsSource) : settingsSource
   const byok = activeMediaConfig(settings, 'image')
   try {
     if (!byok) {
@@ -188,7 +190,7 @@ export async function generateImageTool(
 }
 
 export async function analyzeMediaTool(
-  settingsPath: string,
+  settingsSource: string | AiSettings,
   op: { mediaUrls: string[]; requirements: string },
   options: MediaToolOptions = {},
 ): Promise<{ text?: string; error?: string }> {
@@ -196,7 +198,8 @@ export async function analyzeMediaTool(
   const requirements = String(op.requirements ?? '').trim()
   if (!mediaUrls.length) return { error: 'mediaUrls must not be empty' }
   if (!requirements) return { error: 'requirements must not be empty' }
-  const settings = readAiSettingsFile(settingsPath)
+  const settings =
+    typeof settingsSource === 'string' ? readAiSettingsFile(settingsSource) : settingsSource
   const imageByok = activeMediaConfig(settings, 'analysis')
   const videoByok = activeMediaConfig(settings, 'video')
   try {

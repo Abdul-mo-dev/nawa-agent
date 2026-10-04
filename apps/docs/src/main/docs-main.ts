@@ -1,4 +1,9 @@
-import { assertDirectoryStageCapability, assertDirectoryStageLocalRead } from '../../../../packages/electron-utils/src/directory-stage'
+import {
+  assertDirectoryStageCapability,
+  assertDirectoryStageLocalRead,
+} from '../../../../packages/electron-utils/src/directory-stage'
+import { saveFileWithStagingSync } from '@genoffice/electron-utils/atomic-write'
+import { createAiSettingsStore } from '@genoffice/electron-utils/ai-settings-store'
 import { createHash, randomUUID } from 'node:crypto'
 import { handOffBytes } from './byte-handoff'
 import {
@@ -36,6 +41,7 @@ import {
   nativeImage,
   net,
   shell,
+  safeStorage,
   webContents,
 } from 'electron'
 import {
@@ -84,6 +90,10 @@ import {
   chatForProvider,
   defaultAiSettings,
   activeProvider,
+  applyChatModel,
+  REDACTED_AI_KEY,
+  redactAiSettings,
+  restoreRedactedAiKeys,
   testMediaProvider,
   type AiMediaProviderConfig,
   type AiMediaProviderId,
@@ -2308,7 +2318,7 @@ function readJson<T>(path: string, fallback: T): T {
 
 function writeJson(path: string, value: unknown): void {
   mkdirSync(join(path, '..'), { recursive: true })
-  writeFileSync(path, JSON.stringify(value, null, 2))
+  saveFileWithStagingSync(path, JSON.stringify(value, null, 2))
 }
 
 // ---- recent files ----
@@ -2887,7 +2897,14 @@ export async function readWorkspaceFileText(
   filePath: string,
   maxChars: number,
   offset = 0,
-): Promise<{ ok: boolean; name?: string; text?: string; offset?: number; totalChars?: number; error?: string }> {
+): Promise<{
+  ok: boolean
+  name?: string
+  text?: string
+  offset?: number
+  totalChars?: number
+  error?: string
+}> {
   const name = basename(filePath)
   const ext = name.split('.').pop()?.toLowerCase() ?? ''
   if (!ATTACHMENT_EXTS.has(ext)) return { ok: false, error: `${name}: unsupported file type` }
@@ -2898,7 +2915,13 @@ export async function readWorkspaceFileText(
     const text = await extractAttachmentText(filePath)
     const size = Math.min(Math.max(1, Math.floor(maxChars) || 1), 48_000)
     const start = Math.min(Math.max(0, Math.floor(offset) || 0), text.length)
-    return { ok: true, name, offset: start, totalChars: text.length, text: text.slice(start, start + size) }
+    return {
+      ok: true,
+      name,
+      offset: start,
+      totalChars: text.length,
+      text: text.slice(start, start + size),
+    }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
@@ -2913,6 +2936,15 @@ const TWIPS_PER_INCH = 1440
 // implementations live in @genoffice/ai-provider, shared with apps/sheets.
 
 const SETTINGS_PATH = () => userDataPath('ai-settings.json')
+const aiSettingsStore = createAiSettingsStore(safeStorage)
+const readAiSettings = () =>
+  aiSettingsStore.read<Partial<AiSettings> & LegacyAiSettings>(SETTINGS_PATH(), {})
+const toolAiSettings = () => resolveAiSettings(readAiSettings(), defaultAiSettings())
+const chatAiSettings = (selectedId?: string) => {
+  const settings = toolAiSettings()
+  settings.provider = activeProvider(settings)
+  return applyChatModel(settings, selectedId)
+}
 
 const activeAiStreams = new Map<string, AbortController>()
 
@@ -2924,7 +2956,7 @@ const activeAiStreams = new Map<string, AbortController>()
 export function registerAiIpc(): void {
   app.once('before-quit', shutdownCodexAppServers)
   ipcMain.handle('ai:get-settings', (): AiSettings => {
-    const stored = readJson<Partial<AiSettings> & LegacyAiSettings>(SETTINGS_PATH(), {})
+    const stored = readAiSettings()
     // pre-lock legacy file: genspark selected with cloud tools opted out. The
     // settings UI locks the tools switch on with genspark and apps read this
     // file live, so heal the stored flag once. Judged on the *stored* provider
@@ -2932,12 +2964,13 @@ export function registerAiIpc(): void {
     // file and clobber a saved (half-configured) BYOK selection.
     if ((stored.provider ?? 'genspark') === 'genspark' && stored.gskToolsEnabled === false) {
       stored.gskToolsEnabled = true
-      writeJson(SETTINGS_PATH(), stored)
+      aiSettingsStore.write(SETTINGS_PATH(), stored)
     }
     const settings = resolveAiSettings(stored, defaultAiSettings())
     // a stored BYOK provider is honored when usable; half-filled configs fall back to genspark
     settings.provider = activeProvider(settings)
-    return settings
+    settings.settingsRevision = aiSettingsStore.revision(SETTINGS_PATH())
+    return redactAiSettings(settings)
   })
 
   // Genspark account (gsk login state): auth source for AI features; the frontend uses it to prompt login when logged out
@@ -2956,7 +2989,12 @@ export function registerAiIpc(): void {
   })
 
   ipcMain.handle('ai:set-settings', (_event, settings: AiSettings) => {
-    writeJson(SETTINGS_PATH(), settings)
+    if (!settings?.settingsRevision) throw new Error('Reload AI settings before saving.')
+    aiSettingsStore.write(
+      SETTINGS_PATH(),
+      restoreRedactedAiKeys(settings, toolAiSettings()),
+      settings.settingsRevision,
+    )
   })
 
   ipcMain.handle('ai:codex-models', async (_event, cliPath: unknown) => {
@@ -2964,7 +3002,8 @@ export function registerAiIpc(): void {
   })
 
   ipcMain.handle('ai:stream', async (event, request: AiStreamRequest) => {
-    const { requestId, settings, system, messages } = request
+    const { requestId, system, messages } = request
+    const settings = chatAiSettings(request.settings?.selectedChatModelId)
     const tools = request.tools ?? []
     const maxTokens = request.maxTokens ?? maxOutputTokensOf(settings)
     const provider = settings.provider
@@ -3042,11 +3081,11 @@ export function registerAiIpc(): void {
 
   // shared search tools (content + images): Serper with DuckDuckGo fallback (same source as slides/sheets)
   ipcMain.handle('ai:web-search', async (_event, query: string, maxResults?: number) => {
-      assertDirectoryStageCapability(_event.sender, 'network');
+    assertDirectoryStageCapability(_event.sender, 'network')
 
     try {
       return await webSearchTool(
-        SETTINGS_PATH(),
+        toolAiSettings(),
         String(query),
         typeof maxResults === 'number' ? maxResults : 6,
       )
@@ -3055,11 +3094,11 @@ export function registerAiIpc(): void {
     }
   })
   ipcMain.handle('ai:image-search', async (_event, query: string, maxResults?: number) => {
-      assertDirectoryStageCapability(_event.sender, 'network');
+    assertDirectoryStageCapability(_event.sender, 'network')
 
     try {
       return await imageSearchTool(
-        SETTINGS_PATH(),
+        toolAiSettings(),
         String(query),
         typeof maxResults === 'number' ? maxResults : 8,
       )
@@ -3074,7 +3113,7 @@ export function registerAiIpc(): void {
   ipcMain.handle(
     'docs:analyze-media',
     async (_event, op: { mediaUrls: string[]; requirements: string }) => {
-      assertDirectoryStageCapability(_event.sender, 'media');
+      assertDirectoryStageCapability(_event.sender, 'media')
 
       const mediaUrls = (op.mediaUrls ?? []).map(String).filter(Boolean)
       // a picture opened lazily from a large docx is only addressable by its main-process
@@ -3084,7 +3123,7 @@ export function registerAiIpc(): void {
         const lazy = await readLazyMedia(url).catch(() => null)
         resolved.push(lazy ? `data:${lazy.mime};base64,${lazy.body.toString('base64')}` : url)
       }
-      return analyzeMediaTool(SETTINGS_PATH(), {
+      return analyzeMediaTool(toolAiSettings(), {
         mediaUrls: resolved,
         requirements: String(op.requirements ?? ''),
       })
@@ -3095,7 +3134,7 @@ export function registerAiIpc(): void {
   ipcMain.handle(
     'ai:fetch-image',
     async (_event, url: string): Promise<{ base64: string; mime: string } | null> => {
-      assertDirectoryStageCapability(_event.sender, 'network');
+      assertDirectoryStageCapability(_event.sender, 'network')
 
       try {
         // the URL originates from AI tool calls (prompt-injectable via web search
@@ -3122,11 +3161,13 @@ export function registerAiIpc(): void {
   // registered once a slides view exists, so docs needs its own channel
   ipcMain.handle(
     'docs:ai-generate-image',
-    (_event, op: { prompt?: unknown; aspectRatio?: unknown }) =>
-      { assertDirectoryStageCapability(_event.sender, 'media'); return generateImageTool(SETTINGS_PATH(), {
+    (_event, op: { prompt?: unknown; aspectRatio?: unknown }) => {
+      assertDirectoryStageCapability(_event.sender, 'media')
+      return generateImageTool(toolAiSettings(), {
         prompt: String(op?.prompt ?? ''),
         aspectRatio: op?.aspectRatio ? String(op.aspectRatio) : undefined,
-      }) },
+      })
+    },
   )
 
   ipcMain.handle('ai:search-test', (_event, input: unknown) => {
@@ -3134,7 +3175,9 @@ export function registerAiIpc(): void {
     if (!provider || provider === 'genspark') {
       return hasGskAuth() ? { ok: true } : { ok: false, error: tm('errGskNotLoggedIn') }
     }
-    return testSearchProvider(provider, String(apiKey ?? ''))
+    const key =
+      apiKey === REDACTED_AI_KEY ? toolAiSettings().search?.providers[provider]?.apiKey : apiKey
+    return testSearchProvider(provider, String(key ?? ''))
   })
 
   // settings-UI connection test for the media provider (genspark = the gsk login state)
@@ -3147,11 +3190,16 @@ export function registerAiIpc(): void {
       return hasGskAuth() ? { ok: true } : { ok: false, error: tm('errGskNotLoggedIn') }
     }
     if (!config) return { ok: false, error: 'No media provider configuration' }
-    return testMediaProvider(provider, config)
+    const key =
+      config.apiKey === REDACTED_AI_KEY
+        ? (toolAiSettings().media?.providers[provider]?.apiKey ?? '')
+        : config.apiKey
+    return testMediaProvider(provider, { ...config, apiKey: key })
   })
 
   ipcMain.handle('ai:chat', async (_event, request: AiChatRequest) => {
-    const { settings, system, user } = request
+    const { system, user } = request
+    const settings = restoreRedactedAiKeys(request.settings, toolAiSettings())
     const provider = settings.provider
     let config = settings.providers?.[provider]
     if (provider === 'genspark' && config && !config.apiKey) {
@@ -3886,7 +3934,7 @@ export function registerDocsIpc(): void {
       offset: number,
       maxChars: number,
     ): Promise<AttachmentReadResult> => {
-      assertDirectoryStageLocalRead(_event.sender, filePath);
+      assertDirectoryStageLocalRead(_event.sender, filePath)
 
       const name = basename(filePath)
       const ext = name.split('.').pop()?.toLowerCase() ?? ''
@@ -3913,7 +3961,7 @@ export function registerDocsIpc(): void {
 
   // image attachments read raw bytes → base64; AiPanel puts them into the user message's images for multimodal
   ipcMain.handle('files:read-image', (_event, filePath: string): AttachmentImageResult => {
-      assertDirectoryStageLocalRead(_event.sender, filePath);
+    assertDirectoryStageLocalRead(_event.sender, filePath)
 
     const name = basename(filePath)
     const ext = name.split('.').pop()?.toLowerCase() ?? ''

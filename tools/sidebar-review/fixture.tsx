@@ -8,6 +8,8 @@ import { DEFAULT_RAG_SETTINGS } from '../../apps/shell/src/shared/rag-api'
 import { DEFAULT_ANALYTICS_SETTINGS } from '../../apps/shell/src/shared/analytics-api'
 import type { Dataset, TablePolicy } from '../../apps/shell/src/shared/analytics-api'
 import { snapshot as myAgentSnapshot } from '../../apps/shell/tests/fixtures/myagent-settings'
+import { redactAiSettings, restoreRedactedAiKeys } from '@genoffice/ai-provider/browser'
+import type { AiSettings } from '@genoffice/ai-provider'
 import '@genoffice/ui/tokens.css'
 import '@genoffice/ui/dropdown.css'
 import '../../apps/shell/src/renderer/src/home.css'
@@ -135,6 +137,9 @@ const state = {
   catalogCalls: 0,
   executionCalls: 0,
   commits: 0,
+  addFolderRequests: 0,
+  ragProgressCalls: 0,
+  analyticsProgressCalls: 0,
   catalogUnavailable: false,
   holdCapture: false,
   staleCitation: false,
@@ -157,110 +162,291 @@ let releaseModel: (() => void) | undefined
 let changeSelection: ((files: string[], directories: string[]) => void) | undefined
 const stream = async (request: any) => {
   state.requests.push(clone(request))
-  const emit = (chunk: any) => streamListeners.forEach(listener => listener({ ...chunk, requestId: request.requestId }))
-  const turn = (turns.get(request.sessionId) ?? 0) + 1; turns.set(request.sessionId, turn)
-  await new Promise(resolve => setTimeout(resolve, 50))
+  const emit = (chunk: any) =>
+    streamListeners.forEach((listener) => listener({ ...chunk, requestId: request.requestId }))
+  const turn = (turns.get(request.sessionId) ?? 0) + 1
+  turns.set(request.sessionId, turn)
+  await new Promise((resolve) => setTimeout(resolve, 50))
   if (request.system.includes('The user clicked Prepare & export.')) {
     const calls = [
       { name: 'prepare_data', input: {} },
       { name: 'discover_datasets', input: {} },
       { name: 'describe_dataset', input: { datasetId: 'table' } },
-      { name: 'propose_table_policy', input: { datasetId: 'table', expectedGeneration: 'draft-v1', policy: {} } },
+      {
+        name: 'propose_table_policy',
+        input: { datasetId: 'table', expectedGeneration: 'draft-v1', policy: {} },
+      },
       { name: 'describe_dataset', input: { datasetId: 'survey' } },
       { name: 'export_sqlite', input: {} },
     ]
-    if (calls[turn - 1]) emit({ type: 'tool-call', toolCall: { id: crypto.randomUUID(), ...calls[turn - 1] } })
-    else emit({ type: 'delta', text: 'SQLite export complete: 1 table exported, 99 rows; 1 table needs a header decision. Database: ' + folder + '\\\\Nawa table exports fixture\\\\tables.sqlite3' })
-    emit({ type: 'done' }); return
+    if (calls[turn - 1])
+      emit({ type: 'tool-call', toolCall: { id: crypto.randomUUID(), ...calls[turn - 1] } })
+    else
+      emit({
+        type: 'delta',
+        text:
+          'SQLite export complete: 1 table exported, 99 rows; 1 table needs a header decision. Database: ' +
+          folder +
+          '\\\\Nawa table exports fixture\\\\tables.sqlite3',
+      })
+    emit({ type: 'done' })
+    return
   }
-  if (state.scenario === 'connection-error') { emit({ type: 'error', error: 'Fixture provider unavailable' }); return }
-  if (state.scenario === 'cutoff') { emit({ type: 'delta', text: 'This answer stopped midway.' }); emit({ type: 'done', stopReason: 'max_tokens' }); return }
+  if (state.scenario === 'connection-error') {
+    emit({ type: 'error', error: 'Fixture provider unavailable' })
+    return
+  }
+  if (state.scenario === 'cutoff') {
+    emit({ type: 'delta', text: 'This answer stopped midway.' })
+    emit({ type: 'done', stopReason: 'max_tokens' })
+    return
+  }
   if (['scope-read', 'scope-list'].includes(state.scenario)) {
     if (turn === 1) {
       if (state.scenario === 'scope-read') {
         emit({ type: 'delta', text: 'Checking the request selection. ' })
-        await new Promise<void>(resolve => { releaseModel = resolve })
+        await new Promise<void>((resolve) => {
+          releaseModel = resolve
+        })
       }
-      emit({ type: 'tool-call', toolCall: { id: crypto.randomUUID(), name: 'list_files', input: {} } })
+      emit({
+        type: 'tool-call',
+        toolCall: { id: crypto.randomUUID(), name: 'list_files', input: {} },
+      })
     } else {
-      const result = request.messages.filter((m: any) => m.role === 'tool').flatMap((m: any) => m.results).at(-1)
-      emit({ type: 'delta', text: 'Request selection: ' + JSON.parse(result.output).selectedFiles.join(', ') })
+      const result = request.messages
+        .filter((m: any) => m.role === 'tool')
+        .flatMap((m: any) => m.results)
+        .at(-1)
+      emit({
+        type: 'delta',
+        text: 'Request selection: ' + JSON.parse(result.output).selectedFiles.join(', '),
+      })
     }
-    emit({ type: 'done' }); return
+    emit({ type: 'done' })
+    return
   }
   if (state.scenario.startsWith('fs-')) {
     const actions: Record<string, any> = {
-      'fs-copy': { name: 'copy_file', input: { path: source.path, directory: '.', name: 'revenue-copy.xlsx', reason: 'Keep a duplicate' } },
-      'fs-rename': { name: 'rename_file', input: { path: source.path, name: 'renamed.xlsx', reason: 'Rename workbook' } },
-      'fs-rename-original': { name: 'rename_file', input: { path: folder + '\\Untitled.docx', name: 'test.docs', reason: 'Rename the selected document' } },
-      'fs-move': { name: 'move_file', input: { path: source.path, directory: folder + '\\Archive', reason: 'Archive workbook' } },
-      'fs-mkdir': { name: 'create_folder', input: { directory: '.', name: 'New folder', reason: 'Organize files' } },
-      'fs-trash-folder': { name: 'delete_folder', input: { path: folder + '\\Archive', reason: 'Remove archive' } },
-      'fs-permanent-folder': { name: 'delete_folder', input: { path: folder + '\\Archive', reason: 'Permanently remove archive', permanent: true } },
-      'fs-permanent-file': { name: 'permanently_delete_file', input: { path: source.path, reason: 'Permanently delete workbook' } },
+      'fs-copy': {
+        name: 'copy_file',
+        input: {
+          path: source.path,
+          directory: '.',
+          name: 'revenue-copy.xlsx',
+          reason: 'Keep a duplicate',
+        },
+      },
+      'fs-rename': {
+        name: 'rename_file',
+        input: { path: source.path, name: 'renamed.xlsx', reason: 'Rename workbook' },
+      },
+      'fs-rename-original': {
+        name: 'rename_file',
+        input: {
+          path: folder + '\\Untitled.docx',
+          name: 'test.docs',
+          reason: 'Rename the selected document',
+        },
+      },
+      'fs-move': {
+        name: 'move_file',
+        input: { path: source.path, directory: folder + '\\Archive', reason: 'Archive workbook' },
+      },
+      'fs-mkdir': {
+        name: 'create_folder',
+        input: { directory: '.', name: 'New folder', reason: 'Organize files' },
+      },
+      'fs-trash-folder': {
+        name: 'delete_folder',
+        input: { path: folder + '\\Archive', reason: 'Remove archive' },
+      },
+      'fs-permanent-folder': {
+        name: 'delete_folder',
+        input: {
+          path: folder + '\\Archive',
+          reason: 'Permanently remove archive',
+          permanent: true,
+        },
+      },
+      'fs-permanent-file': {
+        name: 'permanently_delete_file',
+        input: { path: source.path, reason: 'Permanently delete workbook' },
+      },
     }
-    if (turn === 1) emit({ type: 'tool-call', toolCall: { id: crypto.randomUUID(), ...actions[state.scenario] } })
-    else emit({ type: 'delta', text: JSON.stringify(request.messages).includes('declined') ? 'The action was declined.' : 'The requested action completed.' })
-    emit({ type: 'done' }); return
+    if (turn === 1)
+      emit({ type: 'tool-call', toolCall: { id: crypto.randomUUID(), ...actions[state.scenario] } })
+    else
+      emit({
+        type: 'delta',
+        text: JSON.stringify(request.messages).includes('declined')
+          ? 'The action was declined.'
+          : 'The requested action completed.',
+      })
+    emit({ type: 'done' })
+    return
   }
   if (state.scenario.startsWith('overview')) {
-    if (state.scenario === 'overview-missing' && turn <= 2) emit({ type: 'tool-call', toolCall: {
-      id: crypto.randomUUID(), name: turn === 1 ? 'discover_file_tools' : 'inspect_file', input: turn === 1 ? { capability: 'reading' } : { path: surveySource.path },
-    } })
+    if (state.scenario === 'overview-missing' && turn <= 2)
+      emit({
+        type: 'tool-call',
+        toolCall: {
+          id: crypto.randomUUID(),
+          name: turn === 1 ? 'discover_file_tools' : 'inspect_file',
+          input: turn === 1 ? { capability: 'reading' } : { path: surveySource.path },
+        },
+      })
     else {
       const citation = JSON.stringify(request.messages).match(/RAG:[a-z\d-]+/i)?.[0]
-      emit({ type: 'delta', text: state.scenario === 'overview-missing' ? 'The saved workbook contains questions about safety and neighbors.'
-        : `The indexed sheets Survey 1 and Survey 2 contain questions about safety and neighbor interaction. [Survey source](${citation})` })
+      emit({
+        type: 'delta',
+        text:
+          state.scenario === 'overview-missing'
+            ? 'The saved workbook contains questions about safety and neighbors.'
+            : `The indexed sheets Survey 1 and Survey 2 contain questions about safety and neighbor interaction. [Survey source](${citation})`,
+      })
     }
-    emit({ type: 'done' }); return
+    emit({ type: 'done' })
+    return
   }
   if (['listing', 'count', 'citation', 'intermediate-failure'].includes(state.scenario)) {
     if (turn === 1) {
-      if (state.scenario === 'intermediate-failure') emit({ type: 'delta', text: 'Unverified intermediate claim.' })
-      emit({ type: 'tool-call', toolCall: { id: crypto.randomUUID(), name: state.scenario === 'listing' ? 'list_directory' : 'spreadsheet_query_sql',
-        input: state.scenario === 'listing' ? { path: '.' } : { sql: 'SELECT COUNT(*) FROM revenue', _nawaFiles: [folder + '\\revenue.xlsx'] } } })
+      if (state.scenario === 'intermediate-failure')
+        emit({ type: 'delta', text: 'Unverified intermediate claim.' })
+      emit({
+        type: 'tool-call',
+        toolCall: {
+          id: crypto.randomUUID(),
+          name: state.scenario === 'listing' ? 'list_directory' : 'spreadsheet_query_sql',
+          input:
+            state.scenario === 'listing'
+              ? { path: '.' }
+              : { sql: 'SELECT COUNT(*) FROM revenue', _nawaFiles: [folder + '\\revenue.xlsx'] },
+        },
+      })
     } else {
-      if (state.scenario === 'intermediate-failure') { emit({ type: 'error', error: 'Fixture failed after commentary' }); return }
-      const tools = request.messages.filter((message: any) => message.role === 'tool').flatMap((message: any) => message.results)
+      if (state.scenario === 'intermediate-failure') {
+        emit({ type: 'error', error: 'Fixture failed after commentary' })
+        return
+      }
+      const tools = request.messages
+        .filter((message: any) => message.role === 'tool')
+        .flatMap((message: any) => message.results)
       const result = tools.length ? JSON.parse(tools.at(-1).output) : {}
-      emit({ type: 'delta', text: state.scenario === 'listing' ? 'revenue.xlsx' : state.scenario === 'citation'
-        ? `The count is 99. [Source](${result.citations[0].id}) [Unregistered](RAG:unknown)` : 'The workbook contains 99 data rows.' })
+      emit({
+        type: 'delta',
+        text:
+          state.scenario === 'listing'
+            ? 'revenue.xlsx'
+            : state.scenario === 'citation'
+              ? `The count is 99. [Source](${result.citations[0].id}) [Unregistered](RAG:unknown)`
+              : 'The workbook contains 99 data rows.',
+      })
     }
-    emit({ type: 'done' }); return
+    emit({ type: 'done' })
+    return
   }
   const native = request.system.includes('editing a private staging copy')
-  if (native && turn === 1) emit({ type: 'tool-call', toolCall: { id: crypto.randomUUID(), name: 'native_format', input: { range: 'A1:B4' } } })
-  else if (!native && state.scenario === 'edit' && turn === 1) emit({ type: 'tool-call', toolCall: { id: crypto.randomUUID(), name: 'update_file', input: { path: folder + '\\revenue.xlsx', instruction: 'Format the revenue table' } } })
+  if (native && turn === 1)
+    emit({
+      type: 'tool-call',
+      toolCall: { id: crypto.randomUUID(), name: 'native_format', input: { range: 'A1:B4' } },
+    })
+  else if (!native && state.scenario === 'edit' && turn === 1)
+    emit({
+      type: 'tool-call',
+      toolCall: {
+        id: crypto.randomUUID(),
+        name: 'update_file',
+        input: { path: folder + '\\revenue.xlsx', instruction: 'Format the revenue table' },
+      },
+    })
   else if (!native && state.scenario !== 'edit' && turn === 1) {
-    for (let i = 0; i < 2; i++) emit({ type: 'tool-call', toolCall: { id: crypto.randomUUID(), name: 'discover_knowledge_tools', input: { scope: 'selected', query: 'spreadsheet' } } })
-  } else if (!native && state.scenario !== 'edit' && turn === 2) emit({ type: 'tool-call', toolCall: { id: crypto.randomUUID(), name: 'use_knowledge_tool', input: { tool: 'spreadsheet_query_sql', paths: [folder + '\\revenue.xlsx'], arguments: { sql: 'SELECT COUNT(*) FROM revenue' } } } })
+    for (let i = 0; i < 2; i++)
+      emit({
+        type: 'tool-call',
+        toolCall: {
+          id: crypto.randomUUID(),
+          name: 'discover_knowledge_tools',
+          input: { scope: 'selected', query: 'spreadsheet' },
+        },
+      })
+  } else if (!native && state.scenario !== 'edit' && turn === 2)
+    emit({
+      type: 'tool-call',
+      toolCall: {
+        id: crypto.randomUUID(),
+        name: 'use_knowledge_tool',
+        input: {
+          tool: 'spreadsheet_query_sql',
+          paths: [folder + '\\revenue.xlsx'],
+          arguments: { sql: 'SELECT COUNT(*) FROM revenue' },
+        },
+      },
+    })
   else {
     const declined = JSON.stringify(request.messages).includes('user declined')
-    const text = native ? 'Formatting is ready for review.' : state.scenario === 'edit' ? declined ? 'No changes were saved.' : 'The approved changes were saved.' : state.scenario === 'fail' ? 'The file needs a refresh before I can calculate the total.' : 'The selected table contains **99 rows**.'
+    const text = native
+      ? 'Formatting is ready for review.'
+      : state.scenario === 'edit'
+        ? declined
+          ? 'No changes were saved.'
+          : 'The approved changes were saved.'
+        : state.scenario === 'fail'
+          ? 'The file needs a refresh before I can calculate the total.'
+          : 'The selected table contains **99 rows**.'
     for (const character of text) emit({ type: 'delta', text: character })
   }
   emit({ type: 'done' })
 }
-const source = { path: folder + '\\revenue.xlsx', server: 'http://127.0.0.1:5187', documentId: 'doc', contentHash: 'a'.repeat(64), indexRevision: 'v1', datasetRevision: 'table-v1' }
+const source = {
+  path: folder + '\\revenue.xlsx',
+  server: 'http://127.0.0.1:5187',
+  documentId: 'doc',
+  contentHash: 'a'.repeat(64),
+  indexRevision: 'v1',
+  datasetRevision: 'table-v1',
+}
 const surveySource = { ...source, path: folder + '\\Survey data.xlsx', documentId: 'survey' }
-const definition = { name: 'spreadsheet_query_sql', description: 'Query the selected workbook', inputSchema: { type: 'object', properties: { sql: { type: 'string' } }, required: ['sql'] } }
+const definition = {
+  name: 'spreadsheet_query_sql',
+  description: 'Query the selected workbook',
+  inputSchema: { type: 'object', properties: { sql: { type: 'string' } }, required: ['sql'] },
+}
 let proposal: any
 Object.assign(window, {
   sidebarFixture: {
     state,
+    settings: () => clone(settings),
     analyticsSettings: () => clone(analytics),
+    externalModelChange: (model: string) => {
+      settings = {
+        ...settings,
+        providers: { ...settings.providers, custom: { ...settings.providers.custom, model } },
+      }
+    },
     release: () => releaseTool?.(),
     releaseCapture: () => releaseCapture?.(),
     releaseModel: () => releaseModel?.(),
     select: (files: string[], directories: string[] = []) => changeSelection?.(files, directories),
-    restoreSelection: () => changeSelection?.([source.path, surveySource.path], [folder + '\\Archive']),
+    restoreSelection: () =>
+      changeSelection?.([source.path, surveySource.path], [folder + '\\Archive']),
     messages: () => clone(record.messages),
     refresh: () => {
       dataset.generation = 'v2'
       callbacks.forEach((fn) => fn())
     },
     preparePolicy: () => {
-      preparedPolicy = { policy: { ...clone(dataset.policy) as TablePolicy, grain: 'One invoice', confirmed: false }, validatedRows: 99, excludedRows: 1, createdAt: now }
+      preparedPolicy = {
+        policy: {
+          ...(clone(dataset.policy) as TablePolicy),
+          grain: 'One invoice',
+          confirmed: false,
+        },
+        validatedRows: 99,
+        excludedRows: 1,
+        createdAt: now,
+      }
       callbacks.forEach((fn) => fn())
     },
     approvePolicy: () => {
@@ -275,92 +461,302 @@ Object.assign(window, {
     },
   },
   aiOffice: {
-    revealPath: async (path: string) => { state.revealedPaths.push(path) },
-    listWorkspaceFolder: async () => ({ files: [{ name: 'revenue.xlsx', path: source.path, sizeBytes: 2048 }], folders: [] }),
+    revealPath: async (path: string) => {
+      state.revealedPaths.push(path)
+    },
+    listWorkspaceFolder: async () => ({
+      files: [{ name: 'revenue.xlsx', path: source.path, sizeBytes: 2048 }],
+      folders: [],
+    }),
     getAiProviders: () => [
       { id: 'custom', label: 'Custom provider', defaultModel: '', models: [], needsBaseUrl: true },
     ],
     getAiSettings: async () => {
       if (state.failLoad) throw new Error('Could not load model settings')
-      return clone(settings)
+      return redactAiSettings(settings as unknown as AiSettings)
     },
     setAiSettings: async (value: typeof settings) => {
       if (state.failSave) throw new Error('Could not save model settings')
-      settings = clone(value)
+      settings = restoreRedactedAiKeys(
+        value as unknown as AiSettings,
+        settings as unknown as AiSettings,
+      ) as typeof settings
       state.saved++
     },
     testAiSettings: async () => ({ ok: true }),
     setLanguage: async () => {},
-    onAiStreamChunk: (listener: (chunk: any) => void) => { streamListeners.add(listener); return () => streamListeners.delete(listener) },
+    onAiStreamChunk: (listener: (chunk: any) => void) => {
+      streamListeners.add(listener)
+      return () => streamListeners.delete(listener)
+    },
     aiStream: stream,
-    aiStreamCancel: async () => { state.streamCancels++ },
+    aiStreamCancel: async () => {
+      state.streamCancels++
+    },
   },
   nawaDirectory: {
     analytics: async (_run: string, action: string, payload: any) => {
-      if (action === 'prepare') return { preparation: { draftsPrepared: 2, existingDrafts: 0, draftTables: 2, readyTables: 0, issues: [] }, datasets: [] }
-      if (action === 'discover') return { datasets: [{ id: 'table', generation: agentApproved ? 'agent-v1' : 'draft-v1', name: 'Revenue', status: agentApproved ? 'ready' : 'needs-review' }, { id: 'survey', generation: 'survey-v1', name: 'Survey', status: 'needs-review' }], nextOffset: null, nextFileOffset: null }
-      if (action === 'describe') return { ...clone(dataset), id: payload.datasetId, generation: payload.datasetId === 'table' ? 'draft-v1' : 'survey-v1', totalColumns: dataset.policy.columns.length, nextColumnOffset: null }
-      if (action === 'propose-policy') { agentApproved = true; return { datasetId: 'table', generation: 'agent-v1', approved: true, status: 'ready' } }
+      if (action === 'prepare')
+        return {
+          preparation: {
+            draftsPrepared: 2,
+            existingDrafts: 0,
+            draftTables: 2,
+            readyTables: 0,
+            issues: [],
+          },
+          datasets: [],
+        }
+      if (action === 'discover')
+        return {
+          datasets: [
+            {
+              id: 'table',
+              generation: agentApproved ? 'agent-v1' : 'draft-v1',
+              name: 'Revenue',
+              status: agentApproved ? 'ready' : 'needs-review',
+            },
+            { id: 'survey', generation: 'survey-v1', name: 'Survey', status: 'needs-review' },
+          ],
+          nextOffset: null,
+          nextFileOffset: null,
+        }
+      if (action === 'describe')
+        return {
+          ...clone(dataset),
+          id: payload.datasetId,
+          generation: payload.datasetId === 'table' ? 'draft-v1' : 'survey-v1',
+          totalColumns: dataset.policy.columns.length,
+          nextColumnOffset: null,
+        }
+      if (action === 'propose-policy') {
+        agentApproved = true
+        return { datasetId: 'table', generation: 'agent-v1', approved: true, status: 'ready' }
+      }
       if (action === 'export-sqlite') {
         const scope = state.beginScopes.at(-1)
         if (!scope.prepareTables) throw new Error('Export not authorized.')
         state.exportRequests.push({ paths: clone(scope.files), folder: scope.opened })
-        return { exportDirectory: folder + '\\\\Nawa table exports fixture', databasePath: folder + '\\\\Nawa table exports fixture\\\\tables.sqlite3', manifestPath: folder + '\\\\Nawa table exports fixture\\\\manifest.json',
-          exports: [{ datasetId: 'table', sourcePath: source.path, name: 'Revenue', sheet: 'Revenue', generation: 'agent-v1', sourceHash: source.contentHash, fileName: 'tables.sqlite3', sqlTable: 'at_fixture', rows: 99 }],
-          preparation: { readyTables: 1, draftTables: 1, issues: [{ datasetId: 'survey', reason: 'An unnamed column needs clarification.' }] }, sources: [] }
+        return {
+          exportDirectory: folder + '\\\\Nawa table exports fixture',
+          databasePath: folder + '\\\\Nawa table exports fixture\\\\tables.sqlite3',
+          manifestPath: folder + '\\\\Nawa table exports fixture\\\\manifest.json',
+          exports: [
+            {
+              datasetId: 'table',
+              sourcePath: source.path,
+              name: 'Revenue',
+              sheet: 'Revenue',
+              generation: 'agent-v1',
+              sourceHash: source.contentHash,
+              fileName: 'tables.sqlite3',
+              sqlTable: 'at_fixture',
+              rows: 99,
+            },
+          ],
+          preparation: {
+            readyTables: 1,
+            draftTables: 1,
+            issues: [{ datasetId: 'survey', reason: 'An unnamed column needs clarification.' }],
+          },
+          sources: [],
+        }
       }
       throw new Error('Unexpected fixture analytics action: ' + action)
     },
-    begin: async (scope: any) => { const id = crypto.randomUUID(); state.beginScopes.push(clone(scope)); runSources.set(id, new Map()); return id }, cancel: async (id: string) => { state.cancelledRuns.push(id); runSources.delete(id) }, verifyInspections: async () => null,
+    begin: async (scope: any) => {
+      const id = crypto.randomUUID()
+      state.beginScopes.push(clone(scope))
+      runSources.set(id, new Map())
+      return id
+    },
+    cancel: async (id: string) => {
+      state.cancelledRuns.push(id)
+      runSources.delete(id)
+    },
+    verifyInspections: async () => null,
     validateEvidence: async (run: string) => {
-      if (state.scenario === 'overview-changed') throw new Error('Survey source changed during the answer.')
+      if (state.scenario === 'overview-changed')
+        throw new Error('Survey source changed during the answer.')
       const sources = [...(runSources.get(run)?.values() ?? [])]
-      return { evidence: sources.map(value => ({ path: value.path, hash: value.contentHash, myAgent: value })), sourceCount: sources.length, durationMs: 2, httpRequests: sources.length ? 1 : 0 }
+      return {
+        evidence: sources.map((value) => ({
+          path: value.path,
+          hash: value.contentHash,
+          myAgent: value,
+        })),
+        sourceCount: sources.length,
+        durationMs: 2,
+        httpRequests: sources.length ? 1 : 0,
+      }
     },
     restoreEvidence: async (_run: string, requests: any[]) => {
       if (state.rejectHistory) return []
-      for (const request of requests) for (const value of request.evidence) if (value.myAgent) runSources.get(_run)?.set(value.path, value.myAgent)
-      return requests.map(request => request.id)
+      for (const request of requests)
+        for (const value of request.evidence)
+          if (value.myAgent) runSources.get(_run)?.set(value.path, value.myAgent)
+      return requests.map((request) => request.id)
     },
     inspect: async (run: string, path: string) => {
       runSources.get(run)?.set(path, surveySource)
-      return { id: 'inspection', path, sourceHash: source.contentHash, kind: 'sheets', systemPrompt: 'Read only', context: 'Survey 1: safety and neighbor interaction questions.', tools: [] }
+      return {
+        id: 'inspection',
+        path,
+        sourceHash: source.contentHash,
+        kind: 'sheets',
+        systemPrompt: 'Read only',
+        context: 'Survey 1: safety and neighbor interaction questions.',
+        tools: [],
+      }
     },
     checkCitation: async () => !state.staleCitation,
     myAgentTools: async (_run: string, action: string, payload: any) => {
       state.toolRequests.push({ action, payload: clone(payload) })
       if (action === 'catalog') {
-        if (state.holdCapture) await new Promise<void>(resolve => { releaseCapture = resolve })
+        if (state.holdCapture)
+          await new Promise<void>((resolve) => {
+            releaseCapture = resolve
+          })
         state.catalogCalls++
-        if (state.catalogUnavailable) throw new Error('MyAgent tool API not found (HTTP 404). Rebuild and restart MyAgent.')
-        const definitions = state.scenario === 'count' || state.scenario.startsWith('overview') ? [definition, { name: 'spreadsheet_catalog_search', description: 'Dataset catalog', inputSchema: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'number' } } } }] : [definition]
-        if (state.scenario.startsWith('overview')) definitions.push({ name: 'spreadsheet_describe_dataset', description: 'Describe dataset', inputSchema: { type: 'object', properties: { datasetId: { type: 'string' } } } } as any)
-        return { available: true, tools: definitions, initialTools: payload.initial ? definitions : [], total: definitions.length, nextOffset: null,
-          sources: [], files: [{ path: source.path, status: 'unchecked', documentId: 'doc' }], warnings: [], diagnostics: { httpRequests: 1, durationMs: 2 } }
+        if (state.catalogUnavailable)
+          throw new Error('MyAgent tool API not found (HTTP 404). Rebuild and restart MyAgent.')
+        const definitions =
+          state.scenario === 'count' || state.scenario.startsWith('overview')
+            ? [
+                definition,
+                {
+                  name: 'spreadsheet_catalog_search',
+                  description: 'Dataset catalog',
+                  inputSchema: {
+                    type: 'object',
+                    properties: { query: { type: 'string' }, limit: { type: 'number' } },
+                  },
+                },
+              ]
+            : [definition]
+        if (state.scenario.startsWith('overview'))
+          definitions.push({
+            name: 'spreadsheet_describe_dataset',
+            description: 'Describe dataset',
+            inputSchema: { type: 'object', properties: { datasetId: { type: 'string' } } },
+          } as any)
+        return {
+          available: true,
+          tools: definitions,
+          initialTools: payload.initial ? definitions : [],
+          total: definitions.length,
+          nextOffset: null,
+          sources: [],
+          files: [{ path: source.path, status: 'unchecked', documentId: 'doc' }],
+          warnings: [],
+          diagnostics: { httpRequests: 1, durationMs: 2 },
+        }
       }
       state.executionCalls++
-      if (state.scenario === 'slow') await new Promise<void>(resolve => { releaseTool = resolve })
+      if (state.scenario === 'slow')
+        await new Promise<void>((resolve) => {
+          releaseTool = resolve
+        })
       const target = payload.paths?.[0] === surveySource.path ? surveySource : source
       runSources.get(_run)?.set(target.path, target)
-      const datasets = state.scenario === 'overview-missing' ? [] : target === surveySource
-        ? [1, 2].map(n => ({ Id: `survey-${n}`, SqlObjectName: `survey_sql_${n}`, DisplayName: `Logical survey ${n}`, SheetNames: [`Survey ${n}`], ColumnNames: ['Safety perception', 'Neighbor interaction'], ColumnCount: 2, SchemaSignature: 'Large repeated schema '.repeat(1000) }))
-        : [{ Id: 'table', SqlObjectName: 'revenue', RowCount: 99, ColumnNames: ['id', 'amount'] }]
-      return { tool: payload.tool, succeeded: state.scenario !== 'fail', sources: [target], warnings: [],
-        content: state.scenario === 'fail' ? '' : payload.tool === 'spreadsheet_catalog_search' ? JSON.stringify({ datasets }) : JSON.stringify({ rows: [{ count: 99 }], apiKey: 'fixture-secret-must-be-redacted' }),
-        error: state.scenario === 'fail' ? 'revenue.xlsx needs indexing/refresh.' : null }
+      const datasets =
+        state.scenario === 'overview-missing'
+          ? []
+          : target === surveySource
+            ? [1, 2].map((n) => ({
+                Id: `survey-${n}`,
+                SqlObjectName: `survey_sql_${n}`,
+                DisplayName: `Logical survey ${n}`,
+                SheetNames: [`Survey ${n}`],
+                ColumnNames: ['Safety perception', 'Neighbor interaction'],
+                ColumnCount: 2,
+                SchemaSignature: 'Large repeated schema '.repeat(1000),
+              }))
+            : [
+                {
+                  Id: 'table',
+                  SqlObjectName: 'revenue',
+                  RowCount: 99,
+                  ColumnNames: ['id', 'amount'],
+                },
+              ]
+      return {
+        tool: payload.tool,
+        succeeded: state.scenario !== 'fail',
+        sources: [target],
+        warnings: [],
+        content:
+          state.scenario === 'fail'
+            ? ''
+            : payload.tool === 'spreadsheet_catalog_search'
+              ? JSON.stringify({ datasets })
+              : JSON.stringify({
+                  rows: [{ count: 99 }],
+                  apiKey: 'fixture-secret-must-be-redacted',
+                }),
+        error: state.scenario === 'fail' ? 'revenue.xlsx needs indexing/refresh.' : null,
+      }
     },
-    propose: async (_run: string, input: any) => { proposal = { ...input, id: crypto.randomUUID(), run: _run, ...(input.operation === 'delete-folder' ? { inventory: { files: 2, folders: 1, bytes: 5120, entries: ['Archive/', 'old.xlsx', 'notes.txt'] } } : {}) }; return proposal },
-    prepare: async () => state.scenario.startsWith('fs-') ? null : ({ kind: 'sheets', systemPrompt: 'Fixture native editor.', context: 'Selected staged workbook.', tools: [{ name: 'native_format', description: 'Format workbook', inputSchema: { type: 'object', properties: { range: { type: 'string' } } } }] }),
-    execute: async () => ({ output: 'Formatted 8 cells', summary: 'Formatted the revenue table', mutated: true }),
+    propose: async (_run: string, input: any) => {
+      proposal = {
+        ...input,
+        id: crypto.randomUUID(),
+        run: _run,
+        ...(input.operation === 'delete-folder'
+          ? {
+              inventory: {
+                files: 2,
+                folders: 1,
+                bytes: 5120,
+                entries: ['Archive/', 'old.xlsx', 'notes.txt'],
+              },
+            }
+          : {}),
+      }
+      return proposal
+    },
+    prepare: async () =>
+      state.scenario.startsWith('fs-')
+        ? null
+        : {
+            kind: 'sheets',
+            systemPrompt: 'Fixture native editor.',
+            context: 'Selected staged workbook.',
+            tools: [
+              {
+                name: 'native_format',
+                description: 'Format workbook',
+                inputSchema: { type: 'object', properties: { range: { type: 'string' } } },
+              },
+            ],
+          },
+    execute: async () => ({
+      output: 'Formatted 8 cells',
+      summary: 'Formatted the revenue table',
+      mutated: true,
+    }),
     verify: async () => null,
-    preview: async () => ({ ...proposal, bytes: 2048, beforeText: 'Before formatting', afterText: 'After formatting' }),
+    preview: async () => ({
+      ...proposal,
+      bytes: 2048,
+      beforeText: 'Before formatting',
+      afterText: 'After formatting',
+    }),
     commit: async (_id: string, confirmation?: string) => {
       const permanent = proposal.operation === 'delete-permanently' || proposal.permanent
-      if (permanent && confirmation !== proposal.path.split('\\').pop()) throw new Error('Missing typed confirmation')
+      if (permanent && confirmation !== proposal.path.split('\\').pop())
+        throw new Error('Missing typed confirmation')
       state.commits++
-      if (state.scenario.startsWith('fs-')) state.filesystemCommits.push({ ...proposal, confirmation })
+      if (state.scenario.startsWith('fs-'))
+        state.filesystemCommits.push({ ...proposal, confirmation })
       if (state.clearSelectionOnCommit) changeSelection?.([], [])
-      return { path: proposal.path, operation: proposal.operation, destination: proposal.destination, permanent, ...(proposal.operation === 'update' ? { backupPath: proposal.path + '.backup' } : {}) }
+      return {
+        path: proposal.path,
+        operation: proposal.operation,
+        destination: proposal.destination,
+        permanent,
+        ...(proposal.operation === 'update' ? { backupPath: proposal.path + '.backup' } : {}),
+      }
     },
     discard: async () => {},
   },
@@ -373,10 +769,15 @@ Object.assign(window, {
       if (state.failHistorySave) throw new Error('Local storage temporarily unavailable')
       const { delta, removedIds, ...next } = clone(input)
       if (delta) {
-        const updates = new Map((next.messages ?? []).map(message => [message.id, message]))
-        next.messages = record.messages.filter(message => !removedIds?.includes(message.id)).map(message => {
-          const update = updates.get(message.id); updates.delete(message.id); return update ?? message
-        }).concat([...updates.values()])
+        const updates = new Map((next.messages ?? []).map((message) => [message.id, message]))
+        next.messages = record.messages
+          .filter((message) => !removedIds?.includes(message.id))
+          .map((message) => {
+            const update = updates.get(message.id)
+            updates.delete(message.id)
+            return update ?? message
+          })
+          .concat([...updates.values()])
       }
       record = { ...record, ...next, revision: record.revision + 1 }
       if (activityMode) sessionStorage.setItem('fixture.activity-history', JSON.stringify(record))
@@ -402,8 +803,21 @@ Object.assign(window, {
       state.cancelScans++
     },
     capture: async () => {
-      if (state.holdCapture) await new Promise<void>(resolve => { releaseCapture = resolve })
-      return { id: crypto.randomUUID(), hash: 'a'.repeat(64), complete: true, startedAt: Date.now(), finishedAt: Date.now(), fileCount: 1, directoryCount: 1, bytesHashed: 2048, issues: [] }
+      if (state.holdCapture)
+        await new Promise<void>((resolve) => {
+          releaseCapture = resolve
+        })
+      return {
+        id: crypto.randomUUID(),
+        hash: 'a'.repeat(64),
+        complete: true,
+        startedAt: Date.now(),
+        finishedAt: Date.now(),
+        fileCount: 1,
+        directoryCount: 1,
+        bytesHashed: 2048,
+        issues: [],
+      }
     },
     rename: async (_: string, title: string) => {
       record.title = title
@@ -422,24 +836,28 @@ Object.assign(window, {
       return { settings: clone(rag), hasKey: false, databasePath: 'fixture/search.sqlite' }
     },
     test: async () => ({ dimensions: 768, message: 'Connection successful.' }),
-    progress: async () => ({
-      running,
-      folder: 'C:\\Other directory',
-      scanned: 3,
-      embedded: 2,
-      failed: 0,
-      message: running ? 'Indexing files' : '',
-      chunks: 20,
-      unchanged: 0,
-      current: '',
-      incomplete: false,
-    }),
+    progress: async () => {
+      state.ragProgressCalls++
+      return {
+        running,
+        folder: 'C:\\Other directory',
+        scanned: 3,
+        embedded: 2,
+        failed: 0,
+        message: running ? 'Indexing files' : '',
+        chunks: 20,
+        unchanged: 0,
+        current: '',
+        incomplete: false,
+      }
+    },
     onChanged: (fn: () => void) => {
       callbacks.add(fn)
       return () => callbacks.delete(fn)
     },
     clear: async () => {},
-    statuses: async (paths: string[]) => paths.map(path => ({ path, status: 'not-indexed', chunks: 0 })),
+    statuses: async (paths: string[]) =>
+      paths.map((path) => ({ path, status: 'not-indexed', chunks: 0 })),
     cancel: async () => {
       running = false
     },
@@ -447,15 +865,67 @@ Object.assign(window, {
   nawaMyAgent: {
     documentTools: async (request: { query: string; offset: number; extensions?: string[] }) => {
       state.toolCatalogRequests.push(clone(request))
-      const names = ['pdf_read_pages', 'spreadsheet_analyze_text', 'spreadsheet_catalog_search', 'spreadsheet_query_sql']
-        .filter(name => !request.extensions || !name.startsWith('pdf_')).filter(name => name.includes(request.query))
-      return { serverUrl: serverSnapshot.serverUrl, checkedAt: new Date().toISOString(), filtered: !!request.extensions, total: names.length, nextOffset: request.offset + 2 < names.length ? request.offset + 2 : null,
-        tools: names.slice(request.offset, request.offset + 2).map(name => ({ name, description: 'Use selected, indexed document snapshots.', inputSchema: { type: 'object', properties: { documentId: { type: 'string' } } } })) }
+      const names = [
+        'pdf_read_pages',
+        'spreadsheet_analyze_text',
+        'spreadsheet_catalog_search',
+        'spreadsheet_query_sql',
+      ]
+        .filter((name) => !request.extensions || !name.startsWith('pdf_'))
+        .filter((name) => name.includes(request.query))
+      return {
+        serverUrl: serverSnapshot.serverUrl,
+        checkedAt: new Date().toISOString(),
+        filtered: !!request.extensions,
+        total: names.length,
+        nextOffset: request.offset + 2 < names.length ? request.offset + 2 : null,
+        tools: names.slice(request.offset, request.offset + 2).map((name) => ({
+          name,
+          description: 'Use selected, indexed document snapshots.',
+          inputSchema: { type: 'object', properties: { documentId: { type: 'string' } } },
+        })),
+      }
     },
     inspect: async () => clone(serverSnapshot),
-    local: async () => ({ settings: { mode: 'process', serverPath: 'C:\\MyAgent\\MyAgent.Server.exe', configurationDirectory: 'C:\\MyAgent\\server' }, serviceState: 'not-installed', processId: null }),
-    diagnostics: async () => { state.readinessChecks++; return { serverUrl: serverSnapshot.serverUrl, checkedAt: new Date().toISOString(), health: clone(serverSnapshot.health), readiness: { ready: true, status: 'Provider available', providerAvailable: true, startsOnDemand: false, model: 'fixture-chat' }, warnings: [] } },
-    saveConfiguration: async (_url: string, _revision: string, patch: any) => { state.serverSaves++; serverSnapshot.configuration = { ...serverSnapshot.configuration!, provider: { ...serverSnapshot.configuration!.provider, ...patch.provider }, rag: { ...serverSnapshot.configuration!.rag, ...patch.rag } }; return { snapshot: clone(serverSnapshot), restartRequired: true, restartRequiredSettings: ['MyAgent.Rag.Indexing'], applied: false } },
+    local: async () => ({
+      settings: {
+        mode: 'process',
+        serverPath: 'C:\\MyAgent\\MyAgent.Server.exe',
+        configurationDirectory: 'C:\\MyAgent\\server',
+      },
+      serviceState: 'not-installed',
+      processId: null,
+    }),
+    diagnostics: async () => {
+      state.readinessChecks++
+      return {
+        serverUrl: serverSnapshot.serverUrl,
+        checkedAt: new Date().toISOString(),
+        health: clone(serverSnapshot.health),
+        readiness: {
+          ready: true,
+          status: 'Provider available',
+          providerAvailable: true,
+          startsOnDemand: false,
+          model: 'fixture-chat',
+        },
+        warnings: [],
+      }
+    },
+    saveConfiguration: async (_url: string, _revision: string, patch: any) => {
+      state.serverSaves++
+      serverSnapshot.configuration = {
+        ...serverSnapshot.configuration!,
+        provider: { ...serverSnapshot.configuration!.provider, ...patch.provider },
+        rag: { ...serverSnapshot.configuration!.rag, ...patch.rag },
+      }
+      return {
+        snapshot: clone(serverSnapshot),
+        restartRequired: true,
+        restartRequiredSettings: ['MyAgent.Rag.Indexing'],
+        applied: false,
+      }
+    },
   },
   nawaAnalytics: {
     settings: async () => ({ settings: clone(analytics), databasePath: 'fixture/analysis.sqlite' }),
@@ -463,24 +933,36 @@ Object.assign(window, {
       analytics = clone(value)
     },
     catalog: async () => ({
-      datasets: [clone({ ...dataset, preparedPolicy, status: agentApproved ? 'ready' : dataset.status, approval: agentApproved ? { by: 'agent', at: now, reason: 'Fully validated clear population' } : undefined })],
+      datasets: [
+        clone({
+          ...dataset,
+          preparedPolicy,
+          status: agentApproved ? 'ready' : dataset.status,
+          approval: agentApproved
+            ? { by: 'agent', at: now, reason: 'Fully validated clear population' }
+            : undefined,
+        }),
+      ],
       total: 1,
       nextOffset: null,
       files: [],
       truncated: false,
     }),
-    progress: async () => ({
-      running,
-      folder: 'C:\\Other directory',
-      scanned: 3,
-      imported: 2,
-      failed: 0,
-      rows: 100,
-      message: running ? 'Importing records' : '',
-      unchanged: 0,
-      current: '',
-      incomplete: false,
-    }),
+    progress: async () => {
+      state.analyticsProgressCalls++
+      return {
+        running,
+        folder: 'C:\\Other directory',
+        scanned: 3,
+        imported: 2,
+        failed: 0,
+        rows: 100,
+        message: running ? 'Importing records' : '',
+        unchanged: 0,
+        current: '',
+        incomplete: false,
+      }
+    },
     onChanged: (fn: () => void) => {
       callbacks.add(fn)
       return () => callbacks.delete(fn)
@@ -499,7 +981,10 @@ Object.assign(window, {
 function Fixture() {
   const [selectedFiles, setSelectedFiles] = useState([source.path, surveySource.path])
   const [selectedDirectories, setSelectedDirectories] = useState([folder + '\\Archive'])
-  changeSelection = (files, directories) => { setSelectedFiles(files); setSelectedDirectories(directories) }
+  changeSelection = (files, directories) => {
+    setSelectedFiles(files)
+    setSelectedDirectories(directories)
+  }
   const [visible, setVisible] = useState(true),
     [active, setActive] = useState<'ai' | 'ragAnalytics' | 'provider'>('ai'),
     [width, setWidth] = useState(360),
@@ -544,14 +1029,22 @@ function Fixture() {
           closeLabel="Close sidebar"
           folder={folder}
           selectedFiles={selectedFiles}
-          onAddFolder={() => {}}
+          onAddFolder={() => {
+            state.addFolderRequests++
+          }}
           assistant={
             <WorkspaceChat
               folder={folder}
               folderName="Quarterly reports"
+              registeredRoots={[folder]}
+              onAddFolder={() => {
+                state.addFolderRequests++
+              }}
               scopePaths={selectedFiles}
               scopeDirs={selectedDirectories}
-              onOpenFile={path => { state.openedFiles.push(path) }}
+              onOpenFile={(path) => {
+                state.openedFiles.push(path)
+              }}
               onClose={() => setVisible(false)}
             />
           }

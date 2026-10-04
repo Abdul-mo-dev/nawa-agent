@@ -9,267 +9,748 @@ import { fileURLToPath } from 'node:url'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const output = path.join(root, '.task/directory-chat-review')
 await fs.mkdir(output, { recursive: true })
-const server = await createServer({ root, configFile: false, plugins: [react()], optimizeDeps: { entries: ['tools/sidebar-review/index.html'] }, server: { host: '127.0.0.1', port: 5191 }, logLevel: 'error' })
+const server = await createServer({
+  root,
+  configFile: false,
+  plugins: [react()],
+  optimizeDeps: { entries: ['tools/sidebar-review/index.html'] },
+  server: { host: '127.0.0.1', port: 5191 },
+  logLevel: 'error',
+})
 await server.listen()
 const browser = await chromium.launch({ headless: true })
-const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, permissions: ['clipboard-read', 'clipboard-write'] })
+const context = await browser.newContext({
+  viewport: { width: 1440, height: 1000 },
+  permissions: ['clipboard-read', 'clipboard-write'],
+})
 const page = await context.newPage()
 page.setDefaultTimeout(15000)
 const errors = []
-page.on('pageerror', error => errors.push(error.message))
-const check = (name, value) => { assert.ok(value, name); console.log('PASS ' + name) }
+page.on('pageerror', (error) => errors.push(error.message))
+const check = (name, value) => {
+  assert.ok(value, name)
+  console.log('PASS ' + name)
+}
 const send = async (text, scenario) => {
-  await page.evaluate(value => { window.sidebarFixture.state.scenario = value }, scenario)
+  await page.evaluate((value) => {
+    window.sidebarFixture.state.scenario = value
+  }, scenario)
   await page.getByRole('textbox', { name: 'Message Nawa' }).fill(text)
   await page.getByRole('button', { name: 'Send', exact: true }).click()
 }
-const done = () => page.getByRole('button', { name: 'Send', exact: true }).waitFor({ state: 'visible' })
+const done = () =>
+  page.getByRole('button', { name: 'Send', exact: true }).waitFor({ state: 'visible' })
 const current = () => page.locator('.directory-activity').last()
-const openActivity = async () => { const toggle = current().locator('.directory-activity-toggle'); if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click() }
+const openActivity = async () => {
+  const toggle = current().locator('.directory-activity-toggle')
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click()
+}
 try {
-  await page.goto(server.resolvedUrls.local[0] + 'tools/sidebar-review/?activity', { timeout: 60000 })
+  await page.goto(server.resolvedUrls.local[0] + 'tools/sidebar-review/?activity', {
+    timeout: 60000,
+  })
   await page.getByRole('textbox', { name: 'Message Nawa' }).waitFor()
-  await page.evaluate(() => { window.sidebarFixture.state.holdCapture = true })
+  await page.evaluate(() => {
+    window.sidebarFixture.state.holdCapture = true
+  })
   await send('Count selected rows.', 'read')
   await page.locator('.directory-thinking').waitFor()
-  check('Preparation shows thinking without an activity card or empty Nawa response', await page.locator('.directory-activity').count() === 0 && await page.locator('.ws-chat-assistant').count() === 1)
-  check('Repeated author, model and timestamp headers are absent', await page.locator('.workspace-message-role').count() === 0)
-  await page.locator('.nawa-workspace-control-panel').screenshot({ path: path.join(output, 'chat-thinking.png') })
-  await page.evaluate(() => { window.sidebarFixture.state.holdCapture = false; window.sidebarFixture.releaseCapture() }); await done()
-  check('Final streamed text is complete', await page.getByText('The selected table contains 99 rows.', { exact: true }).isVisible())
-  check('Completed activity is collapsed by default', await current().locator('.directory-activity-toggle').getAttribute('aria-expanded') === 'false')
-  check('Activity is outside the answer and no blank responses are rendered', await current().evaluate(node => !node.closest('.ws-chat-msg')) && await page.locator('.ws-chat-assistant').count() === 2)
-  check('No diagnostics are visible by default', await page.locator('.directory-activity pre:visible').count() === 0)
-  const layout = await page.locator('.ws-chat-scroll').evaluate(node => {
-    const user = node.querySelector('.ws-chat-user'), answer = node.querySelector('.ws-chat-assistant')
-    return { user: getComputedStyle(user).borderRadius, answer: getComputedStyle(answer).backgroundColor,
-      padding: getComputedStyle(answer).padding, font: getComputedStyle(answer).fontSize, gap: getComputedStyle(node.querySelector('.ws-chat-log')).gap }
+  check(
+    'Preparation shows thinking without an activity card or empty Nawa response',
+    (await page.locator('.directory-activity').count()) === 0 &&
+      (await page.locator('.ws-chat-assistant').count()) === 1,
+  )
+  check(
+    'Repeated author, model and timestamp headers are absent',
+    (await page.locator('.workspace-message-role').count()) === 0,
+  )
+  await page
+    .locator('.nawa-workspace-control-panel')
+    .screenshot({ path: path.join(output, 'chat-thinking.png') })
+  await page.evaluate(() => {
+    window.sidebarFixture.state.holdCapture = false
+    window.sidebarFixture.releaseCapture()
   })
-  check('Message bubbles, plain answers and spacing match the opened-file chat', layout.user === '14px' && layout.answer === 'rgba(0, 0, 0, 0)' && layout.padding === '0px' && layout.font === '16px' && layout.gap === '16px')
-  check('Shared file-chat composer is mounted', await page.locator('.ws-chat-composer .ai-input-box textarea').count() === 1)
-  await page.locator('.nawa-workspace-control-panel').screenshot({ path: path.join(output, 'chat-completed.png') })
+  await done()
+  check(
+    'Chat requests carry a saved-key marker instead of a credential',
+    await page.evaluate(() =>
+      window.sidebarFixture.state.requests.every(
+        (request) =>
+          !JSON.stringify(request.settings).includes('fixture-key') &&
+          JSON.stringify(request.settings).includes('nawa:stored-api-key:v1'),
+      ),
+    ),
+  )
+  check(
+    'Final streamed text is complete',
+    await page.getByText('The selected table contains 99 rows.', { exact: true }).isVisible(),
+  )
+  check(
+    'Completed activity is collapsed by default',
+    (await current().locator('.directory-activity-toggle').getAttribute('aria-expanded')) ===
+      'false',
+  )
+  check(
+    'Activity is outside the answer and no blank responses are rendered',
+    (await current().evaluate((node) => !node.closest('.ws-chat-msg'))) &&
+      (await page.locator('.ws-chat-assistant').count()) === 2,
+  )
+  check(
+    'No diagnostics are visible by default',
+    (await page.locator('.directory-activity pre:visible').count()) === 0,
+  )
+  const layout = await page.locator('.ws-chat-scroll').evaluate((node) => {
+    const user = node.querySelector('.ws-chat-user'),
+      answer = node.querySelector('.ws-chat-assistant')
+    return {
+      user: getComputedStyle(user).borderRadius,
+      answer: getComputedStyle(answer).backgroundColor,
+      padding: getComputedStyle(answer).padding,
+      font: getComputedStyle(answer).fontSize,
+      gap: getComputedStyle(node.querySelector('.ws-chat-log')).gap,
+    }
+  })
+  check(
+    'Message bubbles, plain answers and spacing match the opened-file chat',
+    layout.user === '14px' &&
+      layout.answer === 'rgba(0, 0, 0, 0)' &&
+      layout.padding === '0px' &&
+      layout.font === '16px' &&
+      layout.gap === '16px',
+  )
+  check(
+    'Shared file-chat composer is mounted',
+    (await page.locator('.ws-chat-composer .ai-input-box textarea').count()) === 1,
+  )
+  await page
+    .locator('.nawa-workspace-control-panel')
+    .screenshot({ path: path.join(output, 'chat-completed.png') })
   await openActivity()
-  check('Tool names and final validation are retained', (await current().innerText()).includes('spreadsheet_query_sql') && (await current().innerText()).includes('Answer sources verified'))
-  check('Chat does not run whole-directory comparison scans', await page.evaluate(() => window.sidebarFixture.state.compares) === 0)
-  check('Model round trips have timing diagnostics', await current().getByText('Model response received', { exact: true }).count() === 3)
+  check(
+    'Tool names and final validation are retained',
+    (await current().innerText()).includes('spreadsheet_query_sql') &&
+      (await current().innerText()).includes('Answer sources verified'),
+  )
+  check(
+    'Chat does not run whole-directory comparison scans',
+    (await page.evaluate(() => window.sidebarFixture.state.compares)) === 0,
+  )
+  check(
+    'Model round trips have timing diagnostics',
+    (await current().getByText('Model response received', { exact: true }).count()) === 3,
+  )
   await current().locator('.directory-activity-toggle').scrollIntoViewIfNeeded()
-  await page.locator('.nawa-workspace-control-panel').screenshot({ path: path.join(output, 'activity-timeline.png') })
-  check('Repeated discovery uses one request', await page.evaluate(() => window.sidebarFixture.state.catalogCalls) === 2)
-  const query = current().locator('.directory-step').filter({ hasText: 'MyAgent: spreadsheet_query_sql' })
+  await page
+    .locator('.nawa-workspace-control-panel')
+    .screenshot({ path: path.join(output, 'activity-timeline.png') })
+  check(
+    'Repeated discovery uses one request',
+    (await page.evaluate(() => window.sidebarFixture.state.catalogCalls)) === 2,
+  )
+  const query = current()
+    .locator('.directory-step')
+    .filter({ hasText: 'MyAgent: spreadsheet_query_sql' })
   await query.locator('summary').first().click()
   await query.getByText('Result details', { exact: true }).click()
-  check('Results and file targets can be inspected', (await query.innerText()).includes('revenue.xlsx') && (await query.innerText()).includes('99'))
+  check(
+    'Results and file targets can be inspected',
+    (await query.innerText()).includes('revenue.xlsx') && (await query.innerText()).includes('99'),
+  )
   await current().getByText('Debug details', { exact: true }).click()
   await current().getByRole('button', { name: 'Copy diagnostics' }).click()
   const copied = await page.evaluate(() => navigator.clipboard.readText())
-  check('Copied diagnostics are structured and redact credentials', JSON.parse(copied).steps.length >= 5 && !copied.includes('fixture-secret-must-be-redacted'))
+  check(
+    'Copied diagnostics are structured and redact credentials',
+    JSON.parse(copied).steps.length >= 5 && !copied.includes('fixture-secret-must-be-redacted'),
+  )
   await page.screenshot({ path: path.join(output, 'activity-expanded.png') })
-  await page.reload(); await current().waitFor()
+  await page.reload()
+  await current().waitFor()
   await openActivity()
-  check('Activity survives reopening the conversation', (await current().innerText()).includes('spreadsheet_query_sql'))
-  await send('Try the stale file.', 'fail'); await done(); await openActivity()
-  check('Tool failures remain visible after the answer', await current().locator('.directory-activity-errors').isVisible())
+  check(
+    'Activity survives reopening the conversation',
+    (await current().innerText()).includes('spreadsheet_query_sql'),
+  )
+  await send('Try the stale file.', 'fail')
+  await done()
+  await openActivity()
+  check(
+    'Tool failures remain visible after the answer',
+    await current().locator('.directory-activity-errors').isVisible(),
+  )
   await current().locator('.directory-step.is-failed summary').first().click()
-  await current().locator('.directory-step.is-failed').getByText('Result details', { exact: true }).click()
-  check('Failure details explain recovery', (await current().innerText()).includes('indexing/refresh'))
+  await current()
+    .locator('.directory-step.is-failed')
+    .getByText('Result details', { exact: true })
+    .click()
+  check(
+    'Failure details explain recovery',
+    (await current().innerText()).includes('indexing/refresh'),
+  )
   await page.screenshot({ path: path.join(output, 'activity-failure.png') })
   await send('Wait for a slow read.', 'slow')
   await page.waitForFunction(() => window.sidebarFixture.state.executionCalls >= 2)
-  check('Running tools stay compact until expanded', await current().locator('.directory-activity-toggle').getAttribute('aria-expanded') === 'false')
-  await current().locator('.directory-activity-toggle').focus(); await page.keyboard.press('Enter')
-  check('Activity expands with the keyboard', await current().locator('.directory-activity-toggle').getAttribute('aria-expanded') === 'true')
-  await page.getByRole('button', { name: 'Stop', exact: true }).click(); await done()
+  check(
+    'Running tools stay compact until expanded',
+    (await current().locator('.directory-activity-toggle').getAttribute('aria-expanded')) ===
+      'false',
+  )
+  await current().locator('.directory-activity-toggle').focus()
+  await page.keyboard.press('Enter')
+  check(
+    'Activity expands with the keyboard',
+    (await current().locator('.directory-activity-toggle').getAttribute('aria-expanded')) ===
+      'true',
+  )
+  await page.getByRole('button', { name: 'Stop', exact: true }).click()
+  await done()
   await page.evaluate(() => window.sidebarFixture.release())
-  check('Stop preserves cancelled steps', await current().locator('.directory-step.is-cancelled').count() > 0)
+  check(
+    'Stop preserves cancelled steps',
+    (await current().locator('.directory-step.is-cancelled').count()) > 0,
+  )
   await send('Format the selected table.', 'edit')
   await current().getByRole('button', { name: 'Review action', exact: true }).click()
   await page.getByRole('button', { name: 'Approve preparation', exact: true }).waitFor()
-  check('Preparation still requires approval', await page.evaluate(() => window.sidebarFixture.state.commits) === 0)
+  check(
+    'Preparation still requires approval',
+    (await page.evaluate(() => window.sidebarFixture.state.commits)) === 0,
+  )
   await page.getByRole('button', { name: 'Approve preparation', exact: true }).click()
   await page.getByRole('button', { name: 'Approve save', exact: true }).waitFor()
-  check('Saving still requires separate approval', await page.evaluate(() => window.sidebarFixture.state.commits) === 0)
-  await page.getByRole('button', { name: 'Approve save', exact: true }).click(); await done()
-  await page.keyboard.press('Escape'); await openActivity()
-  check('Native tools are grouped with the parent action', await current().locator('.directory-step.is-child').count() >= 3)
-  check('Approved save commits once', await page.evaluate(() => window.sidebarFixture.state.commits) === 1)
-  check('Diagnostics are not restored into model messages', await page.evaluate(() => window.sidebarFixture.state.requests.every(request => !JSON.stringify(request.messages).includes('"activity":') && !JSON.stringify(request.messages).includes('"omitted":'))))
+  check(
+    'Saving still requires separate approval',
+    (await page.evaluate(() => window.sidebarFixture.state.commits)) === 0,
+  )
+  await page.getByRole('button', { name: 'Approve save', exact: true }).click()
+  await done()
+  await page.keyboard.press('Escape')
+  await openActivity()
+  check(
+    'Native tools are grouped with the parent action',
+    (await current().locator('.directory-step.is-child').count()) >= 3,
+  )
+  check(
+    'Approved save commits once',
+    (await page.evaluate(() => window.sidebarFixture.state.commits)) === 1,
+  )
+  check(
+    'Diagnostics are not restored into model messages',
+    await page.evaluate(() =>
+      window.sidebarFixture.state.requests.every(
+        (request) =>
+          !JSON.stringify(request.messages).includes('"activity":') &&
+          !JSON.stringify(request.messages).includes('"omitted":'),
+      ),
+    ),
+  )
   await page.getByRole('button', { name: '300px', exact: true }).click()
-  check('Narrow sidebar has no horizontal overflow', await current().evaluate(node => node.scrollWidth <= node.clientWidth + 1))
+  check(
+    'Narrow sidebar has no horizontal overflow',
+    await current().evaluate((node) => node.scrollWidth <= node.clientWidth + 1),
+  )
   await current().locator('.directory-step.is-child').last().scrollIntoViewIfNeeded()
   await page.screenshot({ path: path.join(output, 'activity-native-300.png') })
-  await send('Check the provider error.', 'connection-error'); await done()
-  check('Failed requests do not auto-expand diagnostics', await current().locator('.directory-activity-toggle').getAttribute('aria-expanded') === 'false')
+  await send('Check the provider error.', 'connection-error')
+  await done()
+  check(
+    'Failed requests do not auto-expand diagnostics',
+    (await current().locator('.directory-activity-toggle').getAttribute('aria-expanded')) ===
+      'false',
+  )
   await openActivity()
-  check('Provider errors have a failed model step', await current().getByText('Model request failed', { exact: true }).isVisible())
+  check(
+    'Provider errors have a failed model step',
+    await current().getByText('Model request failed', { exact: true }).isVisible(),
+  )
   await send('Propose another edit.', 'edit')
   await current().getByRole('button', { name: 'Review action', exact: true }).click()
-  await page.getByRole('button', { name: 'Deny', exact: true }).click(); await done(); await page.keyboard.press('Escape'); await openActivity()
-  check('Denied actions are recorded without a commit', (await current().innerText()).includes('Declined') && await page.evaluate(() => window.sidebarFixture.state.commits) === 1)
-  await page.evaluate(() => { window.sidebarFixture.state.catalogUnavailable = true })
-  await send('Read with unavailable document tools.', 'read'); await done()
-  check('Catalog failure remains a collapsed warning while the answer completes', await current().locator('.directory-activity-toggle').getAttribute('aria-expanded') === 'false' && await current().locator('.directory-activity-errors').isVisible())
+  await page.getByRole('button', { name: 'Deny', exact: true }).click()
+  await done()
+  await page.keyboard.press('Escape')
   await openActivity()
-  const preparation = current().locator('.directory-step').filter({ hasText: 'MyAgent tools unavailable' })
-  check('Unavailable MyAgent tools are never reported ready', await preparation.getAttribute('class').then(value => value.includes('is-failed')) && await current().getByText('MyAgent tools ready', { exact: true }).count() === 0)
+  check(
+    'Denied actions are recorded without a commit',
+    (await current().innerText()).includes('Declined') &&
+      (await page.evaluate(() => window.sidebarFixture.state.commits)) === 1,
+  )
+  await page.evaluate(() => {
+    window.sidebarFixture.state.catalogUnavailable = true
+  })
+  await send('Read with unavailable document tools.', 'read')
+  await done()
+  check(
+    'Catalog failure remains a collapsed warning while the answer completes',
+    (await current().locator('.directory-activity-toggle').getAttribute('aria-expanded')) ===
+      'false' && (await current().locator('.directory-activity-errors').isVisible()),
+  )
+  await openActivity()
+  const preparation = current()
+    .locator('.directory-step')
+    .filter({ hasText: 'MyAgent tools unavailable' })
+  check(
+    'Unavailable MyAgent tools are never reported ready',
+    (await preparation.getAttribute('class').then((value) => value.includes('is-failed'))) &&
+      (await current().getByText('MyAgent tools ready', { exact: true }).count()) === 0,
+  )
   await preparation.locator('summary').first().click()
   await preparation.getByText('Result details', { exact: true }).click()
-  check('Catalog diagnostics retain the repair instructions', (await preparation.innerText()).includes('Rebuild and restart MyAgent'))
-  await page.evaluate(() => { window.sidebarFixture.state.catalogUnavailable = false })
+  check(
+    'Catalog diagnostics retain the repair instructions',
+    (await preparation.innerText()).includes('Rebuild and restart MyAgent'),
+  )
+  await page.evaluate(() => {
+    window.sidebarFixture.state.catalogUnavailable = false
+  })
   const catalogBeforeListing = await page.evaluate(() => window.sidebarFixture.state.catalogCalls)
-  await send('list file in this dir', 'listing'); await done()
-  check('Shorthand directory listing skips MyAgent and exposes only four tools', await page.evaluate(before => window.sidebarFixture.state.catalogCalls === before && window.sidebarFixture.state.requests.at(-1).tools.length === 4, catalogBeforeListing))
+  await send('list file in this dir', 'listing')
+  await done()
+  const listingResult = await page.evaluate(
+    (before) => ({
+      before,
+      after: window.sidebarFixture.state.catalogCalls,
+      tools: window.sidebarFixture.state.requests.at(-1).tools.map((tool) => tool.name),
+    }),
+    catalogBeforeListing,
+  )
+  check(
+    'Shorthand directory listing skips MyAgent and exposes only listing tools',
+    listingResult.after === listingResult.before &&
+      listingResult.tools.join(',') === 'list_directory,list_files,discover_file_tools',
+  )
   await openActivity()
-  check('Skipped preparation stays out of the main timeline and its step count', await current().locator('.directory-activity-steps > .directory-step').count() === 5 && (await current().locator('.directory-activity-toggle').innerText()).includes('5 steps'))
-  check('Filename-only answers use an accurate validation label', await current().getByText('Metadata-only response', { exact: true }).isVisible() && await current().getByText('Answer sources verified', { exact: true }).count() === 0)
+  check(
+    'Skipped preparation stays out of the main timeline and its step count',
+    (await current().locator('.directory-activity-steps > .directory-step').count()) === 5 &&
+      (await current().locator('.directory-activity-toggle').innerText()).includes('5 steps'),
+  )
+  check(
+    'Filename-only answers use an accurate validation label',
+    (await current().getByText('Metadata-only response', { exact: true }).isVisible()) &&
+      (await current().getByText('Answer sources verified', { exact: true }).count()) === 0,
+  )
   await current().getByText('Debug details', { exact: true }).click()
-  check('Skipped preparation remains inspectable in diagnostics', await current().locator('.directory-activity-skipped').getByText('MyAgent preparation not needed', { exact: true }).isVisible())
+  check(
+    'Skipped preparation remains inspectable in diagnostics',
+    await current()
+      .locator('.directory-activity-skipped')
+      .getByText('MyAgent preparation not needed', { exact: true })
+      .isVisible(),
+  )
   const beforeCount = await page.evaluate(() => window.sidebarFixture.state.requests.length)
-  await send('how many rows in revenue.xlsx', 'count'); await done(); await openActivity()
-  check('Workbook count uses prepared metadata and one query in two model turns', await page.evaluate(before => window.sidebarFixture.state.requests.length - before === 2, beforeCount) && (await current().innerText()).includes('Workbook metadata ready'))
+  await send('how many rows in revenue.xlsx', 'count')
+  await done()
+  await openActivity()
+  check(
+    'Workbook count uses prepared metadata and one query in two model turns',
+    (await page.evaluate(
+      (before) => window.sidebarFixture.state.requests.length - before === 2,
+      beforeCount,
+    )) && (await current().innerText()).includes('Workbook metadata ready'),
+  )
   const beforeCachedCount = await page.evaluate(() => window.sidebarFixture.state.executionCalls)
-  await send('how many rows in revenue.xlsx', 'count'); await done(); await openActivity()
-  check('Follow-up count reuses verified dataset metadata', await page.evaluate(before => window.sidebarFixture.state.executionCalls - before === 1, beforeCachedCount) && (await current().innerText()).includes('Reused verified workbook metadata'))
-  await send('how many rows in revenue.xlsx', 'citation'); await done()
-  check('Only registered citation links are actionable', await page.getByRole('link', { name: 'Source', exact: true }).count() === 1 && await page.getByRole('link', { name: 'Unregistered' }).count() === 0)
+  await send('how many rows in revenue.xlsx', 'count')
+  await done()
+  await openActivity()
+  const cachedCount = await page.evaluate(
+    (before) => ({ before, after: window.sidebarFixture.state.executionCalls }),
+    beforeCachedCount,
+  )
+  check(
+    'Follow-up count reuses verified dataset metadata',
+    cachedCount.after - cachedCount.before === 1 &&
+      (await current().innerText()).includes('Reused verified workbook metadata'),
+  )
+  await send('how many rows in revenue.xlsx', 'citation')
+  await done()
+  check(
+    'Only registered citation links are actionable',
+    (await page.getByRole('link', { name: 'Source', exact: true }).count()) === 1 &&
+      (await page.getByRole('link', { name: 'Unregistered' }).count()) === 0,
+  )
   await page.getByRole('link', { name: 'Source', exact: true }).click()
   await page.getByText('Source version matches this evidence.', { exact: true }).waitFor()
-  check('A short citation uses a compact source dialog', await page.locator('.directory-evidence-dialog').evaluate(node => node.getBoundingClientRect().height < 500))
+  check(
+    'A short citation uses a compact source dialog',
+    await page
+      .locator('.directory-evidence-dialog')
+      .evaluate((node) => node.getBoundingClientRect().height < 500),
+  )
   await page.getByRole('button', { name: 'Open file', exact: true }).click()
-  check('Citation opens its registered file', await page.evaluate(() => window.sidebarFixture.state.openedFiles.at(-1).endsWith('revenue.xlsx')))
-  await page.screenshot({ path: path.join(output, 'citation-evidence.png') }); await page.keyboard.press('Escape')
-  await page.evaluate(() => { window.sidebarFixture.state.staleCitation = true })
+  check(
+    'Citation opens its registered file',
+    await page.evaluate(() =>
+      window.sidebarFixture.state.openedFiles.at(-1).endsWith('revenue.xlsx'),
+    ),
+  )
+  await page.screenshot({ path: path.join(output, 'citation-evidence.png') })
+  await page.keyboard.press('Escape')
+  await page.evaluate(() => {
+    window.sidebarFixture.state.staleCitation = true
+  })
   await page.getByRole('link', { name: 'Source', exact: true }).click()
-  await page.getByText('The source changed or is unavailable. This is an earlier excerpt.', { exact: true }).waitFor()
+  await page
+    .getByText('The source changed or is unavailable. This is an earlier excerpt.', { exact: true })
+    .waitFor()
   check('Changed citation sources show an earlier-excerpt warning', true)
-  await page.keyboard.press('Escape'); await page.reload(); await page.getByRole('link', { name: 'Source', exact: true }).waitFor()
+  await page.keyboard.press('Escape')
+  await page.reload()
+  await page.getByRole('link', { name: 'Source', exact: true }).waitFor()
   check('Citations survive reopening saved history', true)
-  await send('Continue describing the workbook.', 'cutoff'); await done()
-  check('Cutoff answers remain incomplete and offer continuation', (await current().innerText()).includes('Incomplete') && await page.getByRole('button', { name: 'Continue answer', exact: true }).isVisible())
-  await page.evaluate(() => { window.sidebarFixture.state.scenario = 'read' })
-  await page.getByRole('button', { name: 'Continue answer', exact: true }).click(); await done()
-  check('Continuation is a new explicit request that rechecks its evidence', await page.evaluate(() => window.sidebarFixture.messages().some(message => message.request?.outcome === 'incomplete') && window.sidebarFixture.messages().at(-1).request.outcome === 'completed'))
-  await send('how many rows in revenue.xlsx', 'intermediate-failure'); await done()
+  await send('Continue describing the workbook.', 'cutoff')
+  await done()
+  check(
+    'Cutoff answers remain incomplete and offer continuation',
+    (await current().innerText()).includes('Incomplete') &&
+      (await page.getByRole('button', { name: 'Continue answer', exact: true }).isVisible()),
+  )
+  await page.evaluate(() => {
+    window.sidebarFixture.state.scenario = 'read'
+  })
+  await page.getByRole('button', { name: 'Continue answer', exact: true }).click()
+  await done()
+  check(
+    'Continuation is a new explicit request that rechecks its evidence',
+    await page.evaluate(
+      () =>
+        window.sidebarFixture
+          .messages()
+          .some((message) => message.request?.outcome === 'incomplete') &&
+        window.sidebarFixture.messages().at(-1).request.outcome === 'completed',
+    ),
+  )
+  await send('how many rows in revenue.xlsx', 'intermediate-failure')
+  await done()
   const beforeRecovery = await page.evaluate(() => window.sidebarFixture.state.requests.length)
-  await send('Find the current total.', 'read'); await done()
-  check('Failed intermediate claims are excluded from later model history', await page.evaluate(before => window.sidebarFixture.state.requests.slice(before).every(request => !JSON.stringify(request.messages).includes('Unverified intermediate claim.')), beforeRecovery))
-  const beforeOverview = await page.evaluate(() => ({ requests: window.sidebarFixture.state.requests.length, calls: window.sidebarFixture.state.toolRequests.length }))
-  await send('what is Survey data.xlsx about', 'overview'); await done(); await openActivity()
-  check('Workbook overview prepares only its target and answers in one model turn with eight tools', await page.evaluate(before => {
-    const requests = window.sidebarFixture.state.requests.slice(before.requests), calls = window.sidebarFixture.state.toolRequests.slice(before.calls).filter(call => call.action === 'execute')
-    return requests.length === 1 && requests[0].tools.length === 8 && JSON.stringify(requests[0].messages).includes('Safety perception') && JSON.stringify(requests[0].messages).includes('Survey 2') && !JSON.stringify(requests[0].messages).includes('Large repeated schema') && calls.length === 1 && calls[0].payload.paths.length === 1 && calls[0].payload.paths[0].endsWith('Survey data.xlsx')
-  }, beforeOverview))
-  check('Prepared overview retains a registered source citation', await page.getByRole('link', { name: 'Survey source', exact: true }).isVisible())
+  await send('Find the current total.', 'read')
+  await done()
+  check(
+    'Failed intermediate claims are excluded from later model history',
+    await page.evaluate(
+      (before) =>
+        window.sidebarFixture.state.requests
+          .slice(before)
+          .every(
+            (request) =>
+              !JSON.stringify(request.messages).includes('Unverified intermediate claim.'),
+          ),
+      beforeRecovery,
+    ),
+  )
+  const beforeOverview = await page.evaluate(() => ({
+    requests: window.sidebarFixture.state.requests.length,
+    calls: window.sidebarFixture.state.toolRequests.length,
+  }))
+  await send('what is Survey data.xlsx about', 'overview')
+  await done()
+  await openActivity()
+  check(
+    'Workbook overview prepares only its target and answers in one model turn with focused tools',
+    await page.evaluate((before) => {
+      const requests = window.sidebarFixture.state.requests.slice(before.requests),
+        calls = window.sidebarFixture.state.toolRequests
+          .slice(before.calls)
+          .filter((call) => call.action === 'execute')
+      return (
+        requests.length === 1 &&
+        requests[0].tools.length <= 8 &&
+        requests[0].tools.some((tool) => tool.name === 'spreadsheet_catalog_search') &&
+        JSON.stringify(requests[0].messages).includes('Safety perception') &&
+        JSON.stringify(requests[0].messages).includes('Survey 2') &&
+        !JSON.stringify(requests[0].messages).includes('Large repeated schema') &&
+        calls.length === 1 &&
+        calls[0].payload.paths.length === 1 &&
+        calls[0].payload.paths[0].endsWith('Survey data.xlsx')
+      )
+    }, beforeOverview),
+  )
+  check(
+    'Prepared overview retains a registered source citation',
+    await page.getByRole('link', { name: 'Survey source', exact: true }).isVisible(),
+  )
   await page.screenshot({ path: path.join(output, 'workbook-overview.png') })
   const beforeReuse = await page.evaluate(() => window.sidebarFixture.state.executionCalls)
-  await send('describe Survey data.xlsx', 'overview'); await done(); await openActivity()
-  check('Overview reuses verified compact metadata on follow-up', await page.evaluate(before => window.sidebarFixture.state.executionCalls === before, beforeReuse) && (await current().innerText()).includes('Reused verified workbook metadata'))
-  await page.evaluate(() => { window.sidebarFixture.state.rejectHistory = true })
-  await send('what is Survey data.xlsx about', 'overview-missing'); await done(); await openActivity()
-  check('Missing catalog evidence falls back to native readers', (await current().innerText()).includes('Workbook metadata unavailable') && await current().locator('.directory-step').filter({ hasText: 'Inspected saved file:' }).count() === 1 && await page.getByText('The saved workbook contains questions about safety and neighbors.', { exact: true }).isVisible())
-  await send('what is Survey data.xlsx about', 'overview-changed'); await done(); await openActivity()
-  check('Prepared metadata still receives hard final source validation', (await current().innerText()).includes('Source verification failed') && await page.evaluate(() => window.sidebarFixture.messages().at(-1).request.outcome === 'failed'))
-  await page.evaluate(() => { window.sidebarFixture.state.rejectHistory = false })
+  await send('describe Survey data.xlsx', 'overview')
+  await done()
+  await openActivity()
+  check(
+    'Overview reuses verified compact metadata on follow-up',
+    (await page.evaluate(
+      (before) => window.sidebarFixture.state.executionCalls === before,
+      beforeReuse,
+    )) && (await current().innerText()).includes('Reused verified workbook metadata'),
+  )
+  await page.evaluate(() => {
+    window.sidebarFixture.state.rejectHistory = true
+  })
+  await send('what is Survey data.xlsx about', 'overview-missing')
+  await done()
+  await openActivity()
+  check(
+    'Missing catalog evidence falls back to native readers',
+    (await current().innerText()).includes('Workbook metadata unavailable') &&
+      (await current()
+        .locator('.directory-step')
+        .filter({ hasText: 'Inspected saved file:' })
+        .count()) === 1 &&
+      (await page
+        .getByText('The saved workbook contains questions about safety and neighbors.', {
+          exact: true,
+        })
+        .isVisible()),
+  )
+  await send('what is Survey data.xlsx about', 'overview-changed')
+  await done()
+  await openActivity()
+  check(
+    'Prepared metadata still receives hard final source validation',
+    (await current().innerText()).includes('Source verification failed') &&
+      (await page.evaluate(
+        () => window.sidebarFixture.messages().at(-1).request.outcome === 'failed',
+      )),
+  )
+  await page.evaluate(() => {
+    window.sidebarFixture.state.rejectHistory = false
+  })
   for (const [scenario, task, title] of [
-    ['fs-copy', 'copy revenue.xlsx', 'Copy file'], ['fs-rename', 'rename revenue.xlsx', 'Rename file'],
-    ['fs-move', 'move revenue.xlsx to Archive', 'Move file'], ['fs-mkdir', 'create folder New folder', 'Create folder'],
+    ['fs-copy', 'copy revenue.xlsx', 'Copy file'],
+    ['fs-rename', 'rename revenue.xlsx', 'Rename file'],
+    ['fs-move', 'move revenue.xlsx to Archive', 'Move file'],
+    ['fs-mkdir', 'create folder New folder', 'Create folder'],
   ]) {
     const before = await page.evaluate(() => window.sidebarFixture.state.commits)
     await send(task, scenario)
     await current().getByRole('button', { name: 'Review action', exact: true }).click()
     const approval = page.getByRole('region', { name: 'File action approval' })
     await approval.getByRole('heading', { name: title, exact: true }).waitFor()
-    check(`${title} waits for approval`, await page.evaluate(n => window.sidebarFixture.state.commits === n, before))
-    if (scenario === 'fs-copy') check('Copy review shows the exact destination', (await approval.innerText()).includes('revenue-copy.xlsx'))
-    await approval.getByRole('button', { name: 'Approve action', exact: true }).click(); await done(); await page.keyboard.press('Escape')
-    check(`${title} commits after one approval without native editing`, await page.evaluate(n => window.sidebarFixture.state.commits === n + 1, before))
+    check(
+      `${title} waits for approval`,
+      await page.evaluate((n) => window.sidebarFixture.state.commits === n, before),
+    )
+    if (scenario === 'fs-copy')
+      check(
+        'Copy review shows the exact destination',
+        (await approval.innerText()).includes('revenue-copy.xlsx'),
+      )
+    await approval.getByRole('button', { name: 'Approve action', exact: true }).click()
+    await done()
+    await page.keyboard.press('Escape')
+    check(
+      `${title} commits after one approval without native editing`,
+      await page.evaluate((n) => window.sidebarFixture.state.commits === n + 1, before),
+    )
   }
   await send('delete folder Archive', 'fs-trash-folder')
   await current().getByRole('button', { name: 'Review action', exact: true }).click()
   const folderApproval = page.getByRole('region', { name: 'File action approval' })
   await folderApproval.getByRole('button', { name: 'Move to Recycle Bin', exact: true }).waitFor()
   await folderApproval.getByText('Review affected contents', { exact: true }).click()
-  check('Folder approval inventories child names and defaults to Recycle Bin', (await folderApproval.innerText()).includes('old.xlsx') && (await folderApproval.innerText()).includes('2 files'))
-  await folderApproval.getByRole('button', { name: 'Move to Recycle Bin', exact: true }).click(); await done(); await page.keyboard.press('Escape')
+  check(
+    'Folder approval inventories child names and defaults to Recycle Bin',
+    (await folderApproval.innerText()).includes('old.xlsx') &&
+      (await folderApproval.innerText()).includes('2 files'),
+  )
+  await folderApproval.getByRole('button', { name: 'Move to Recycle Bin', exact: true }).click()
+  await done()
+  await page.keyboard.press('Escape')
   for (const [scenario, task, name] of [
     ['fs-permanent-file', 'permanently delete revenue.xlsx', 'revenue.xlsx'],
     ['fs-permanent-folder', 'permanently delete folder Archive', 'Archive'],
   ]) {
     await send(task, scenario)
     await current().getByRole('button', { name: 'Review action', exact: true }).click()
-    const approval = page.getByRole('region', { name: 'File action approval' }), button = approval.getByRole('button', { name: 'Permanently delete', exact: true })
-    await button.waitFor(); check('Permanent deletion starts disabled', await button.isDisabled())
+    const approval = page.getByRole('region', { name: 'File action approval' }),
+      button = approval.getByRole('button', { name: 'Permanently delete', exact: true })
+    await button.waitFor()
+    check('Permanent deletion starts disabled', await button.isDisabled())
     await approval.getByRole('textbox', { name: 'Confirm permanent deletion' }).fill('wrong name')
     check('Wrong target name cannot approve deletion', await button.isDisabled())
     await approval.getByRole('textbox', { name: 'Confirm permanent deletion' }).fill(name)
     check('Exact target name enables explicit permanent deletion', await button.isEnabled())
-    if (scenario === 'fs-permanent-folder') await page.screenshot({ path: path.join(output, 'permanent-folder-approval.png') })
-    await button.click(); await done(); await page.keyboard.press('Escape')
-    check('Typed deletion confirmation reaches the commit boundary', await page.evaluate(value => window.sidebarFixture.state.filesystemCommits.at(-1).confirmation === value, name))
+    if (scenario === 'fs-permanent-folder')
+      await page.screenshot({ path: path.join(output, 'permanent-folder-approval.png') })
+    await button.click()
+    await done()
+    await page.keyboard.press('Escape')
+    check(
+      'Typed deletion confirmation reaches the commit boundary',
+      await page.evaluate(
+        (value) => window.sidebarFixture.state.filesystemCommits.at(-1).confirmation === value,
+        name,
+      ),
+    )
   }
   const beforeDenied = await page.evaluate(() => window.sidebarFixture.state.commits)
   await send('permanently delete revenue.xlsx', 'fs-permanent-file')
   await current().getByRole('button', { name: 'Review action', exact: true }).click()
-  await page.getByRole('region', { name: 'File action approval' }).getByRole('button', { name: 'Deny', exact: true }).click(); await done(); await page.keyboard.press('Escape')
-  check('Denied permanent deletion never commits', await page.evaluate(value => window.sidebarFixture.state.commits === value, beforeDenied))
+  await page
+    .getByRole('region', { name: 'File action approval' })
+    .getByRole('button', { name: 'Deny', exact: true })
+    .click()
+  await done()
+  await page.keyboard.press('Escape')
+  check(
+    'Denied permanent deletion never commits',
+    await page.evaluate((value) => window.sidebarFixture.state.commits === value, beforeDenied),
+  )
   await page.evaluate(() => window.sidebarFixture.restoreSelection())
-  const beforeSelectionChange = await page.evaluate(() => ({ requests: window.sidebarFixture.state.requests.length, scopes: window.sidebarFixture.state.beginScopes.length, cancellations: window.sidebarFixture.state.streamCancels }))
+  const beforeSelectionChange = await page.evaluate(() => ({
+    requests: window.sidebarFixture.state.requests.length,
+    scopes: window.sidebarFixture.state.beginScopes.length,
+    cancellations: window.sidebarFixture.state.streamCancels,
+  }))
   await send('list selected files', 'scope-read')
   await page.getByText('Checking the request selection.', { exact: true }).waitFor()
-  await page.evaluate(() => window.sidebarFixture.select(['C:\\Review workspace\\Quarterly reports\\Survey data.xlsx']))
-  check('Selection changes during streaming keep the response active', await page.getByRole('button', { name: 'Stop', exact: true }).isVisible())
-  check('The changed-selection notice explains the current snapshot', await page.getByText(/This response continues with 2 files and 1 folders/).isVisible())
-  check('Changing selection does not cancel the model stream', await page.evaluate(before => window.sidebarFixture.state.streamCancels === before.cancellations, beforeSelectionChange))
-  await page.evaluate(() => window.sidebarFixture.releaseModel()); await done()
-  await page.waitForFunction(() => window.sidebarFixture.messages().at(-1).request.outcome === 'completed')
-  const capturedSelection = await page.evaluate(before => {
-    const last = window.sidebarFixture.messages().at(-1), scopes = window.sidebarFixture.state.beginScopes.slice(before.scopes)
+  await page.evaluate(() =>
+    window.sidebarFixture.select(['C:\\Review workspace\\Quarterly reports\\Survey data.xlsx']),
+  )
+  check(
+    'Selection changes during streaming keep the response active',
+    await page.getByRole('button', { name: 'Stop', exact: true }).isVisible(),
+  )
+  check(
+    'The changed-selection notice explains the current snapshot',
+    await page.getByText(/This response continues with 2 files and 1 folders/).isVisible(),
+  )
+  check(
+    'Changing selection does not cancel the model stream',
+    await page.evaluate(
+      (before) => window.sidebarFixture.state.streamCancels === before.cancellations,
+      beforeSelectionChange,
+    ),
+  )
+  await page.evaluate(() => window.sidebarFixture.releaseModel())
+  await done()
+  await page.waitForFunction(
+    () => window.sidebarFixture.messages().at(-1).request.outcome === 'completed',
+  )
+  const capturedSelection = await page.evaluate((before) => {
+    const last = window.sidebarFixture.messages().at(-1),
+      scopes = window.sidebarFixture.state.beginScopes.slice(before.scopes)
     return { outcome: last.request.outcome, text: last.text, scopes }
   }, beforeSelectionChange)
-  assert.ok(capturedSelection.outcome === 'completed' && capturedSelection.text.includes('revenue.xlsx') && capturedSelection.text.includes('Survey data.xlsx') && capturedSelection.scopes.length === 0, JSON.stringify(capturedSelection))
-  check('Metadata tools retain the original selection without starting unnecessary server runs', true)
-  await send('list selected files', 'scope-list'); await done()
-  await page.waitForFunction(() => window.sidebarFixture.messages().at(-1).request.outcome === 'completed' && window.sidebarFixture.messages().at(-1).text.startsWith('Request selection:') && !window.sidebarFixture.messages().at(-1).text.includes('revenue.xlsx'))
-  check('The next message uses the new selection', await page.evaluate(() => {
-    const last = window.sidebarFixture.messages().at(-1)
-    return last.request.outcome === 'completed' && last.text.includes('Survey data.xlsx') && !last.text.includes('revenue.xlsx')
-  }))
+  assert.ok(
+    capturedSelection.outcome === 'completed' &&
+      capturedSelection.text.includes('revenue.xlsx') &&
+      capturedSelection.text.includes('Survey data.xlsx') &&
+      capturedSelection.scopes.length === 0,
+    JSON.stringify(capturedSelection),
+  )
+  check(
+    'Metadata tools retain the original selection without starting unnecessary server runs',
+    true,
+  )
+  await send('list selected files', 'scope-list')
+  await done()
+  await page.waitForFunction(
+    () =>
+      window.sidebarFixture.messages().at(-1).request.outcome === 'completed' &&
+      window.sidebarFixture.messages().at(-1).text.startsWith('Request selection:') &&
+      !window.sidebarFixture.messages().at(-1).text.includes('revenue.xlsx'),
+  )
+  check(
+    'The next message uses the new selection',
+    await page.evaluate(() => {
+      const last = window.sidebarFixture.messages().at(-1)
+      return (
+        last.request.outcome === 'completed' &&
+        last.text.includes('Survey data.xlsx') &&
+        !last.text.includes('revenue.xlsx')
+      )
+    }),
+  )
   const originalFile = 'C:\\Review workspace\\Quarterly reports\\Untitled.docx'
-  await page.evaluate(path => window.sidebarFixture.select([path]), originalFile)
+  await page.evaluate((path) => window.sidebarFixture.select([path]), originalFile)
   const beforeChangedApproval = await page.evaluate(() => window.sidebarFixture.state.commits)
   await send('rename Untitled.docx to test.docs', 'fs-rename-original')
   await current().getByRole('button', { name: 'Review action', exact: true }).click()
   await page.getByRole('button', { name: 'Approve action', exact: true }).waitFor()
   await page.keyboard.press('Escape')
   await page.evaluate(() => window.sidebarFixture.select([]))
-  check('Closing review and clearing selection leave the approval waiting', await current().getByRole('button', { name: 'Review action', exact: true }).isVisible() && await page.evaluate(n => window.sidebarFixture.state.commits === n, beforeChangedApproval))
+  check(
+    'Closing review and clearing selection leave the approval waiting',
+    (await current().getByRole('button', { name: 'Review action', exact: true }).isVisible()) &&
+      (await page.evaluate(
+        (n) => window.sidebarFixture.state.commits === n,
+        beforeChangedApproval,
+      )),
+  )
   await current().getByRole('button', { name: 'Review action', exact: true }).click()
-  await page.getByRole('button', { name: 'Approve action', exact: true }).click(); await done(); await page.keyboard.press('Escape')
-  await page.waitForFunction(() => window.sidebarFixture.messages().at(-1).request.outcome === 'completed')
-  check('A reviewed action completes with original run permissions after live selection changes', await page.evaluate(n => {
-    const scope = window.sidebarFixture.state.beginScopes.at(-1)
-    return window.sidebarFixture.state.commits === n + 1 && window.sidebarFixture.messages().at(-1).request.outcome === 'completed' && scope.files.length === 1 && scope.files[0].endsWith('Untitled.docx')
-  }, beforeChangedApproval))
-  await page.evaluate(path => { window.sidebarFixture.select([path]); window.sidebarFixture.state.clearSelectionOnCommit = true }, originalFile)
+  await page.getByRole('button', { name: 'Approve action', exact: true }).click()
+  await done()
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(
+    () => window.sidebarFixture.messages().at(-1).request.outcome === 'completed',
+  )
+  check(
+    'A reviewed action completes with original run permissions after live selection changes',
+    await page.evaluate((n) => {
+      const scope = window.sidebarFixture.state.beginScopes.at(-1)
+      return (
+        window.sidebarFixture.state.commits === n + 1 &&
+        window.sidebarFixture.messages().at(-1).request.outcome === 'completed' &&
+        scope.files.length === 1 &&
+        scope.files[0].endsWith('Untitled.docx')
+      )
+    }, beforeChangedApproval),
+  )
+  await page.evaluate((path) => {
+    window.sidebarFixture.select([path])
+    window.sidebarFixture.state.clearSelectionOnCommit = true
+  }, originalFile)
   const beforeRefresh = await page.evaluate(() => window.sidebarFixture.state.commits)
   await send('rename Untitled.docx to test.docs', 'fs-rename-original')
   await current().getByRole('button', { name: 'Review action', exact: true }).click()
-  await page.getByRole('button', { name: 'Approve action', exact: true }).click(); await done(); await page.keyboard.press('Escape')
-  await page.waitForFunction(() => window.sidebarFixture.messages().at(-1).request.outcome === 'completed')
-  check('Rename refresh removing the selected source no longer cancels the final response', await page.evaluate(n => {
-    const last = window.sidebarFixture.messages().at(-1)
-    return window.sidebarFixture.state.commits === n + 1 && last.request.outcome === 'completed' && last.text === 'The requested action completed.' && window.sidebarFixture.messages().some(message => message.text.includes('Untitled.docx → C:\\Review workspace\\Quarterly reports\\test.docs'))
-  }, beforeRefresh))
+  await page.getByRole('button', { name: 'Approve action', exact: true }).click()
+  await done()
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(
+    () => window.sidebarFixture.messages().at(-1).request.outcome === 'completed',
+  )
+  check(
+    'Rename refresh removing the selected source no longer cancels the final response',
+    await page.evaluate((n) => {
+      const last = window.sidebarFixture.messages().at(-1)
+      return (
+        window.sidebarFixture.state.commits === n + 1 &&
+        last.request.outcome === 'completed' &&
+        last.text === 'The requested action completed.' &&
+        window.sidebarFixture
+          .messages()
+          .some((message) =>
+            message.text.includes(
+              'Untitled.docx → C:\\Review workspace\\Quarterly reports\\test.docs',
+            ),
+          )
+      )
+    }, beforeRefresh),
+  )
   await page.screenshot({ path: path.join(output, 'rename-after-selection-refresh.png') })
-  await page.evaluate(() => { window.sidebarFixture.state.clearSelectionOnCommit = false; window.sidebarFixture.restoreSelection() })
-  await send('list files in this dir', 'listing'); await done()
+  await page.evaluate(() => {
+    window.sidebarFixture.state.clearSelectionOnCommit = false
+    window.sidebarFixture.restoreSelection()
+  })
+  await send('list files in this dir', 'listing')
+  await done()
   await page.getByRole('button', { name: 'Arabic dark', exact: true }).click()
-  check('Activity labels follow Arabic localization', (await current().locator('.directory-activity-toggle').innerText()).includes('اكتمل العمل'))
-  check('Dark RTL activity has no horizontal overflow', await current().evaluate(node => node.scrollWidth <= node.clientWidth + 1))
+  check(
+    'Activity labels follow Arabic localization',
+    (await current().locator('.directory-activity-toggle').innerText()).includes('اكتمل العمل'),
+  )
+  check(
+    'Dark RTL activity has no horizontal overflow',
+    await current().evaluate((node) => node.scrollWidth <= node.clientWidth + 1),
+  )
   await page.screenshot({ path: path.join(output, 'activity-arabic-dark.png') })
   check('No renderer errors', errors.length === 0)
   console.log(`Screenshots: ${output}`)
 } catch (error) {
   await page.screenshot({ path: path.join(output, 'failure.png') })
-  console.error((await page.locator('.ws-chat').innerText()).slice(-10000)); console.error(errors)
+  console.error((await page.locator('.ws-chat').innerText()).slice(-10000))
+  console.error(errors)
   throw error
-} finally { await browser.close(); await server.close() }
+} finally {
+  await browser.close()
+  await server.close()
+}

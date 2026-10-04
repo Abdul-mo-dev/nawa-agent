@@ -5,7 +5,7 @@ import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import { spawn } from 'node:child_process'
-import { validateExplorer } from './transform.mjs'
+import { validateCurrentExplorer } from './transform.mjs'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..'),
   require = createRequire(path.join(root, 'package.json'))
 let ts
@@ -22,9 +22,11 @@ try {
     path.join(root, 'apps/shell/src/renderer/src/explorer/ExplorerHome.tsx'),
     'utf8',
   )
-  validateExplorer(ts, source)
+  validateCurrentExplorer(ts, source)
   for (const relative of [
     'apps/shell/src/renderer/src/explorer/ExplorerHome.tsx',
+    'apps/shell/src/renderer/src/explorer/WorkspaceControlPanel.tsx',
+    'apps/shell/src/renderer/src/explorer/RagAnalyticsPanel.tsx',
     'apps/shell/src/renderer/src/explorer/model.ts',
     'apps/shell/src/renderer/src/rag/RagToolbar.tsx',
     'apps/shell/src/renderer/src/analytics/AnalyticsToolbar.tsx',

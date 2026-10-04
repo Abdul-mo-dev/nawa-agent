@@ -2226,6 +2226,25 @@ export const aiSettingsInputSchema = z
   .object({
     provider: z.string().min(1),
     providers: z.record(z.string(), aiProviderConfigSchema),
+    chatModels: z
+      .array(
+        z
+          .object({
+            id: z.string().min(1),
+            name: z.string().min(1),
+            provider: z.string().min(1),
+            config: aiProviderConfigSchema,
+          })
+          .strict(),
+      )
+      .max(64)
+      .optional(),
+    defaultChatModelId: z.string().optional(),
+    selectedChatModelId: z.string().optional(),
+    settingsRevision: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
     gskToolsEnabled: z.boolean().optional(),
     media: z
       .object({

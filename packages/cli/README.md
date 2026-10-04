@@ -166,9 +166,12 @@ Independently of the PATH, every launch of the packaged app writes the launcher 
 
 `search`, `image` and `media` reuse the editors' provider routing: Genspark
 when signed in (`~/.genoffice/auth.json`) and cloud tools are on, otherwise the
-Serper / Tavily or BYOK image / media provider chosen in the app's AI settings
-(`GenOffice/ai-settings.json` in the platform config directory, override with
-`GENOFFICE_AI_SETTINGS`). `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` are honoured.
+Serper / Tavily or BYOK image / media provider chosen in the app's AI settings.
+Nawa protects saved API keys with the operating system. The CLI starts the Nawa
+app briefly in the background to unlock those keys; install a matching app or
+set `GENOFFICE_APP_BIN`. `GENOFFICE_AI_SETTINGS` can point to a separate
+unprotected CLI settings file, but an alternate protected file cannot be
+unlocked by the app. `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` are honoured.
 Search results, image bytes and analysis text come back in the JSON `detail`;
 `image` also writes the file. These are the only commands that send data off
 the machine.

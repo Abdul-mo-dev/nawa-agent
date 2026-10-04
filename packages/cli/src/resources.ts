@@ -30,8 +30,11 @@ export function repoRoot(): string | null {
     const pkg = join(dir, 'package.json')
     if (existsSync(pkg)) {
       try {
-        if (JSON.parse(readFileSync(pkg, 'utf-8')).name === 'genoffice' ||
-          (existsSync(join(dir, 'apps', 'shell', 'package.json')) && existsSync(join(dir, 'packages', 'cli', 'package.json')))) {
+        if (
+          JSON.parse(readFileSync(pkg, 'utf-8')).name === 'genoffice' ||
+          (existsSync(join(dir, 'apps', 'shell', 'package.json')) &&
+            existsSync(join(dir, 'packages', 'cli', 'package.json')))
+        ) {
           cachedRepo = dir
           return dir
         }
@@ -117,16 +120,20 @@ function installedAppBinaries(env: NodeJS.ProcessEnv): string[] {
   switch (process.platform) {
     case 'darwin':
       return [
+        '/Applications/Nawa.app/Contents/MacOS/Nawa',
+        join(homedir(), 'Applications/Nawa.app/Contents/MacOS/Nawa'),
         '/Applications/GenOffice.app/Contents/MacOS/GenOffice',
         join(homedir(), 'Applications/GenOffice.app/Contents/MacOS/GenOffice'),
       ]
     case 'win32':
       return [
+        env.LOCALAPPDATA ? join(env.LOCALAPPDATA, 'Programs', 'Nawa', 'Nawa.exe') : '',
+        env.ProgramFiles ? join(env.ProgramFiles, 'Nawa', 'Nawa.exe') : '',
         env.LOCALAPPDATA ? join(env.LOCALAPPDATA, 'Programs', 'GenOffice', 'GenOffice.exe') : '',
         env.ProgramFiles ? join(env.ProgramFiles, 'GenOffice', 'GenOffice.exe') : '',
       ].filter(Boolean)
     default:
-      return ['/opt/GenOffice/genoffice', '/usr/bin/genoffice']
+      return ['/opt/Nawa/nawa', '/usr/bin/nawa', '/opt/GenOffice/genoffice', '/usr/bin/genoffice']
   }
 }
 

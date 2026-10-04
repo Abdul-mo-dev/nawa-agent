@@ -133,16 +133,18 @@ repository:
 BUILD_DIR=/tmp/genoffice-release npm run dist:mac
 ```
 
-`dist:win` additionally expects the xlsx sidecar at the MinGW cross-compilation
-path. Building on Windows leaves it under the MSVC target instead, so stage it
-first:
+On Windows, run the full build from PowerShell:
 
-```bash
-cargo build --release --target x86_64-pc-windows-gnu   # from apps/sheets/native/xlsx-engine
+```powershell
+.\Build-NawaInstaller.ps1
 ```
 
-or copy an existing `target/release/xlsx-sidecar.exe` to
-`target/x86_64-pc-windows-gnu/release/`.
+The script runs `npm ci`, compiles the Rust xlsx sidecar for the host MSVC
+target, and packages it with the Windows OCR helper. The installer is
+`release/Nawa-Setup-<version>.exe`; the unpacked app is in `release/win-unpacked`.
+Use `-SkipDependencyInstall` for another build with the same installed
+dependencies, or `-OutputDirectory <path>` to choose another output folder. A
+local build without signing credentials is unsigned.
 
 ## Environment variables
 

@@ -23,6 +23,7 @@ import {
   Menu,
   net,
   screen,
+  safeStorage,
   session as electronSession,
   shell,
   systemPreferences,
@@ -55,6 +56,7 @@ import {
   registerRendererScheme,
   rendererUrl,
 } from '@genoffice/electron-utils'
+import { createAiSettingsStore } from '@genoffice/electron-utils/ai-settings-store'
 import { createI18n, getUiLang, type Lang, normalizeLang, setUiLang } from '@genoffice/i18n'
 import { ProjectStore } from '@genoffice/project-store'
 
@@ -66,6 +68,9 @@ import {
   chatForProvider,
   defaultAiSettings,
   activeProvider,
+  applyChatModel,
+  redactAiSettings,
+  restoreRedactedAiKeys,
   maxOutputTokensOf,
   resolveAiSettings,
   setAiUserAgent,
@@ -1832,21 +1837,16 @@ function pendingRecoveryFor(filePath: string): string | null {
   }
 }
 
-function readJson<T>(path: string, fallback: T): T {
-  try {
-    if (existsSync(path)) return JSON.parse(readFileSync(path, 'utf-8')) as T
-  } catch {
-    /* corrupted state file: fall back to defaults */
-  }
-  return fallback
-}
-
-function writeJson(path: string, value: unknown): void {
-  mkdirSync(join(path, '..'), { recursive: true })
-  writeFileSync(path, JSON.stringify(value, null, 2))
-}
-
 const SETTINGS_PATH = () => userDataPath('ai-settings.json')
+const aiSettingsStore = createAiSettingsStore(safeStorage)
+const readAiSettings = () =>
+  aiSettingsStore.read<Partial<AiSettings> & LegacyAiSettings>(SETTINGS_PATH(), {})
+const toolAiSettings = () => resolveAiSettings(readAiSettings(), defaultAiSettings())
+const chatAiSettings = (selectedId?: string) => {
+  const settings = toolAiSettings()
+  settings.provider = activeProvider(settings)
+  return applyChatModel(settings, selectedId)
+}
 
 // Dev-only automation hooks: a fixed CDP port for driving the app from test
 // scripts, and a workbook path that bypasses the native file dialog.
@@ -2321,11 +2321,13 @@ export function registerSheetsIpc(): void {
   // owns its channel the way pdf does.
   ipcMain.handle(
     IPC_CHANNELS.aiGenerateImage,
-    (_event, op: { prompt?: unknown; aspectRatio?: unknown }) =>
-      { assertDirectoryStageCapability(_event.sender, 'media'); return generateImageTool(SETTINGS_PATH(), {
+    (_event, op: { prompt?: unknown; aspectRatio?: unknown }) => {
+      assertDirectoryStageCapability(_event.sender, 'media')
+      return generateImageTool(toolAiSettings(), {
         prompt: String(op?.prompt ?? ''),
         ...(op?.aspectRatio ? { aspectRatio: String(op.aspectRatio) } : {}),
-      }) },
+      })
+    },
   )
 
   ipcMain.on(IPC_CHANNELS.recoveryPromptReply, (event, restore: unknown) => {
@@ -3263,11 +3265,12 @@ export function registerSheetsAiIpc(): void {
 
   ipcMain.handle(IPC_CHANNELS.aiGetSettings, (event): AiSettings => {
     sessionFor(event)
-    const stored = readJson<Partial<AiSettings> & LegacyAiSettings>(SETTINGS_PATH(), {})
+    const stored = readAiSettings()
     const settings = resolveAiSettings(stored, defaultAiSettings())
     // a stored BYOK provider is honored when usable; half-filled configs fall back to genspark
     settings.provider = activeProvider(settings)
-    return settings
+    settings.settingsRevision = aiSettingsStore.revision(SETTINGS_PATH())
+    return redactAiSettings(settings)
   })
 
   // Genspark account (gsk login state): the auth source for AI features; the
@@ -3289,14 +3292,20 @@ export function registerSheetsAiIpc(): void {
   ipcMain.handle(IPC_CHANNELS.aiSetSettings, (event, input: unknown) => {
     sessionFor(event)
     const settings = aiSettingsInputSchema.parse(input)
-    writeJson(SETTINGS_PATH(), settings)
+    if (!settings.settingsRevision) throw new Error('Reload AI settings before saving.')
+    aiSettingsStore.write(
+      SETTINGS_PATH(),
+      restoreRedactedAiKeys(settings as AiSettings, toolAiSettings()),
+      settings.settingsRevision,
+    )
   })
 
   ipcMain.handle(IPC_CHANNELS.aiChat, async (event, input: unknown) => {
     sessionFor(event)
     const request = aiChatRequestSchema.parse(input)
-    const provider = request.settings.provider as AiProviderId
-    let config = request.settings.providers[provider]
+    const settings = restoreRedactedAiKeys(request.settings as AiSettings, toolAiSettings())
+    const provider = settings.provider as AiProviderId
+    let config = settings.providers[provider]
     if (provider === 'genspark' && config && !config.apiKey) {
       config = { ...config, apiKey: gskApiKey() }
     }
@@ -3325,9 +3334,10 @@ export function registerSheetsAiIpc(): void {
     const request = aiStreamRequestSchema.parse(input)
     const { requestId, system, messages } = request
     const tools = request.tools ?? []
-    const maxTokens = request.maxTokens ?? maxOutputTokensOf(request.settings)
-    const provider = request.settings.provider as AiProviderId
-    let config = request.settings.providers[provider]
+    const settings = chatAiSettings(request.settings.selectedChatModelId)
+    const maxTokens = request.maxTokens ?? maxOutputTokensOf(settings)
+    const provider = settings.provider as AiProviderId
+    let config = settings.providers[provider]
     // Genspark's key never enters the settings file; it is read from the gsk
     // login state per request
     if (provider === 'genspark' && config && !config.apiKey) {
@@ -3411,11 +3421,11 @@ export function registerSheetsAiIpc(): void {
   // Shared search tools (content + images): Serper with DuckDuckGo fallback
   // (same source as slides/docs)
   ipcMain.handle('ai:web-search', async (_event, query: unknown, maxResults?: unknown) => {
-      assertDirectoryStageCapability(_event.sender, 'network');
+    assertDirectoryStageCapability(_event.sender, 'network')
 
     try {
       return await webSearchTool(
-        SETTINGS_PATH(),
+        toolAiSettings(),
         z.string().parse(query),
         typeof maxResults === 'number' ? maxResults : 6,
       )
@@ -3424,11 +3434,11 @@ export function registerSheetsAiIpc(): void {
     }
   })
   ipcMain.handle('ai:image-search', async (_event, query: unknown, maxResults?: unknown) => {
-      assertDirectoryStageCapability(_event.sender, 'network');
+    assertDirectoryStageCapability(_event.sender, 'network')
 
     try {
       return await imageSearchTool(
-        SETTINGS_PATH(),
+        toolAiSettings(),
         z.string().parse(query),
         typeof maxResults === 'number' ? maxResults : 8,
       )
@@ -3444,7 +3454,7 @@ export function registerSheetsAiIpc(): void {
   ipcMain.handle(
     'ai:fetch-image',
     async (_event, url: unknown): Promise<{ base64: string; mime: string } | null> => {
-      assertDirectoryStageCapability(_event.sender, 'network');
+      assertDirectoryStageCapability(_event.sender, 'network')
 
       try {
         const resp = await fetchRemoteImage(z.string().parse(url))

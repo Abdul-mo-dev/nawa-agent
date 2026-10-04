@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { generateImageTool } from '@genoffice/ai-search'
 import { fetchRemoteImage } from '@genoffice/electron-utils/remote-image'
 import { flagBool, flagString } from '../args'
-import { aiSettingsPath, prepareCloud } from '../cloud'
+import { loadCloudSettings, prepareCloud } from '../cloud'
 import { resolveInput, resolveOutput, writeOutput } from '../fs'
 import type { CommandDef } from '../registry'
 import { CliError, EXIT } from '../result'
@@ -86,7 +86,7 @@ export const imageCommand: CommandDef = {
       resolveOutput(`${base}${ext}`, ctx, { force, fresh: true })
     }
     await prepareCloud(ctx.env)
-    const r = await generateImageTool(aiSettingsPath(ctx.env), {
+    const r = await generateImageTool(await loadCloudSettings(ctx.env), {
       prompt,
       aspectRatio: aspect,
       imageSize: size,

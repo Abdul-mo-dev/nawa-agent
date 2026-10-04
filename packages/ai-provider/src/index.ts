@@ -1,4 +1,15 @@
-export { applyChatModel, chatModelLabel, normalizeChatModels, validateChatModels, setRendererChatModel, getRendererChatModel, rememberChatModels, resolveRendererChatSettings, chatModelSessionKey } from './chat-models'
+export {
+  applyChatModel,
+  chatModelLabel,
+  normalizeChatModels,
+  validateChatModels,
+  setRendererChatModel,
+  getRendererChatModel,
+  rememberChatModels,
+  resolveRendererChatSettings,
+  chatModelSessionKey,
+} from './chat-models'
+export { REDACTED_AI_KEY, redactAiSettings, restoreRedactedAiKeys } from './credentials'
 export type { AiChatModel } from './chat-models'
 export type {
   AiChatRequest,

@@ -233,6 +233,13 @@ jobs:
       - name: Install Chromium for layout tests
         run: npx playwright install chromium
 
+      - name: Directory sidebar interaction checks
+        run: |
+          node tools/inspector-tabs/test.mjs
+          node tools/workspace-tabs/test.mjs
+          node tools/sidebar-review/test.mjs
+          node tools/sidebar-review/activity-test.mjs
+
       - name: Markdown browser tests
         run: npx playwright test --config apps/markdown/playwright.config.ts
 
@@ -252,4 +259,6 @@ jobs:
           path: |
             e2e/artifacts
             e2e/test-results
+            .task/sidebar-review
+            .task/directory-chat-review
           retention-days: 7

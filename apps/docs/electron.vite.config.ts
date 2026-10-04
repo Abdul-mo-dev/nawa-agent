@@ -38,6 +38,10 @@ const mainAlias = {
     __dirname,
     '../../packages/electron-utils/src/atomic-write.ts',
   ),
+  '@genoffice/electron-utils/ai-settings-store': resolve(
+    __dirname,
+    '../../packages/electron-utils/src/ai-settings-store.ts',
+  ),
   '@genoffice/electron-utils/drop-open': resolve(
     __dirname,
     '../../packages/electron-utils/src/drop-open.ts',

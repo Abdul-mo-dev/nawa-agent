@@ -5,8 +5,8 @@ import {
   imageGenerationAvailable,
   mediaAnalysisAvailable,
 } from '@genoffice/ai-provider'
-import { hasGskAuth, readAiSettingsFile } from '@genoffice/ai-search'
-import { aiSettingsPath, prepareCloud } from '../cloud'
+import { hasGskAuth } from '@genoffice/ai-search'
+import { aiSettingsPath, loadCloudSettings, prepareCloud } from '../cloud'
 import type { CommandDef } from '../registry'
 import { appLaunch } from '../resources'
 
@@ -24,7 +24,7 @@ export const capabilitiesCommand: CommandDef = {
   usage: 'capabilities',
   async run(_args, ctx) {
     await prepareCloud(ctx.env)
-    const settings = readAiSettingsFile(aiSettingsPath(ctx.env))
+    const settings = await loadCloudSettings(ctx.env)
     const gsk = hasGskAuth() && cloudToolsEnabled(settings)
     const searchProvider = activeSearchProvider(settings)
     const keyedSearch = searchProvider !== 'genspark'

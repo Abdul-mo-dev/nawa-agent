@@ -24,6 +24,7 @@ export function AiComposer({
   header,
   footerStart,
   iconOnly = false,
+  sendDisabled = false,
   sendIconEnabled,
   sendIconDisabled,
   stopIcon,
@@ -49,6 +50,8 @@ export function AiComposer({
   readonly footerStart?: React.ReactNode
   /** compact variant: no hint text, icon-only enter/stop button (Genspark composer style) */
   readonly iconOnly?: boolean | undefined
+  /** Keep the draft editable when the host has a recoverable send prerequisite. */
+  readonly sendDisabled?: boolean | undefined
   /** custom art for the icon-only send button (e.g. brand-supplied PNGs); falls back to IconEnter */
   readonly sendIconEnabled?: React.ReactNode
   readonly sendIconDisabled?: React.ReactNode
@@ -66,7 +69,7 @@ export function AiComposer({
 }): React.JSX.Element {
   const innerRef = useRef<HTMLTextAreaElement | null>(null)
   const ref = textareaRef ?? innerRef
-  const canSend = value.trim().length > 0 && !busy
+  const canSend = value.trim().length > 0 && !busy && !sendDisabled
   const { spellcheck } = useAiPanelPrefs()
 
   // auto-grow up to ~6 lines; empty clears the inline height outright so the

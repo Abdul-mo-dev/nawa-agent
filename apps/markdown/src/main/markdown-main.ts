@@ -11,6 +11,7 @@ import {
   ipcMain,
   net,
   protocol,
+  safeStorage,
   shell,
 } from 'electron'
 import type { WebContents } from 'electron'
@@ -29,6 +30,13 @@ import {
   rendererUrl,
 } from '@genoffice/electron-utils'
 import { createI18n, getUiLang } from '@genoffice/i18n'
+import {
+  defaultAiSettings,
+  resolveAiSettings,
+  type AiSettings,
+  type LegacyAiSettings,
+} from '@genoffice/ai-provider'
+import { createAiSettingsStore } from '@genoffice/electron-utils/ai-settings-store'
 import { generateImageTool } from '@genoffice/ai-search'
 import { ImageExportSessions } from './image-export'
 import { printMarkdownPdf } from './print-pdf'
@@ -60,6 +68,15 @@ import type {
   SaveMarkdownResult,
   SaveMode,
 } from '../shared/ipc'
+
+const toolAiSettings = () =>
+  resolveAiSettings(
+    createAiSettingsStore(safeStorage).read<Partial<AiSettings> & LegacyAiSettings>(
+      join(app.getPath('userData'), 'ai-settings.json'),
+      {},
+    ),
+    defaultAiSettings(),
+  )
 
 const tDlg = createI18n({
   zh: {
@@ -857,11 +874,13 @@ function registerMarkdownIpc(): void {
   // shell-registered, but image generation is gated per app
   ipcMain.handle(
     MARKDOWN_CHANNELS.aiGenerateImage,
-    (_e, op: { prompt?: unknown; aspectRatio?: unknown }) =>
-      { assertDirectoryStageCapability(_e.sender, 'media'); return generateImageTool(join(app.getPath('userData'), 'ai-settings.json'), {
+    (_e, op: { prompt?: unknown; aspectRatio?: unknown }) => {
+      assertDirectoryStageCapability(_e.sender, 'media')
+      return generateImageTool(toolAiSettings(), {
         prompt: String(op?.prompt ?? ''),
         aspectRatio: op?.aspectRatio ? String(op.aspectRatio) : undefined,
-      }) },
+      })
+    },
   )
 
   const MIME_BY_EXT: Record<string, ImageData['mime']> = {
