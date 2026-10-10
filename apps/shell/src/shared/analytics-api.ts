@@ -2,6 +2,7 @@
 export const ANALYTICS_CHANNEL = 'nawa:analytics'
 export const ANALYTICS_CHANGED = 'nawa:analytics-changed'
 export const ANALYTICS_VERSION = '1.0.0'
+export const ANALYTICS_FILE_EXTENSIONS = ['.csv', '.tsv', '.jsonl', '.ndjson', '.json', '.xlsx', '.xlsm'] as const
 export type DataType = 'text' | 'integer' | 'decimal' | 'real' | 'date' | 'boolean'
 export interface DataColumn {
   id: string
@@ -83,6 +84,8 @@ export interface AnalyticsProgress {
   running: boolean
   folder: string
   current: string
+  paths?: string[]
+  currentRows?: number
   scanned: number
   imported: number
   unchanged: number
@@ -183,6 +186,8 @@ export interface AnalyticsApi {
   settings(): Promise<{ settings: AnalyticsSettings; databasePath: string; backend: string }>
   saveSettings(settings: AnalyticsSettings): Promise<void>
   importFolder(folder: string, recursive: boolean, consent: boolean): Promise<AnalyticsProgress>
+  /** Explicit UI action; prepares only selected tables and preserves the saved approval mode. */
+  prepareSelected(folder: string, paths: string[]): Promise<AnalyticsPreparationSummary>
   progress(): Promise<AnalyticsProgress>
   cancel(): Promise<void>
   statuses(paths: string[], verify?: boolean): Promise<AnalyticsFileStatus[]>

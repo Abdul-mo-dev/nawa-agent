@@ -1,5 +1,6 @@
 import { basename, extname, posix } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
+import { ANALYTICS_FILE_EXTENSIONS } from '../../shared/analytics-api'
 import {
   readXml,
   descendants,
@@ -27,15 +28,7 @@ import {
   type SourceTable,
 } from './stream'
 import { TableZip } from './zip'
-export const TABLE_EXTENSIONS = new Set([
-  '.csv',
-  '.tsv',
-  '.jsonl',
-  '.ndjson',
-  '.json',
-  '.xlsx',
-  '.xlsm',
-])
+export const TABLE_EXTENSIONS = new Set<string>(ANALYTICS_FILE_EXTENSIONS)
 export function columnNumber(name: string): number {
   if (!/^[A-Z]{1,3}$/i.test(name)) throw new Error('Invalid Excel column reference.')
   let n = 0

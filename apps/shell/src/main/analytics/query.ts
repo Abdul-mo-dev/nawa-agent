@@ -11,6 +11,11 @@ import { samePath } from '../directory-actions/file-safety'
 import { AnalyticsStore, quotedTable, type StoredDataset } from './store'
 import { object, list, text, id, int } from './validation'
 import { convert, display, divide, pow10, cellDisplay, jsonSafe } from './numeric'
+export function datasetWarnings(dataset: { warnings: string[]; formulaCells: number }): string[] {
+  return dataset.formulaCells > 0
+    ? dataset.warnings
+    : dataset.warnings.filter(warning => !warning.startsWith('Workbook requests recalculation'))
+}
 export interface Field {
   column: DataColumn
   sql: string
@@ -131,7 +136,7 @@ export class QuerySession {
         )
     }
     const datasets = [...left],
-      warnings = left.flatMap((d) => d.data.warnings)
+      warnings = left.flatMap((d) => datasetWarnings(d.data))
     if (r.join !== undefined) {
       const j = object(r.join, 'join'),
         right = this.dataset(j.datasetId)
@@ -174,7 +179,7 @@ export class QuerySession {
       for (const c of rightCols)
         fields.set(`right.${c.id}`, { column: c, sql: `b."${c.id}"`, side: 'right' })
       datasets.push(right)
-      warnings.push(...right.data.warnings)
+      warnings.push(...datasetWarnings(right.data))
     }
     const params: SQLInputValue[] = [],
       parts = ['analytics_guard()']
@@ -285,7 +290,11 @@ export class QuerySession {
     const groups = groupInputs.map((raw, i) => {
       const g = object(raw, 'group'),
         field = this.field(relation.fields, g.column),
-        name = unique(g.as ?? `group_${i}`)
+        inferredName = field.column.name
+          .normalize('NFKD')
+          .replace(/[^a-zA-Z0-9_]+/g, '_')
+          .replace(/^_+|_+$/g, ''),
+        name = unique(g.as ?? (/^[a-zA-Z]/.test(inferredName) ? inferredName : `group_${i}`))
       let expression = field.sql
       if (g.period !== undefined) {
         if (field.column.type !== 'date' || !['day', 'month', 'year'].includes(String(g.period)))
@@ -423,8 +432,12 @@ export class QuerySession {
       ])
       const orders = list(r.orderBy ?? [], 'orderBy', 8).map((v) => {
         const o = object(v, 'order'),
-          key = text(o.column, 'order column')
-        if (!meta.has(key)) throw new Error('Aggregate orderBy uses an output group/metric name.')
+          requested = text(o.column, 'order column'),
+          key = meta.has(requested)
+            ? requested
+            : groups.find(group => group.key === requested)?.name
+        if (!key || !meta.has(key))
+          throw new Error('Aggregate orderBy uses a group column or an output group/metric name.')
         return { key, descending: o.descending === true }
       })
       const compare = (

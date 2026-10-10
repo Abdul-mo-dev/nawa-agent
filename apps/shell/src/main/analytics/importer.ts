@@ -50,7 +50,9 @@ export function describeDraft(store:AnalyticsStore,draft:Draft,path:string,hash:
   const seen=new Map<string,number>(),columns=profiles.map((p,i)=>{
     let name=headers[i]?.trim()||`Column ${i+1}`;const key=name.normalize('NFKC').toLowerCase(),n=(seen.get(key)??0)+1;seen.set(key,n);if(n>1)name+=` (${n})`;return inferColumn(i,name,p)
   })
-  const warnings=[...m.warnings,'Analytics is blocked until a user confirms this table policy. Review numeric units and exclusions.']
+  // A workbook-wide recalc flag cannot affect a table with no formula cells.
+  // Keep the warning on formula-bearing tables, where cached values matter.
+  const warnings=[...m.warnings.filter(w=>formulas>0||!w.startsWith('Workbook requests recalculation')),'Analytics is blocked until a user confirms this table policy. Review numeric units and exclusions.']
   if(hidden)warnings.push(`${hidden} hidden rows found; the default policy excludes them and reports that exclusion.`)
   if(formulas)warnings.push(`${formulas} formula cells found. Default policy rejects formulas. Selecting saved-cache explicitly accepts unverified saved values; nothing is recalculated.`)
   if(suspicious)warnings.push(`${suspicious} possible total/subtotal rows found, including ${suspiciousRows.join(', ')}. They are NOT automatically removed; review skipRows/range.`)

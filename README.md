@@ -218,6 +218,7 @@ document in a visible editor tab while you watch.
 - **PDF done properly.** Edit text inside the page, and convert PDF to Word,
   Excel or PowerPoint on-device, with system OCR for scans.
 - **Markdown and HTML too**, with the same AI panel and local export to Word.
+- **Local file knowledge.** [Index selected files on-device](docs/LOCAL_KNOWLEDGE.md) with OCR, semantic search and cited source locations; prepare supported tables for read-only SQL and statistics.
 - **Scriptable.** A `genoffice` command line, an agent skill and an MCP server
   put every engine at the service of Claude Code, Claude Desktop, Codex, Cursor
   and other agents, still on-device.

@@ -120,7 +120,8 @@ export function RagToolbar({
     }
   }
   const remote = settings?.settings.backend === 'myagent'
-  const configured = settings?.settings.enabled && (remote || !!settings?.settings.model)
+  const native = settings?.settings.backend === 'native'
+  const configured = settings?.settings.enabled && (remote || native || !!settings?.settings.model)
   const running = progress?.running === true
   const status = error
     ? 'Check needs attention'
@@ -158,11 +159,15 @@ export function RagToolbar({
           <strong>
             {remote
               ? 'MyAgent · '
-              : settings?.settings.model
-                ? settings.settings.model + ' · '
-                : ''}
+              : native
+                ? 'Nawa on-device model'
+                : settings?.settings.model
+                  ? settings.settings.model + ' · '
+                  : ''}
           </strong>
-          <bdi>{remote ? settings?.settings.serverUrl : settings?.settings.baseUrl}</bdi>
+          {!native && (
+            <bdi>{remote ? settings?.settings.serverUrl : settings?.settings.baseUrl}</bdi>
+          )}
         </p>
         {status === 'Needs setup' && (
           <p role="status">{s('Configure and enable file search in Setup.')}</p>
@@ -172,16 +177,18 @@ export function RagToolbar({
             {s('Configure file search')}
           </button>
         )}
-        {remote && (
-          <SelectedFileRefresh
-            folder={folder}
-            selectedFiles={selectedFiles}
-            configured={!!configured}
-            progress={progress}
-            onProgress={setProgress}
-          />
-        )}
-        <details className="nawa-directory-indexing" open={!remote || undefined}>
+        <SelectedFileRefresh
+          folder={folder}
+          selectedFiles={selectedFiles}
+          backend={settings?.settings.backend ?? 'native'}
+          configured={!!configured}
+          progress={progress}
+          onProgress={setProgress}
+        />
+        <details
+          className="nawa-directory-indexing"
+          open={settings?.settings.backend === 'local' || undefined}
+        >
           <summary>{s('Index the whole directory')}</summary>
           <p>
             {s(
@@ -207,8 +214,10 @@ export function RagToolbar({
             />
             {s(
               remote
-                ? 'I allow MyAgent on this machine to read this directory and store its contents in the shared index using its configured embedding service.'
-                : 'I allow this directory’s text to be sent to the embedding server and stored in the unencrypted local index.',
+                ? 'I allow the configured MyAgent server to index this directory using its configured processing services.'
+                : native
+                  ? 'I allow this directory’s extracted text to be stored in the unencrypted local index and embedded on this device.'
+                  : 'I allow this directory’s extracted text to be sent to the configured embedding endpoint and stored in the unencrypted local index.',
             )}
           </label>
           <div className="nawa-rag-actions">

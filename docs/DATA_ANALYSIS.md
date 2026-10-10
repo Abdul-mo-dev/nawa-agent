@@ -4,7 +4,7 @@ The directory chat agent combines its existing file-inspection tools with SQLite
 
 ## 1. Prepare and export once
 
-Click **Prepare & export** beside **New chat**. The button starts the existing chat agent with the clicked selection and authorizes preparation, agent review and SQLite export for that request. Separate preparation settings, another prompt and manual approval of clear tables are not required. A configured chat model is required because the agent performs the review.
+Click **More → Prepare & export** in Chat. The button starts the existing chat agent with the clicked selection and authorizes preparation, agent review and SQLite export for that request. Separate preparation settings, another prompt and manual approval of clear tables are not required. A configured chat model is required because the agent performs the review.
 
 The agent imports supported saved files locally, validates draft table policies, and describes every table and every column page. It checks row meaning, boundaries, types, decimal scales, units, keys and warnings, using the original file when more evidence is needed. It applies clear validated policies and preserves existing user-approved policies. Formula caches, hidden rows, possible subtotals and uncertain populations remain pending when a decision cannot be justified.
 
@@ -23,7 +23,7 @@ flowchart LR
 
 Native preparation supports CSV, TSV, JSON, JSONL/NDJSON and Excel `.xlsx`/`.xlsm`. File and row limits are enforced; failed imports are not published as complete populations. Local source snapshots, table data, results and exports are stored without encryption. The button authorizes this batch and does not change saved settings. Stop cancels active work; incomplete exports are not published as completed batches.
 
-**Knowledge → Tables** remains available for inspecting policies and resolving specific remaining decisions. Advanced preparation toggles and manual import/review are optional controls, not prerequisites for the button workflow.
+The main file panel’s **More actions → Review table data** remains available for inspecting policies and resolving specific remaining decisions. **Settings → Knowledge** controls automatic table preparation; import limits are collapsed under **Advanced analysis settings**.
 
 ## 2. Ask for insights, searches or calculations
 
@@ -61,19 +61,19 @@ When a source changes, prepare/refresh it again before reusing results. Unavaila
 See [MyAgent connection and indexing setup](MYAGENT_RAG.md) for full configuration instructions.
 
 1. Start a compatible MyAgent.Server and ensure its configured shared folders include the source files.
-2. In **Knowledge → Setup → Connection and search**, select MyAgent, configure the server URL and service API key, and enable/test/save the connection. **Settings → MyAgent → Connection** provides the same connection setup.
+2. In **Settings → Knowledge → Advanced embedding settings**, select MyAgent, configure the server URL and service API key, and enable/test/save the connection. Optional server administration lives under **Settings → Integrations → MyAgent server (optional)**.
 3. For text classification, also configure MyAgent's model/provider under the model settings. Nawa's chat model does not configure the server's classification model.
-4. In **Knowledge → Files**, select the individual files and click **Check selected files**.
-5. Confirm selected-file processing consent, then use **Refresh selected files** for missing or stale indexes. Check again for **Ready — snapshot verified**.
+4. Select individual files in the main panel and click **Index** at the top of chat. It starts embeddings through the saved search connection and separately prepares supported tables for native analysis using the saved approval mode.
+5. Hover or focus the files' Search and Analysis icons to check progress and readiness. Click Index again for changed or failed files. Additional retry and table-review controls are in the main file panel’s **More actions**.
 6. Keep the intended files selected and ask in Chat. Nawa native table approval is not required for ordinary MyAgent SQL.
 
 ```mermaid
 flowchart TD
-    START["Start MyAgent and configure shared folders"] --> SETUP["Knowledge > Setup<br/>Save enabled MyAgent connection"]
-    SETUP --> FILES["Knowledge > Files<br/>Select individual files"]
+    START["Start MyAgent and configure shared folders"] --> SETUP["Settings > Knowledge<br/>Save enabled MyAgent connection"]
+    SETUP --> FILES["Main file panel<br/>Select individual files"]
     FILES --> CHECK["Check selected files"]
     CHECK --> READY{"Current index verified?"}
-    READY -->|No| CONSENT["Confirm processing consent<br/>Refresh selected files"]
+    READY -->|No| CONSENT["Click Index in chat"]
     CONSENT --> CHECK
     READY -->|Yes| ASK["Ask in Chat"]
     ASK --> KIND{"Question type"}
@@ -123,7 +123,7 @@ Before accepting an answer, check the engine used, selected-file coverage, row p
 | Approval asks for confirmation again | A policy edit cleared it. Select the confirmation checkbox after the final edit. |
 | Approval stays disabled while idle | Restart Nawa with the current build. The current review UI disables approval only during validation. |
 | `Cannot find module ... worker-*.js` | Restart Nawa from a complete current build so its main process and worker artifacts belong to the same build. Retry the operation. |
-| MyAgent reports **Needs indexing** or **Needs refresh** | Use **Knowledge → Files → Refresh selected files**, then check readiness again. |
+| MyAgent reports **Needs indexing** or **Needs refresh** | Select the files and click **Index** at the top of chat. |
 | SQL totals differ from native totals | Compare grain, boundaries, hidden rows, exclusions, formula-cache policy, import limits and numeric types. |
 | Classification is interrupted | List saved analyses and resume the compatible `analysisId`; inspect failed and uncertain rows. |
 | A source file changes | Refresh the engine you are using. Newly imported native generations must be validated under the saved approval mode; do not reuse stale receipts or classification results. |

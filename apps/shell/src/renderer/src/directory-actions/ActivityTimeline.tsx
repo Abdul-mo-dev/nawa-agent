@@ -48,18 +48,20 @@ export const ActivityTimeline = memo(function ActivityTimeline({ activity, onRev
   const label = activity.status === 'incomplete' ? 'Incomplete' : activity.status === 'failed' ? 'Request failed' : activity.status === 'cancelled' ? 'Stopped' : activity.status === 'waiting' ? 'Waiting for you' : running ? 'Working' : 'Worked'
   // File checks and model setup belong to diagnostics, not a premature answer.
   // Show the native file-chat thinking indicator until a tool starts.
-  const showActivity = !running || activity.status === 'waiting' || failures > 0 ||
-    activity.steps.some(step => step.kind === 'tool' || step.kind === 'native' || step.kind === 'approval')
+  const showActivity = activity.status === 'waiting' || failures > 0 || steps.visible.length > 0
   const copyDetails = async () => {
     try { await navigator.clipboard.writeText(JSON.stringify(activity, null, 2)); setCopy('Copied') }
     catch { setCopy('Could not copy. Select details below.') }
   }
-  if (!showActivity) return <div className="directory-thinking"><AiTypingIndicator label={s('Thinking…')} /></div>
+  if (!showActivity)
+    return running
+      ? <div className="directory-thinking"><AiTypingIndicator label={s('Thinking…')} /></div>
+      : null
   return <section className="directory-activity" aria-label={s('Request activity')}>
     <div className="directory-activity-heading">
     <button type="button" className="directory-activity-toggle" aria-expanded={open} onClick={() => setExpanded(!open)}>
       {running && <span className={`directory-activity-indicator is-${activity.status}`} aria-hidden="true" />}
-      <span>{s(label)} · {s('{count} steps', { count: steps.visible.length })}</span>
+      <span>{s(label)} · {steps.visible.length === 1 ? s('1 step') : s('{count} steps', { count: steps.visible.length })}</span>
       <time>{elapsed(activity.startedAt, activity.finishedAt ?? now)}</time><span className={`directory-activity-caret${open ? ' is-open' : ''}`} aria-hidden="true">›</span>
     </button>
     {!!failures && <div className="directory-activity-errors">{s('{count} failed steps', { count: failures })}</div>}
@@ -75,6 +77,7 @@ export const ActivityTimeline = memo(function ActivityTimeline({ activity, onRev
         {copy && <span role="status">{s(copy)}</span>}
         <pre dir="ltr">{JSON.stringify({ requestId: activity.id, model: activity.model, selectedFiles: activity.selectedFiles,
           startedAt: new Date(activity.startedAt).toISOString(), status: activity.status }, null, 2)}</pre>
+        {!!steps.diagnostic.length && <><p>{s('Technical steps')}</p><ol className="directory-activity-skipped">{steps.diagnostic.map(step => <Step key={step.id} step={step} now={step.finishedAt ?? now} />)}</ol></>}
         {!!steps.skipped.length && <><p>{s('Skipped preparation')}</p><ol className="directory-activity-skipped">{steps.skipped.map(step => <Step key={step.id} step={step} now={step.finishedAt ?? now} />)}</ol></>}
       </details>
     </div>}

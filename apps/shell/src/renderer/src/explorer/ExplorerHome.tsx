@@ -1,6 +1,9 @@
 import { useSidebarText } from './sidebar-i18n'
 import type { PanelActivity } from './panel-state'
 import { WorkspaceControlPanel } from './WorkspaceControlPanel'
+import { PanelDialog } from './PanelDialog'
+import { RagToolbar } from '../rag/RagToolbar'
+import { AnalyticsToolbar } from '../analytics/AnalyticsToolbar'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, MouseEvent } from 'react'
 import type { FolderRoot, HomeApi, RecentPage } from '../../../shared/home-api'
@@ -60,11 +63,11 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
   const { lang, dateLocale } = useI18n()
   const { s } = useSidebarText()
   const [panelActivity, setPanelActivity] = useState<PanelActivity | undefined>()
-  const lastPanel = useRef<'ai' | 'ragAnalytics' | 'provider'>('ai')
   const t = explorerText(lang)
   const [prefs, setPrefs] = useState<Preferences>(() => {
     try {
-      return parsePreferences(localStorage.getItem(PREFERENCES_KEY))
+      const saved = parsePreferences(localStorage.getItem(PREFERENCES_KEY))
+      return { ...saved, pane: saved.pane === 'none' ? 'none' : 'ai' }
     } catch {
       return { ...DEFAULT_PREFERENCES }
     }
@@ -88,6 +91,9 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
   const [name, setName] = useState('')
   const [dialogError, setDialogError] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [fileTools, setFileTools] = useState<'search' | 'tables' | null>(null)
+  const [settingsSection, setSettingsSection] = useState<'account' | 'knowledge' | 'aiModel'>('account')
+  const openSettings = (section: typeof settingsSection = 'account') => { setSettingsSection(section); setSettingsOpen(true) }
   const [cutItems, setCutItems] = useState<Item[]>([])
   const [clipboardMode, setClipboardMode] = useState<'copy' | 'cut'>('cut')
   const [page, setPage] = useState<RecentPage>({ entries: [], total: 0, totalAll: 0 })
@@ -109,7 +115,6 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
     roots.find((root) => samePath(root.path, currentRootPath || activeRoot || '')) ?? roots[0]
   const state = folder ? directory(folder) : undefined
   const inspectorVisible = !editorActive && prefs.pane !== 'none'
-  if (prefs.pane !== 'none') lastPanel.current = prefs.pane
   const drawer = windowWidth < 1100
   const navigationVisible = prefs.navigationVisible && windowWidth >= 540
   const effectiveNavWidth = Math.min(prefs.navigationWidth, Math.max(180, windowWidth - 400))
@@ -118,7 +123,7 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
     Math.max(300, windowWidth - (navigationVisible ? effectiveNavWidth : 0) - 385),
   )
   const title = folder ? basename(folder) : t(location.kind as 'home' | 'recent' | 'starred')
-  const suspended = !!menu || !!dialog || settingsOpen
+  const suspended = !!menu || !!dialog || settingsOpen || !!fileTools
   useEditorSlot(center, suspended)
   const notify = useCallback((text: string, error = false) => setNotice({ text, error }), [])
   const failure = useCallback((error: unknown) => notify(errorText(error), true), [notify])
@@ -660,16 +665,12 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
     {
       label: s('Knowledge'),
       icon: 'search',
-      checked: prefs.pane === 'ragAnalytics',
-      disabled: editorActive,
-      action: () => changePrefs({ pane: 'ragAnalytics' }),
+      action: () => openSettings('knowledge'),
     },
     {
       label: s('Models'),
       icon: 'settings',
-      checked: prefs.pane === 'provider',
-      disabled: editorActive,
-      action: () => changePrefs({ pane: 'provider' }),
+      action: () => openSettings('aiModel'),
     },
     { label: t('resetLayout'), divider: true, action: () => setPrefs({ ...DEFAULT_PREFERENCES }) },
     { label: 'Original home', icon: 'home', divider: true, action: onOpenLegacy },
@@ -1105,10 +1106,22 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
                 },
               },
               {
+                label: s('Index selected files'),
+                icon: 'search',
+                disabled: !folder || !selectedItems.some(item => item.kind === 'file'),
+                action: () => setFileTools('search'),
+              },
+              {
+                label: s('Review table data'),
+                icon: 'list',
+                disabled: !folder,
+                action: () => setFileTools('tables'),
+              },
+              {
                 label: t('settings'),
                 icon: 'settings',
                 divider: true,
-                action: () => setSettingsOpen(true),
+                action: () => openSettings(),
               },
               { label: 'Original home', icon: 'home', action: onOpenLegacy },
             ])
@@ -1238,7 +1251,7 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
                 )}
               </div>
               <div className="ex-nav-footer">
-                <button className="ex-nav-item" onClick={() => setSettingsOpen(true)}>
+                <button className="ex-nav-item" onClick={() => openSettings()}>
                   <Icon name="settings" />
                   <span>{t('settings')}</span>
                 </button>
@@ -1430,13 +1443,7 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
         </main>
         {inspectorVisible && !drawer && (
           <Splitter
-            label={
-              prefs.pane === 'ragAnalytics'
-                ? s('Knowledge')
-                : prefs.pane === 'provider'
-                  ? s('Models')
-                  : t('assistant')
-            }
+            label={t('assistant')}
             value={effectiveInspectorWidth}
             min={300}
             max={Math.min(
@@ -1450,19 +1457,13 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
         <WorkspaceControlPanel
           visible={inspectorVisible}
           drawer={drawer}
+          settingsOpen={settingsOpen}
           onActivity={setPanelActivity}
-          active={lastPanel.current}
-          assistantLabel={t('assistant')}
           closeLabel={t('close')}
           folder={folder && currentRootPath ? folder : null}
-          selectedFiles={selectedItems
-            .filter((item) => item.kind === 'file')
-            .map((item) => item.path)}
-          onChange={(pane) => changePrefs({ pane })}
+          selectedFiles={selectedItems.filter(item => item.kind === 'file').map(item => item.path)}
+          onOpenSettings={() => openSettings('knowledge')}
           onClose={() => changePrefs({ pane: 'none' })}
-          onAddFolder={() => {
-            void addRoot()
-          }}
           assistant={
             (folder && currentRootPath) || selectedItems.length > 0 ? (
               <WorkspaceChat
@@ -1651,7 +1652,12 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
           )}
         </Dialog>
       )}
-      {settingsOpen && <ExplorerSettings onClose={() => setSettingsOpen(false)} />}
+      <PanelDialog open={!!fileTools} title={s(fileTools === 'search' ? 'Index selected files' : 'Review table data')} onClose={() => setFileTools(null)}>
+        {fileTools === 'search' && <RagToolbar folder={folder} selectedFiles={selectedItems.filter(item => item.kind === 'file').map(item => item.path)} inSidebar
+          onSetup={() => { setFileTools(null); openSettings('knowledge') }} />}
+        {fileTools === 'tables' && <AnalyticsToolbar folder={folder} inSidebar />}
+      </PanelDialog>
+      {settingsOpen && <ExplorerSettings initialSection={settingsSection} onClose={() => setSettingsOpen(false)} />}
     </div>
   )
 }

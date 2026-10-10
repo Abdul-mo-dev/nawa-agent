@@ -1,8 +1,8 @@
 import { ChatModelsEditor } from './ChatModelsEditor'
-import { usePanelActivity } from './explorer/panel-state'
+import { PanelActivityContext, usePanelActivity, type PanelActivity } from './explorer/panel-state'
 import { useSidebarText } from './explorer/sidebar-i18n'
 import { REDACTED_AI_KEY, validateChatModels } from '@genoffice/ai-provider/browser'
-import { useCallback, useEffect, useId, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
   AI_CUSTOM_FONT_MAX_PX,
@@ -33,6 +33,7 @@ import type { AccountStatus, AiCatalogEntry, UiTheme } from '../../shared/home-a
 import { ProviderLogo } from './provider-logos'
 import { IntegrationsPane, skillUpdateDue } from './IntegrationsPane'
 import { MyAgentSettings } from './myagent/MyAgentSettings'
+import { KnowledgeSettings } from './KnowledgeSettings'
 import './settings.css'
 
 // ── Settings modal (opened from the account menu) ─────────
@@ -135,20 +136,23 @@ function CustomFontSizeInput({
   )
 }
 
-type SectionId =
-  'account' | 'aiModel' | 'aiMedia' | 'myagent' | 'general' | 'integrations' | 'about'
+export type SettingsSection =
+  'account' | 'aiModel' | 'aiMedia' | 'knowledge' | 'general' | 'integrations' | 'about'
 
-const SECTIONS: readonly { id: SectionId; labelKey: StringKey }[] = [
+const SECTIONS: readonly { id: SettingsSection; labelKey: StringKey }[] = [
   { id: 'account', labelKey: 'setSecAccount' },
   { id: 'aiModel', labelKey: 'setSecAiModel' },
   { id: 'aiMedia', labelKey: 'setSecAiMedia' },
-  { id: 'myagent', labelKey: 'setSecIntegrations' },
+  { id: 'knowledge', labelKey: 'setSecIntegrations' },
   { id: 'general', labelKey: 'setSecGeneral' },
   { id: 'integrations', labelKey: 'setSecIntegrations' },
   { id: 'about', labelKey: 'setSecAbout' },
 ]
 
-function SectionIcon({ id }: { id: SectionId }) {
+function SectionIcon({ id }: { id: SettingsSection }) {
+  if (id === 'knowledge') return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true">
+    <path d="M2 3.5c2-1 4-1 6 0 2-1 4-1 6 0v9c-2-1-4-1-6 0-2-1-4-1-6 0Z M8 3.5v9" />
+  </svg>
   if (id === 'aiModel') {
     return (
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -279,12 +283,12 @@ export function AiModelPane({ t }: { t: TFunc }) {
   usePanelActivity(
     'provider',
     'settings',
-    error
-      ? { kind: 'error', text: error }
-      : dirty || maxTokensDraft !== null
-        ? { kind: 'unsaved', text: s('Unsaved model settings') }
-        : testing || saving
-          ? { kind: 'busy', text: s('Working…') }
+    testing || saving
+      ? { kind: 'busy', text: s('Working…'), dirty: dirty || maxTokensDraft !== null }
+      : error
+        ? { kind: 'error', text: error, dirty: dirty || maxTokensDraft !== null }
+        : dirty || maxTokensDraft !== null
+          ? { kind: 'unsaved', text: s('Unsaved model settings') }
           : null,
   )
 
@@ -1170,6 +1174,7 @@ function AiStatusPill({ status }: { status: AiStatus | null }) {
 }
 
 export interface SettingsModalProps {
+  initialSection?: SettingsSection
   status: AccountStatus | null
   loggingOut: boolean
   /** browser sign-in in progress (spinner shows on the account entry) */
@@ -1189,6 +1194,7 @@ export interface SettingsModalProps {
 }
 
 export function SettingsModal({
+  initialSection = 'account',
   status,
   loggingOut,
   loginWaiting,
@@ -1203,8 +1209,29 @@ export function SettingsModal({
   onSkillUpdateDue,
 }: SettingsModalProps) {
   const { lang, setLang, t } = useI18n()
-  const [section, setSection] = useState<SectionId>('account')
+  const { s, dir } = useSidebarText()
+  const [section, setSection] = useState<SettingsSection>(initialSection)
+  const [visited, setVisited] = useState<Set<SettingsSection>>(() => new Set([initialSection]))
   const [myAgentVisited, setMyAgentVisited] = useState(false)
+  const [activities, setActivities] = useState<Record<string, PanelActivity>>({})
+  const [closePrompt, setClosePrompt] = useState(false)
+  const modal = useRef<HTMLDivElement>(null)
+  const publish = useCallback((_tab: unknown, source: string, activity: PanelActivity | null) => {
+    setActivities(previous => {
+      if (!activity) { if (!previous[source]) return previous; const next = { ...previous }; delete next[source]; return next }
+      if (previous[source]?.kind === activity.kind && previous[source]?.text === activity.text && previous[source]?.dirty === activity.dirty) return previous
+      return { ...previous, [source]: activity }
+    })
+  }, [])
+  const busy = Object.values(activities).some(activity => activity.kind === 'busy')
+  const dirty = Object.values(activities).some(activity => activity.dirty || activity.kind === 'unsaved')
+  const requestClose = useCallback(() => {
+    if (busy) return
+    if (dirty) setClosePrompt(true)
+    else onClose()
+  }, [busy, dirty, onClose])
+  const closeRef = useRef(requestClose); closeRef.current = requestClose
+  const knowledgeLabel = s('Knowledge')
   const [theme, setTheme] = useState<UiTheme>('system')
   const [saveDir, setSaveDir] = useState('')
   const [analyticsOn, setAnalyticsOn] = useState(true)
@@ -1243,12 +1270,35 @@ export function SettingsModal({
   }, [])
 
   useEffect(() => {
+    const element = modal.current!
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const siblings: HTMLElement[] = []
+    let branch: HTMLElement = element.parentElement!
+    while (branch.parentElement) {
+      siblings.push(...[...branch.parentElement.children].filter((node): node is HTMLElement => node instanceof HTMLElement && node !== branch))
+      branch = branch.parentElement
+    }
+    const inert = siblings.map(node => [node, node.inert] as const)
+    inert.forEach(([node]) => { node.inert = true })
+    element.querySelector<HTMLElement>('.set-nav-item.active')?.focus()
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.defaultPrevented) return
+      if (document.querySelector('dialog[open]')) return
+      if (e.key === 'Escape') { e.preventDefault(); closeRef.current() }
+      if (e.key !== 'Tab') return
+      const controls = [...element.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex="0"]')]
+        .filter(node => node.tabIndex >= 0 && node.getClientRects().length > 0)
+      const first = controls[0], last = controls.at(-1)
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus() }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus() }
     }
     window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [onClose])
+    return () => {
+      window.removeEventListener('keydown', handler)
+      inert.forEach(([node, value]) => { node.inert = value })
+      if (previous?.isConnected) previous.focus()
+    }
+  }, [])
 
   const applyTheme = (next: UiTheme) => {
     setTheme(next)
@@ -1272,16 +1322,17 @@ export function SettingsModal({
   const email = status?.email ?? ''
 
   return (
-    <div
+    <PanelActivityContext.Provider value={publish}><div
       className="set-overlay"
+      dir={dir}
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose()
+        if (e.target === e.currentTarget) requestClose()
       }}
     >
-      <div className="set-dialog" role="dialog" aria-modal="true" aria-label={t('settings')}>
+      <div ref={modal} className="set-dialog" role="dialog" aria-modal="true" aria-label={t('settings')}>
         <div className="set-header">
           <h2 className="set-title">{t('settings')}</h2>
-          <button className="set-close" onClick={onClose} aria-label={t('cancel')}>
+          <button className="set-close" disabled={busy} onClick={requestClose} aria-label={t('cancel')}>
             <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
               <path
                 d="M2 2l10 10M12 2L2 12"
@@ -1301,11 +1352,11 @@ export function SettingsModal({
                 aria-current={section === s.id}
                 onClick={() => {
                   setSection(s.id)
-                  if (s.id === 'myagent') setMyAgentVisited(true)
+                  setVisited(previous => new Set([...previous, s.id]))
                 }}
               >
                 <SectionIcon id={s.id} />
-                {s.id === 'myagent' ? 'MyAgent' : t(s.labelKey)}
+                {s.id === 'knowledge' ? knowledgeLabel : t(s.labelKey)}
                 {s.id === 'integrations' && updateDue && (
                   <span className="set-nav-dot" role="img" aria-label={t('intgUpdateDue')} />
                 )}
@@ -1361,9 +1412,9 @@ export function SettingsModal({
                 </div>
               </>
             )}
-            {section === 'aiModel' && <AiModelPane t={t} />}
-            {section === 'aiMedia' && <AiMediaPane t={t} />}
-            <div hidden={section !== 'myagent'}>{myAgentVisited && <MyAgentSettings />}</div>
+            <div hidden={section !== 'aiModel'}>{visited.has('aiModel') && <AiModelPane t={t} />}</div>
+            <div hidden={section !== 'aiMedia'}>{visited.has('aiMedia') && <AiMediaPane t={t} />}</div>
+            <div hidden={section !== 'knowledge'}>{visited.has('knowledge') && <KnowledgeSettings suspended={activities['myagent-settings']?.kind === 'busy'} />}</div>
             {section === 'general' && (
               <>
                 <h3 className="set-pane-title">{t('setSecGeneral')}</h3>
@@ -1514,6 +1565,12 @@ export function SettingsModal({
             {section === 'integrations' && (
               <IntegrationsPane t={t} onStatus={(st) => onSkillUpdateDue?.(skillUpdateDue(st))} />
             )}
+            <div hidden={section !== 'integrations'}>
+              {visited.has('integrations') && <details className="set-optional-integration" onToggle={event => { if (event.currentTarget.open) setMyAgentVisited(true) }}>
+                <summary>{s('MyAgent server (optional)')}</summary>
+                {myAgentVisited && <MyAgentSettings hideConnection connectionPending={!!activities['search-settings']?.dirty || ['unsaved', 'busy'].includes(activities['search-settings']?.kind ?? '')} />}
+              </details>}
+            </div>
             {section === 'about' && (
               <>
                 <h3 className="set-pane-title">{t('setSecAbout')}</h3>
@@ -1541,7 +1598,12 @@ export function SettingsModal({
             )}
           </div>
         </div>
+        {closePrompt && <div className="set-close-prompt" role="alert">
+          <span>{s('Discard unsaved settings?')}</span>
+          <button type="button" className="set-btn" onClick={() => setClosePrompt(false)}>{s('Keep editing')}</button>
+          <button type="button" className="set-btn danger" disabled={busy} onClick={onClose}>{s('Discard and close')}</button>
+        </div>}
       </div>
-    </div>
+    </div></PanelActivityContext.Provider>
   )
 }

@@ -2,7 +2,7 @@ import { createRequire } from 'node:module'
 import { randomUUID } from 'node:crypto'
 import type { SQLInputValue } from 'node:sqlite'
 import type { AnalyticsResult } from '../../shared/analytics-api'
-import { QuerySession } from './query'
+import { QuerySession, datasetWarnings } from './query'
 import { jsonSafe } from './numeric'
 import { int, list, object, text } from './validation'
 
@@ -49,6 +49,6 @@ export function executeSql(session: QuerySession, raw: unknown): AnalyticsResult
     columns: statement.columns().map(column => ({ name: column.name, declaredType: column.type })), rows,
     totalResultRows: count, displayedRows: rows.length, outputTruncated: truncated, inputSampled: false,
     summary: { totalResultRowsExact: !truncated }, request,
-    warnings: [...new Set(datasets.flatMap(record => record.data.warnings)), 'SQL integers are serialized as strings. Decimal columns store exact scaled integers: use the declared scale. SQLite SUM may overflow and AVG/REAL math is approximate; use query_data/analyze_data for exact decimal arithmetic. Check join multiplicity and mixed units before interpreting totals.', ...(truncated ? ['Displayed result is capped; totalResultRows is a lower bound. Aggregates run over the SQL-defined input population.'] : [])],
+    warnings: [...new Set(datasets.flatMap(record => datasetWarnings(record.data))), 'SQL integers are serialized as strings. Decimal columns store exact scaled integers: use the declared scale. SQLite SUM may overflow and AVG/REAL math is approximate; use query_data/analyze_data for exact decimal arithmetic. Check join multiplicity and mixed units before interpreting totals.', ...(truncated ? ['Displayed result is capped; totalResultRows is a lower bound. Aggregates run over the SQL-defined input population.'] : [])],
   }
 }

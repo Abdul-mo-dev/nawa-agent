@@ -3,6 +3,7 @@ import { RagSettings } from '../rag/RagSettings'
 import { useSidebarText } from '../explorer/sidebar-i18n'
 import { usePanelActivity } from '../explorer/panel-state'
 import { MyAgentDiagnostics } from './MyAgentDiagnostics'
+import { MyAgentDocumentTools } from './MyAgentDocumentTools'
 import type { WorkspaceTab } from '../explorer/workspace-tabs-model'
 import type { MyAgentConfigPatch, MyAgentDiagnostics as DiagnosticReport, MyAgentLaunchSettings, MyAgentLocalView, MyAgentSnapshot } from '../../../shared/myagent-settings-api'
 import './myagent.css'
@@ -27,7 +28,7 @@ export function draftConfiguration(snapshot: MyAgentSnapshot): MyAgentConfigPatc
 
 export type MyAgentSettingsSection = 'status' | 'models' | 'folders' | 'extraction' | 'launch'
 
-export function MyAgentSettings({ activityTab = 'provider', section, connectionPending = false }: { activityTab?: WorkspaceTab; section?: MyAgentSettingsSection; connectionPending?: boolean }) {
+export function MyAgentSettings({ activityTab = 'provider', section, hideConnection = false, connectionPending = false }: { activityTab?: WorkspaceTab; section?: MyAgentSettingsSection; hideConnection?: boolean; connectionPending?: boolean }) {
   const { s, dir } = useSidebarText(), id = useId()
   const [snapshot, setSnapshot] = useState<MyAgentSnapshot | null>(null)
   const [draft, setDraft] = useState<MyAgentConfigPatch | null>(null)
@@ -37,6 +38,7 @@ export function MyAgentSettings({ activityTab = 'provider', section, connectionP
   const [restart, setRestart] = useState<string[]>([])
   const [confirm, setConfirm] = useState<'stop' | 'restart' | null>(null)
   const [connectionOpen, setConnectionOpen] = useState(true)
+  const [toolsOpen, setToolsOpen] = useState(false), [toolsVisited, setToolsVisited] = useState(false)
   const [connectionDirty, setConnectionDirty] = useState(false), [connected, setConnected] = useState(false)
   const connectionBlocked = connectionDirty || connectionPending
   const [diagnostics, setDiagnostics] = useState<DiagnosticReport | null>(null)
@@ -47,7 +49,7 @@ export function MyAgentSettings({ activityTab = 'provider', section, connectionP
   const dirty = !!draft && (JSON.stringify(draft) !== JSON.stringify(baseline) || !!providerKey || !!embeddingKey || removeProviderKey || removeEmbeddingKey)
   const launchDirty = !!launch && JSON.stringify(launch) !== JSON.stringify(local?.settings)
   dirtyRef.current = dirty
-  usePanelActivity(activityTab, 'myagent-settings', busy ? { kind: 'busy', text: s('Managing MyAgent…') } : error ? { kind: 'error', text: error } : dirty || launchDirty ? { kind: 'unsaved', text: s('Unsaved MyAgent settings') } : null)
+  usePanelActivity(activityTab, 'myagent-settings', busy ? { kind: 'busy', text: s('Managing MyAgent…'), dirty: dirty || launchDirty } : error ? { kind: 'error', text: error, dirty: dirty || launchDirty } : dirty || launchDirty ? { kind: 'unsaved', text: s('Unsaved MyAgent settings') } : null)
 
   const reload = async (replace = false) => {
     const results = await Promise.allSettled([window.nawaMyAgent.inspect(), window.nawaMyAgent.local()])
@@ -112,7 +114,10 @@ export function MyAgentSettings({ activityTab = 'provider', section, connectionP
   return <section className={`nawa-myagent-settings nawa-rag-settings${section ? ' is-compact' : ''}`} aria-label="MyAgent settings" dir={dir}>
     {!section && <><h3 className="set-pane-title">MyAgent</h3>
     <p>{s('Connect to MyAgent and manage its server, models, and shared document folders. Nawa’s chat model is configured separately.')}</p>
-    <details open={connectionOpen} onToggle={e => setConnectionOpen(e.currentTarget.open)}><summary>{s('Connection')}</summary><RagSettings myAgentOnly suspended={busy} onDirtyChanged={setConnectionDirty}/></details></>}
+    {!hideConnection && <details open={connectionOpen} onToggle={e => setConnectionOpen(e.currentTarget.open)}><summary>{s('Connection')}</summary><RagSettings myAgentOnly suspended={busy} onDirtyChanged={setConnectionDirty}/></details>}
+    <details onToggle={e => { setToolsOpen(e.currentTarget.open); if (e.currentTarget.open) setToolsVisited(true) }}><summary>{s('MyAgent document tools')}</summary>
+      {toolsVisited && <MyAgentDocumentTools active={toolsOpen} disabled={busy || connectionBlocked} />}
+    </details></>}
     <section hidden={!!section && section !== 'status'} aria-labelledby={`${id}-status`}>
       <div className="nawa-myagent-heading"><h4 id={`${id}-status`}>{s('Server status')}</h4><button type="button" className="set-btn" disabled={busy} onClick={() => void perform(() => reload())}>{s('Refresh status')}</button></div>
       <p role="status">{snapshot && connected ? `${s('Connected')} · ${snapshot.health.status} · ${snapshot.health.version}` : s('Not connected. Save the connection, then start or refresh the server.')}</p>

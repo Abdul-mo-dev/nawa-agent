@@ -2,12 +2,14 @@
 
 Nawa can use the MyAgent HTTP API for document extraction, embeddings, indexing and hybrid retrieval. Nawa retains its chat provider, selected-file permissions, native editor tools and reviewed-table analytics.
 
+MyAgent is optional. For on-device extraction, OCR, embeddings, search and local SQL without the server, see [On-device file knowledge and analysis](LOCAL_KNOWLEDGE.md).
+
 ## Setup
 
 1. Build and restart MyAgent from the checkout containing the Nawa API additions. The running server must return `localPath` and ingestion limits from `/api/v1/rag/roots`, and `contentHash` plus `indexRevision` on documents, search hits and chunk windows.
-2. Configure shared document folders and the embedding provider in **MyAgent.Server.UI**, or use Nawa's **Settings → MyAgent** once the server is connected. The MyAgent process must have read access. Shared-folder changes require a server restart.
-3. In Nawa, open **Settings → MyAgent → Connection**, or **Knowledge → Setup → Connection and search**. Set its URL (normally `http://127.0.0.1:5187`), enter the MyAgent **service API key**, enable RAG, and test/save the connection. The service key grants administrator access; ordinary user sessions cannot start ingestion jobs. Keys are protected using Electron's OS-backed storage and are never returned to the renderer. The same directory Setup form supports choosing the local embedding backend.
-4. Open a document folder. In **Knowledge → Files**, select individual files and choose **Check selected files** to inspect their index readiness. Confirm selected-file processing consent and choose **Refresh selected files**, or expand **Index the whole directory** for the separate directory controls. Nawa submits explicit root-relative file batches and polls jobs. No upload copies are needed.
+2. Configure shared document folders and the embedding provider in **MyAgent.Server.UI**, or Nawa’s **Settings → Integrations → MyAgent server (optional)** after connecting. The process must have read access. Shared-folder changes require a server restart.
+3. Open **Settings → Knowledge → Advanced embedding settings**, choose **MyAgent** as the search engine, then enter its URL (normally `http://127.0.0.1:5187`) and service API key. Enable file search, test and save. The service key grants administrator access. Keys use OS protection and are never returned to the renderer. Knowledge contains the single connection form.
+4. Open a folder, select individual files and click **Index** at the top of chat. This starts indexing through the configured service and prepares supported tables for Nawa's native analysis. File status appears as icons in the main table; hover or focus for details. The main file panel’s **More actions → Index selected files** retains retry and optional directory controls. No upload copies are needed.
 5. Select individual files and ask the assistant. Indexing a directory does not grant the assistant permission to search all its children.
 
 For example, the MyAgent root configuration can contain:
@@ -16,21 +18,19 @@ For example, the MyAgent root configuration can contain:
 {
   "MyAgent": {
     "Rag": {
-      "Roots": [
-        { "Id": "documents", "DisplayName": "Documents", "Path": "C:\\Documents" }
-      ]
+      "Roots": [{ "Id": "documents", "DisplayName": "Documents", "Path": "C:\\Documents" }]
     }
   }
 }
 ```
 
-New Nawa settings default to MyAgent, initially disabled. Existing saved embedding settings migrate to **Local embeddings**, preserving their behavior until you switch. Changing backend or server identity requires replacing or explicitly removing a stored credential.
+New settings default to llama.cpp embeddings, initially disabled. Existing MyAgent and built-in model profiles are preserved. Changing the endpoint or backend requires re-entering or explicitly removing any stored key; credentials are never forwarded to a different service.
 
 ## MyAgent server settings in Nawa
 
-The directory Knowledge panel has three views: **Files**, **Tables**, and **Setup**. Files is the default and contains index checks and refresh actions; Tables contains imports and review. Setup has one **Settings area** selector for connection/search, document tools, server status/readiness, models/embeddings, shared folders, extraction/indexing, server launch, and local table settings. The directory panel has one connection form. Controls appear first; explanations are collapsed under Help. Extraction settings are grouped into File limits, OCR and Office, Visual extraction, and Timeouts and retries, collapsed by default in the directory panel. Server settings use the same shared draft across their areas; switching views keeps drafts and admitted jobs, with notices linking back to hidden edits or background activity. Unsaved connection changes block server actions, and server work suspends the shared connection form. The file-search status **Enabled** describes the saved configuration; per-file checks establish snapshot readiness.
+Knowledge configuration lives in **Settings → Knowledge**. The chat gear opens that tab directly. Embedding tuning and analytical limits start collapsed. Optional MyAgent administration is under **Settings → Integrations → MyAgent server (optional)**; its drafts survive section changes. Unsaved connection changes block server actions, and server work suspends the connection form. Indexing and table review are available from the main file panel’s **More actions** menu. Per-file readiness and progress remain in the files table.
 
-**Setup → Document tools** loads a searchable live catalog from the saved MyAgent connection. Choose selected file types or all server document tools, and load more pages as needed. Tool descriptions and parameter schemas start collapsed. Discovery uses only extension hints, never file paths, contents, hashes, or document mappings; indexing is unnecessary. Scope changes clear the prior list; Search/Refresh loads the new filter on demand. Saving a connection discards an earlier catalog or pending result. This browser lists definitions rather than enabling individual tools or executing them. The assistant still chooses tools and enforces selected-file permissions when reading content. The application-wide connection page offers the same catalog inside its MyAgent document tools disclosure.
+**Settings → Integrations → MyAgent server (optional) → MyAgent document tools** loads a searchable live catalog from the saved connection. Tool descriptions and schemas start collapsed. Discovery uses extension hints rather than file paths, contents or hashes. Search/Refresh loads filters on demand; changing the connection invalidates prior results. This browser lists definitions. The assistant chooses tools and enforces selected-file permissions when accessing content.
 
 The dedicated MyAgent page shares the protected connection used by file search. It reads `/api/v1/health`, `/api/v1/config`, `/api/v1/llama/profiles`, and `/api/v1/llama/status` in the main process. Administration is user-controlled; these endpoints and local service controls are not agent tools.
 
@@ -40,7 +40,7 @@ The page edits chat/classification and embedding provider settings, provider key
 
 Start/stop/restart can control the installed `MyAgentServer` Windows service, subject to Windows permissions, or an explicitly selected `MyAgent.Server.exe`/`MyAgent.Server.dll`. Process mode uses fixed arguments and a hidden process. The configuration/data directory defaults to `%APPDATA%\MyAgent\server`; choose the directory used by your existing server. Nawa only creates `appsettings.json` if it is missing and requires a saved service key to do so. It preserves an existing configuration and does not copy or migrate legacy data into a newly created setup. A running server keeps running when Nawa closes; use Stop to shut it down. Restarting an externally started process requires its launch paths first.
 
-Managed models can be started/stopped using their advertised profile IDs. Chat and embedding runtime selectors show the appropriate kinds. Enter the runtime's API URL and served alias separately; the profile API reports a model filename/repository, not necessarily its served alias. Use MyAgent.Server.UI's **Setup** and **Runtime** tabs to install dependencies, download models, and create/edit GGUF profiles. User-account setup and low-level service installation remain in MyAgent.Server.UI. Refresh Nawa to see those changes. After changing embeddings/extraction, index/refresh affected files through Knowledge.
+Managed models can be started/stopped using their advertised profile IDs. Chat and embedding runtime selectors show the appropriate kinds. Enter the runtime's API URL and served alias separately; the profile API reports a model filename/repository, not necessarily its served alias. Use MyAgent.Server.UI's **Setup** and **Runtime** tabs to install dependencies, download models, and create/edit GGUF profiles. User-account setup and low-level service installation remain in MyAgent.Server.UI. Refresh Nawa to see those changes. After changing embeddings/extraction, index/refresh affected files from the main file panel.
 
 Server drafts survive status refreshes and settings-section switches. Stop/restart shows a confirmation because it interrupts MyAgent work, including requests from other clients. Server actions are disabled while connection or server drafts are unsaved.
 

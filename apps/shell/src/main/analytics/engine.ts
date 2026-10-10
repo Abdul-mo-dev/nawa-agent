@@ -6,12 +6,12 @@ import { AnalyticsStore, type StoreOptions } from './store'
 import { approveDataset, approveDatasetByAgent, importFile, validateDatasetPolicy } from './importer'
 import { automaticApprovalIssues, baselinePolicy, mergePolicy, preparationNotes, preparationTargets, suggestedPolicy } from './preparation'
 import { TABLE_EXTENSIONS } from './readers'
-import { QuerySession } from './query'
+import { QuerySession, datasetWarnings } from './query'
 import { analyze } from './statistics'
 import { object, text, list, int, message } from './validation'
 import { exportReadyTables } from './export'
 import { executeSql } from './sql'
-export interface AnalyticsJob { action:string; folder?:string; paths?:string[]; recursive?:boolean; verify?:boolean; payload?:unknown; preparationAuthorized?:boolean; reviewedDatasets?:{datasetId:string;generation:string}[] }
+export interface AnalyticsJob { action:string; folder?:string; paths?:string[]; recursive?:boolean; verify?:boolean; payload?:unknown; preparationAuthorized?:boolean; indexAuthorized?:boolean; reviewedDatasets?:{datasetId:string;generation:string}[] }
 export const emptyProgress=():AnalyticsProgress=>({running:false,folder:'',current:'',scanned:0,imported:0,unchanged:0,failed:0,rows:0,message:'',incomplete:false})
 export class AnalyticsEngine {
   readonly store:AnalyticsStore
@@ -135,10 +135,10 @@ export class AnalyticsEngine {
         }
         try{
           for(const path of targets){
-            this.check();state.current=path;state.scanned++
+            this.check();state.current=path;state.currentRows=0;state.scanned++;state.message='Reading selected table data';this.progress({...state})
             if(!TABLE_EXTENSIONS.has(extname(path).toLowerCase())){state.failed++;unsupportedFiles++;state.message='Unsupported analytical file type; source was not imported.';addIssue({kind:'unsupported-file',path,reason:state.message});this.progress({...state});continue}
             let priorRows=0
-            try{const result=await importFile(this.store,path,this.roots,this.settings,this.check,rows=>{state.rows+=rows-priorRows;priorRows=rows;state.message='Preparing selected table data';this.progress({...state})});if(result==='unchanged')state.unchanged++;else state.imported++}
+            try{const result=await importFile(this.store,path,this.roots,this.settings,this.check,rows=>{state.rows+=rows-priorRows;state.currentRows=rows;priorRows=rows;state.message='Preparing selected table data';this.progress({...state})});if(result==='unchanged')state.unchanged++;else state.imported++}
             catch(e){this.check();state.failed++;failedFiles++;state.message=message(e);addIssue({kind:'failed-file',path,reason:state.message.slice(0,1000)})}
             this.progress({...state})
           }
@@ -152,7 +152,7 @@ export class AnalyticsEngine {
             let priorRows=0
             try{
               let preparedPolicy=d.preparedPolicy
-              const report=(rows:number)=>{state.rows+=rows-priorRows;priorRows=rows;state.current=d.path;state.message=`Validating a draft for ${d.name}`;this.progress({...state})}
+              const report=(rows:number)=>{state.rows+=rows-priorRows;state.currentRows=rows;priorRows=rows;state.current=d.path;state.message=`Validating a draft for ${d.name}`;this.progress({...state})}
               if(!preparedPolicy){const validated=await validateDatasetPolicy(this.store,d.id,d.generation,baseline!.policy,this.roots,this.settings,this.check,report);preparedPolicy={policy:validated.policy,validatedRows:validated.rows,excludedRows:validated.excludedRows,createdAt:Date.now(),notes:baseline!.notes}}
               const reviewReasons=this.settings.allowAgentApproval?automaticApprovalIssues(d,preparedPolicy.policy):[]
               if(this.settings.allowAgentApproval&&!reviewReasons.length){
@@ -182,6 +182,7 @@ export class AnalyticsEngine {
         const selectedFiles=list(catalog.selectedFiles,'selected files')
         const preparation={imported:state.imported,unchanged:state.unchanged,failed:state.failed,failedFiles,unsupportedFiles,draftsPrepared,existingDrafts,draftTables:draftsPrepared+existingDrafts,alreadyReady,approvedTables,readyTables:alreadyReady+approvedTables,reviewTables,blockedTables,automaticApprovalEnabled:this.settings.allowAgentApproval,selectedFileCount:targets.length,allImportedTablesAttempted:true,issues,issuesTruncated,approvalRequired:draftsPrepared+existingDrafts+blockedTables>0,next:'Preparation is complete for this requested selection. Do not repeat prepare_data to read another page. These counters cover every imported selected table; when issuesTruncated is false, all blockers and file issues are listed here. Use discover_datasets pagination only for additional catalog details or omitted issues, and describe_dataset/propose_table_policy to refine a draft. Automatically approved tables are Ready for native analysis; remaining drafts and decisions are in Knowledge > Tables > Review table. With automatic approval disabled, enable it once in Table settings to let the agent finish clear tables.'}
         if(job.preparationAuthorized)preparation.next='The clicked Prepare & export request has imported and validated drafts for all selected tables. Do not repeat preparation to paginate. Discover and describe every imported table (including all column pages), review actual source evidence, apply clear policies with propose_table_policy, then call export_sqlite. This request already has preparation and agent-approval authority; do not direct clear tables to settings or manual approval.'
+        if(job.indexAuthorized)preparation.next='Selected tables have been prepared using the saved approval mode. Ready tables can be queried directly. Remaining decisions are available in Review table data from the file toolbar.'
         const value={preparation,...catalog,datasets,selectedFiles,nextOffset:catalog.nextOffset as number|null,nextFileOffset:catalog.nextFileOffset as number|null}
         while(Buffer.byteLength(JSON.stringify(value))>60000&&datasets.length>1)datasets.pop()
         while(Buffer.byteLength(JSON.stringify(value))>60000&&selectedFiles.length>1)selectedFiles.pop()
@@ -236,7 +237,7 @@ export class AnalyticsEngine {
       const filtered=all.filter(d=>!query||[d.data.name,d.data.sheet,d.data.path,d.data.policy.description,...d.data.policy.columns.map(c=>`${c.name} ${c.description}`)].join(' ').normalize('NFKC').toLowerCase().includes(query))
       const page=filtered.slice(offset,offset+25),sources:SourceRef[]=[]
       const datasets=[]
-      for(const entry of page){const d=entry.data;try{const ref={path:d.path,hash:d.sourceHash,datasetId:d.id,generation:d.generation};await this.verify([ref],paths);sources.push(ref);datasets.push({id:d.id,sqlTable:entry.typedTable,path:d.path,sourceHash:d.sourceHash,generation:d.generation,name:d.name,sheet:d.sheet,range:d.range,status:d.status,rows:d.rows,grain:d.policy.grain,preparationState:d.status==='ready'?'ready':d.preparedPolicy?'draft-ready':d.preparationError?'blocked':'not-prepared',preparedPolicy:d.preparedPolicy?{grain:d.preparedPolicy.policy.grain,validatedRows:d.preparedPolicy.validatedRows,notes:d.preparedPolicy.notes}:undefined,preparationError:d.preparationError,approval:d.approval,columns:d.policy.columns.slice(0,12).map(c=>({id:c.id,name:c.name,type:c.type,unit:c.unit})),totalColumns:d.policy.columns.length,moreColumns:d.policy.columns.length>12,warnings:d.warnings})}catch(e){datasets.push({id:d.id,path:d.path,status:'unavailable',reason:message(e)})}}
+      for(const entry of page){const d=entry.data;try{const ref={path:d.path,hash:d.sourceHash,datasetId:d.id,generation:d.generation};await this.verify([ref],paths);sources.push(ref);datasets.push({id:d.id,sqlTable:entry.typedTable,path:d.path,sourceHash:d.sourceHash,generation:d.generation,name:d.name,sheet:d.sheet,range:d.range,status:d.status,rows:d.rows,grain:d.policy.grain,preparationState:d.status==='ready'?'ready':d.preparedPolicy?'draft-ready':d.preparationError?'blocked':'not-prepared',preparedPolicy:d.preparedPolicy?{grain:d.preparedPolicy.policy.grain,validatedRows:d.preparedPolicy.validatedRows,notes:d.preparedPolicy.notes}:undefined,preparationError:d.preparationError,approval:d.approval,columns:d.policy.columns.slice(0,12).map(c=>({id:c.id,name:c.name,type:c.type,unit:c.unit})),totalColumns:d.policy.columns.length,moreColumns:d.policy.columns.length>12,warnings:datasetWarnings(d)})}catch(e){datasets.push({id:d.id,path:d.path,status:'unavailable',reason:message(e)})}}
       while(Buffer.byteLength(JSON.stringify(datasets))>40000&&datasets.length>1)datasets.pop()
       const returnedIds=new Set(datasets.map(d=>d.id)),returnedSources=sources.filter(s=>returnedIds.has(s.datasetId))
       const fileOffset=r.fileOffset===undefined?0:int(r.fileOffset,'selected file offset',0,256),selectedFiles=statuses.slice(fileOffset,fileOffset+16)
@@ -255,7 +256,7 @@ export class AnalyticsEngine {
       while(Buffer.byteLength(JSON.stringify(columns))>12000&&columns.length>1)columns.pop()
       const suggestions=suggestedPolicy(this.store,d)
       const prepared=d.data.preparedPolicy
-      const value={...d.data,sqlSchema:{table:d.typedTable,rowColumn:'__row',numericEncoding:'Decimals are exact scaled INTEGER coefficients: value / 10^scale. REAL is approximate.',columns:columns.map(c=>({id:c.id,name:c.name,type:c.type,scale:c.scale,unit:c.unit}))},preparedPolicy:prepared?{...prepared,policy:{...prepared.policy,columns:prepared.policy.columns.slice(offset,offset+columns.length),skipRows:prepared.policy.skipRows.slice(0,100)}}:undefined,
+      const value={...d.data,warnings:datasetWarnings(d.data),sqlSchema:{table:d.typedTable,rowColumn:'__row',numericEncoding:'Decimals are exact scaled INTEGER coefficients: value / 10^scale. REAL is approximate.',columns:columns.map(c=>({id:c.id,name:c.name,type:c.type,scale:c.scale,unit:c.unit}))},preparedPolicy:prepared?{...prepared,policy:{...prepared.policy,columns:prepared.policy.columns.slice(offset,offset+columns.length),skipRows:prepared.policy.skipRows.slice(0,100)}}:undefined,
         policy:{...d.data.policy,columns,skipRows:d.data.policy.skipRows.slice(0,100)},suggestedPolicy:{columns:suggestions.columns.slice(offset,offset+columns.length).map(({id,name,unit,role})=>({id,name,unit,role}))},suggestionsAreUnapproved:true,
         excludedRowListTruncated:d.data.policy.skipRows.length>100,explicitExcludedRowCount:d.data.policy.skipRows.length,profile:{...d.data.profile,columns:undefined},totalColumns:d.data.policy.columns.length,nextColumnOffset:offset+columns.length<d.data.policy.columns.length?offset+columns.length:null,
         preview:d.data.preview.slice(0,3).map(row=>({...row,values:row.values.slice(offset,offset+Math.min(16,columns.length))})),previewIsSample:true,previewColumnOffset:offset,previewTruncated:d.data.preview.length>3||d.data.policy.columns.length>16}

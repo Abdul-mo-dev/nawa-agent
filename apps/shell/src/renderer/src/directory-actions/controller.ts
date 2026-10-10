@@ -112,7 +112,7 @@ export class DirectoryActionClient {
         this.addEvidence({ path: result.sources[0].path, sourceHash: result.sources[0].hash,
           text: JSON.stringify({ resultId: result.id, operation: result.operation, sources: result.sources,
             population: result.population, summary: result.summary, rows: result.rows, warnings: result.warnings }) })
-        Object.assign(value, { citations: result.sources.map(source => this.addCitation({ id: `RAG:${crypto.randomUUID()}`, path: source.path,
+        Object.assign(value, { citations: result.sources.map((source, index) => this.addCitation({ id: `RAG:${result.id}:${index + 1}`, path: source.path,
           sourceHash: source.hash, locator: `Analysis ${result.id}: ${result.operation}`, excerpt: JSON.stringify({ summary: result.summary, rows: result.rows }) })) })
       }
     }

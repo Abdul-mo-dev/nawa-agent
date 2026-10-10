@@ -8,6 +8,7 @@ import { prepareMyAgentKnowledgeSkill } from './rag/myagent-skill'
 import {
   memo,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -15,6 +16,8 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from 'react'
+import { createPortal } from 'react-dom'
+import { ChatHeaderTarget } from './explorer/chat-header'
 import { AgentLoop, type AgentMessage, type AgentTransport } from '@genoffice/agent-core'
 import { applyChatModel, chatModelLabel } from '@genoffice/ai-provider/browser'
 import { AiComposer, Markdown, ChatModelPicker } from '@genoffice/ui'
@@ -49,13 +52,12 @@ import {
 } from './directory-actions/activity'
 import { createDirectorySkill } from './ai/directory-skill'
 import {
-  displayPath,
   selectionKey,
   selectionSnapshot,
   type DirectorySelection,
 } from './ai/directory-selection'
 import { createShellTransport } from './ai/transport'
-import { DocumentIcon, FolderGlyph, NawaIcon } from './explorer/Icons'
+import { Icon, NawaIcon } from './explorer/Icons'
 import {
   ConversationBuffer,
   flushDetachedBuffers,
@@ -389,7 +391,9 @@ function DirectoryChat({
   historyDropdown,
 }: DirectoryChatProps) {
   const { s } = useSidebarText()
+  const headerTarget = useContext(ChatHeaderTarget)
   const [reviewOpen, setReviewOpen] = useState(false)
+  const [optionsOpen, setOptionsOpen] = useState(false)
   const [citation, setCitation] = useState<DirectoryCitation | null>(null)
   const [citationCurrent, setCitationCurrent] = useState<boolean | null>(null)
   const openCitation = useCallback((value: DirectoryCitation) => setCitation(value), [])
@@ -1300,6 +1304,8 @@ function DirectoryChat({
               }),
             )
           try {
+            const unverified = routed.verifyEvidence(text)
+            if (unverified) throw new Error('The answer could not be verified against the saved file or a native analytical result. Ask again with the individual source selected, or request a location summary.')
             validation = await files.validateEvidence(text)
             const summary =
               validation.sourceCount > 0
@@ -1444,6 +1450,15 @@ function DirectoryChat({
     }
   }
 
+  const primaryActions = <div className="nawa-chat-primary-actions">
+    <button type="button" className="ws-chat-close" disabled={transitioning} onClick={onNew} title={s('New chat')}>
+      {s('New chat')}
+    </button>
+    <button type="button" className={headerTarget ? 'ex-tool' : 'ws-chat-close'} aria-label={s('More chat options')}
+      title={s('More chat options')} aria-haspopup="dialog" onClick={() => setOptionsOpen(true)}>
+      {headerTarget ? <Icon name="more" size={18} /> : s('More')}
+    </button>
+  </div>
   return (
     <section
       className="ws-chat workspace-chat-main"
@@ -1451,30 +1466,24 @@ function DirectoryChat({
     >
       <header className="ws-chat-head">
         <div className="nawa-conversation-picker">{historyDropdown}</div>
-        <div className="nawa-chat-primary-actions">
-          <button type="button" className="ws-chat-close" disabled={transitioning} onClick={onNew}>
-            {s('New chat')}
-          </button>
-          <PrepareExportButton
-            paths={selection.files}
-            folder={folder}
-            disabled={busy || transitioning || !!selectionIssue}
-            onPrepare={(paths, opened) => send({ paths, folder: opened })}
-          />
-        </div>
-        <button
-          type="button"
-          className="ws-chat-close"
-          aria-expanded={historyOpen}
-          onClick={toggleHistory}
-        >
-          {s('Manage history')}
-        </button>
-        <button type="button" className="ws-chat-close ws-chat-hide" onClick={onHide}>
-          {s('Hide chat')}
-        </button>
+        {headerTarget ? createPortal(primaryActions, headerTarget) : primaryActions}
       </header>
       {historyPanel}
+      <PanelDialog open={optionsOpen} title={s('Chat options')} onClose={() => setOptionsOpen(false)}>
+        <div className="nawa-chat-options">
+          <button type="button" className="set-btn" aria-expanded={historyOpen}
+            onClick={() => { setOptionsOpen(false); setTimeout(toggleHistory, 0) }}>{s('Manage history')}</button>
+          <PrepareExportButton paths={selection.files} folder={folder}
+            disabled={busy || transitioning || !!selectionIssue}
+            onPrepare={(paths, opened) => { setOptionsOpen(false); void send({ paths, folder: opened }) }} />
+          <button type="button" className="set-btn" onClick={() => { setOptionsOpen(false); onHide() }}>{s('Hide chat')}</button>
+        </div>
+        <ChangeNotice report={comparison} checking={checking} error={checkError} recheck={() => void checkChanges()} />
+        <details className="workspace-privacy-note">
+          <summary>{s('Storage and file checks')}</summary>
+          <p>{s('Only selected files can be read by the assistant. Used sources are verified before the answer. Check again compares tracked folders on demand. Chat history is stored locally without encryption.')}</p>
+        </details>
+      </PanelDialog>
       <PanelDialog
         open={!!citation}
         title={s('Source evidence')}
@@ -1520,56 +1529,6 @@ function DirectoryChat({
           followTail.current = node.scrollHeight - node.scrollTop - node.clientHeight < 80
         }}
       >
-        <ChangeNotice
-          report={comparison}
-          checking={checking}
-          error={checkError}
-          recheck={() => void checkChanges()}
-        />
-        <details className="ws-chat-scope" aria-label={s('Selection details')}>
-          <summary className="nawa-scope-summary">
-            <strong>{s('Selected files')}</strong>
-            <span>
-              {s('{files} files · {folders} folders', {
-                files: selection.files.length,
-                folders: selection.directories.length,
-              })}
-            </span>
-          </summary>
-          {!selection.files.length && !selection.directories.length && (
-            <p className="workspace-scope-help">
-              {s('Select files in the workspace to let Nawa read their contents.')}
-            </p>
-          )}
-          <div className="nawa-selection-items">
-            {selection.directories.map((path) => (
-              <div key={path} className="nawa-selection-item" title={path}>
-                <FolderGlyph size={18} />
-                <bdi>{displayPath(selection, path)}</bdi>
-                <small>{s('Names only')}</small>
-              </div>
-            ))}
-            {selection.files.map((path) => (
-              <div key={path} className="nawa-selection-item" title={path}>
-                <DocumentIcon ext={path.split('.').pop() || ''} size={18} />
-                <button type="button" onClick={() => onOpenFile(path)}>
-                  <bdi>{displayPath(selection, path)}</bdi>
-                </button>
-                <small>{s(outsideRoots.includes(path) ? 'Outside workspace' : 'Can read')}</small>
-              </div>
-            ))}
-          </div>
-          {folder && (
-            <div className="nawa-opened-folder" title={folder}>
-              <bdi>{folder}</bdi> · {s('Names only')}
-            </div>
-          )}
-          <p className="workspace-scope-help">
-            {s(
-              'Opening history does not reselect files. Each response uses the selection when sent. Selection changes apply to the next message.',
-            )}
-          </p>
-        </details>
         {selectionIssue && (
           <div className="ws-chat-notice" role="alert">
             {selectionIssue}
@@ -1583,11 +1542,7 @@ function DirectoryChat({
         {busy && responseSelection && selectionKey(responseSelection) !== scopeKey && (
           <p className="workspace-scope-help" role="status">
             {s(
-              'This response continues with {files} files and {folders} folders selected when sent. Your new selection applies to the next message.',
-              {
-                files: responseSelection.files.length,
-                folders: responseSelection.directories.length,
-              },
+              'Selection changed. This answer uses the files selected when you sent your question.',
             )}
           </p>
         )}
@@ -1608,7 +1563,7 @@ function DirectoryChat({
               <h2>{s('Ask Nawa')}</h2>
               <p>
                 {s(
-                  'Select files to ask questions or request changes. Every file change requires your approval.',
+                  'Select files in the main panel, then ask a question.',
                 )}
               </p>
             </div>
@@ -1626,14 +1581,6 @@ function DirectoryChat({
             />
           ))}
         </div>
-        <details className="workspace-privacy-note">
-          <summary>{s('Storage and file checks')}</summary>
-          <p>
-            {s(
-              'Only selected files can be read by the assistant. Used sources are verified before the answer. Check again compares tracked folders on demand. Chat history is stored locally without encryption.',
-            )}
-          </p>
-        </details>
       </div>
       <footer className="ws-chat-footer">
         {!busy && messages.at(-1)?.request?.outcome === 'incomplete' && (
@@ -1703,7 +1650,7 @@ function DirectoryChat({
             textareaRef={inputRef}
             iconOnly
             sendDisabled={!!selectionIssue}
-            placeholder={s('Ask about this selection…')}
+            placeholder={s('Ask about your files…')}
             ariaLabel={s('Message Nawa')}
             hintIdle={s('Enter to send')}
             hintBusy={s('Esc to stop')}

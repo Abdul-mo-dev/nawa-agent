@@ -12,6 +12,11 @@ it('the actual directory-chat button runs agent review and SQLite export in the 
   document.body.innerHTML = '<div id="root"></div>'
   await act(async () => { await import('../../../tools/sidebar-review/fixture') })
   const fixture = (window as unknown as { sidebarFixture: { state: { requests: unknown[]; beginScopes: { files: string[]; prepareTables?: boolean }[]; exportRequests: { paths: string[] }[] }; analyticsSettings(): { allowAgentPreparation: boolean }; messages(): { text: string }[] } }).sidebarFixture
+  await vi.waitFor(() => expect(document.querySelector('[aria-label="More chat options"]')).not.toBeNull())
+  expect(document.querySelector('.ws-chat-scope')).toBeNull()
+  expect(document.querySelector('.nawa-selection-items')).toBeNull()
+  expect(document.querySelector('[role="tablist"]')).toBeNull()
+  await act(async () => (document.querySelector('[aria-label="More chat options"]') as HTMLButtonElement).click())
   await vi.waitFor(() => expect([...document.querySelectorAll('button')].some(button => button.textContent === 'Prepare & export')).toBe(true))
   const button = [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Prepare & export')!
   expect(fixture.analyticsSettings().allowAgentPreparation).toBe(false)

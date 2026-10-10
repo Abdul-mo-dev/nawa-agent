@@ -611,7 +611,7 @@ try {
   )
   check(
     'The changed-selection notice explains the current snapshot',
-    await page.getByText(/This response continues with 2 files and 1 folders/).isVisible(),
+    await page.getByText('Selection changed. This answer uses the files selected when you sent your question.', { exact: true }).isVisible(),
   )
   check(
     'Changing selection does not cancel the model stream',

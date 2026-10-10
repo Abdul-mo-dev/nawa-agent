@@ -30,7 +30,7 @@ export { PdfLoadError } from '../../../../packages/pdf2docx/src'
  * Dev: the compiled helper in the repo (packages/pdf2docx/ocr-helper/).
  */
 let ocrEngine: OcrEngine | null | undefined
-function ensureOcrEngine(): OcrEngine | null {
+export function ensureOcrEngine(): OcrEngine | null {
   if (ocrEngine !== undefined) return ocrEngine
   const here = dirname(fileURLToPath(import.meta.url))
   const helper = process.platform === 'darwin' ? 'vision-ocr' : 'win-ocr.exe'

@@ -19,6 +19,7 @@
     "fast-xml-parser": "^5.3.4",
     "jszip": "^3.10.1",
     "pdfjs-dist": "^6.2.108",
+    "postal-mime": "4.0.4",
     "ppt-to-text": "^1.0.1",
     "word-extractor": "^1.0.4"
   },

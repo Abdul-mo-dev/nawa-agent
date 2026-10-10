@@ -8,9 +8,11 @@ const trace = (): DirectoryActivity => ({ id: 'run', model: 'model', selectedFil
 it('retains skipped preparation in diagnostics and keeps failures in the visible timeline', () => {
   let value = trace()
   for (const status of ['skipped', 'failed', 'completed'] as const) value = startActivityStep(value, { id: status, tool: 'prepare', kind: 'preparation', status, startedAt: 1, summary: status, targets: [] })
+  value = startActivityStep(value, { id: 'read', tool: 'read', kind: 'tool', status: 'completed', startedAt: 1, summary: 'read', targets: [] })
   expect(activitySteps(value).visible.map(step => step.status)).toEqual(['failed', 'completed'])
   expect(activitySteps(value).skipped.map(step => step.status)).toEqual(['skipped'])
-  expect(value.steps).toHaveLength(3)
+  expect(activitySteps(value).diagnostic.map(step => step.id)).toEqual(['completed'])
+  expect(value.steps).toHaveLength(4)
 })
 it('keeps a bounded timeline and records failed, completed and interrupted steps', () => {
   let value = trace()

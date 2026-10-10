@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { SettingsModal } from '../SettingsModal'
+import { SettingsModal, type SettingsSection } from '../SettingsModal'
 import type { AccountStatus } from '../../../shared/home-api'
 /** Keep the original provider, model, language, theme and integration settings. */
-export function ExplorerSettings({ onClose }: { onClose: () => void }) {
+export function ExplorerSettings({ onClose, initialSection }: { onClose: () => void; initialSection?: SettingsSection }) {
   const [status, setStatus] = useState<AccountStatus | null>(null)
   const [loggingOut, setLoggingOut] = useState(false)
   const [loginWaiting, setLoginWaiting] = useState(false)
@@ -23,7 +23,7 @@ export function ExplorerSettings({ onClose }: { onClose: () => void }) {
   }, [])
   const failure = (error: unknown) => setNotice(error instanceof Error ? error.message : String(error))
   return <>
-    <SettingsModal status={status} loggingOut={loggingOut} loginWaiting={loginWaiting} loginUrl={loginUrl} urlCopied={urlCopied}
+    <SettingsModal initialSection={initialSection} status={status} loggingOut={loggingOut} loginWaiting={loginWaiting} loginUrl={loginUrl} urlCopied={urlCopied}
       onClose={onClose} onOpenLoginUrl={() => { void window.aiOffice.openLoginUrl().catch(failure) }}
       onCopyLoginUrl={() => { if (loginUrl) void navigator.clipboard.writeText(loginUrl).then(() => setUrlCopied(true)).catch(failure) }}
       onLogin={() => { setLoginWaiting(true); setNotice(null); void window.aiOffice.accountLogin().then(ok => { if (!ok) { setLoginWaiting(false); setNotice('Sign-in could not be started.') } }).catch(error => { setLoginWaiting(false); failure(error) }) }}

@@ -4,6 +4,7 @@ import type { WorkspaceTab } from './workspace-tabs-model'
 export interface PanelActivity {
   kind: 'busy' | 'attention' | 'error' | 'unsaved'
   text: string
+  dirty?: boolean
 }
 export const PanelVisibility = createContext(true)
 export const PanelActivityContext = createContext<
@@ -18,11 +19,11 @@ export function usePanelActivity(
 ) {
   const publish = useContext(PanelActivityContext)
   const kind = activity?.kind,
-    text = activity?.text
+    text = activity?.text, dirty = activity?.dirty
   useEffect(() => {
-    publish(tab, source, kind && text ? { kind, text } : null)
+    publish(tab, source, kind && text ? { kind, text, dirty } : null)
     return () => publish(tab, source, null)
-  }, [publish, tab, source, kind, text])
+  }, [publish, tab, source, kind, text, dirty])
 }
 
 export function mostImportantActivity(

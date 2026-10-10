@@ -16,6 +16,17 @@ export interface DirectoryRoute {
   prepareKnowledge: boolean
   maxTurns: number
   target?: string
+  evidence: {
+    direct: boolean
+    calculation: boolean
+    quote: boolean
+    entityCount: boolean
+    exhaustiveGroups: boolean
+  }
+}
+export interface RoutedDirectorySkill extends AgentSkill {
+  /** Final gate after the agent loop's single corrective turn. */
+  verifyEvidence(finalText: string): string | null
 }
 const sheet = /\.(?:xlsx?|xlsm|csv|tsv|ods)$/i
 const tableFile = /\.(?:xlsx?|xlsm|csv|tsv|ods|json|jsonl|ndjson)$/i
@@ -147,19 +158,47 @@ export function directoryRoute(task: string, scope: DirectorySelection): Directo
     intent = 'analysis'
   else if (
     scope.files.some((path) => tableFile.test(path)) &&
-    /\b(?:how many|count|sum|total|average|join|group by|compare|percentage)\b|كم عدد|件数|何人|合計/.test(
+    /\b(?:why\b.*\b(?:fell|fall|dropped|declined|rose|grew|increased|decreased|changed)|what\s+(?:drove|caused|explains?)\b|explain\b.*\b(?:decline|drop|growth|increase|decrease|change)|drivers?\s+of\b)/.test(
+      analyticalRequest,
+    )
+  )
+    intent = 'analysis'
+  else if (
+    scope.files.some((path) => tableFile.test(path)) &&
+    /\b(?:how many|how much|number of|count|sum|total|average|join|group by|compare|percentage)\b|كم عدد|件数|何人|合計/.test(
       text,
     )
   )
     intent = 'table'
   else if (/\b(?:find|search|which file|contains?|exists|mention)\b|ابحث|どのファイル/.test(text))
     intent = 'lookup'
+  const contentRequest = analyticalRequest.replace(/\b(?:exact|precise)\s+(?:count|total|average|mean|percentage|sum)\b/g, '')
+  const cellLookup = /\b(?:in|at|of) (?:the )?cell [a-z]{1,3}\d+\b/i.test(contentRequest)
+  const direct = !['metadata', 'tools'].includes(intent) &&
+    (cellLookup || /\b(?:verbatim|transcribe|exact (?:text|wording|quote|phrase|sentence|content|value|date|figure|amount)|quote (?:the|from|what)|what does (?:the |this )?(?:document|file|paragraph|section|line|email|message|contract|text|note) .{0,80}say|(?:cell|row) (?:value|formula)|(?:value|formula) (?:in|of|at) (?:cell|row|[a-z]{1,3}\d+)|(?:read|show) (?:the )?(?:formula|cell value))\b/i.test(contentRequest))
+  const calculation = !(cellLookup && !/\b(?:sum|calculate|compute|add|average|count)\b/.test(analyticalRequest)) &&
+    !/\b(?:prepare|preparation|export)\b/.test(analyticalRequest) &&
+    (intent === 'analysis' || (intent === 'reviewed' && /\b(?:calculate|compute|statistical|correlation|variance|quantile|exact decimal)\b/.test(analyticalRequest)) ||
+      (intent === 'table' && /\b(?:how many|how much|number of|count|calculate|compute|sum|total|average|mean|median|percentage|percent|ratio|compare|group by|minimum|maximum)\b|كم عدد|件数|何人|合計/.test(analyticalRequest)))
+  const countRequest = /\b(?:how many|number of|count)\b|كم عدد|件数|何人/.test(analyticalRequest)
+  const entityCount = calculation && countRequest &&
+    !/\b(?:rows?|records?|entries|lines|nonblank|non-empty|cells?)\b/.test(analyticalRequest)
+  const exhaustiveGroups = calculation &&
+    (/\b(?:each|every|all)\b/.test(analyticalRequest) ||
+      /\b(?:by|per)\s+(?:each\s+)?[\p{L}\p{N}_-]+/u.test(analyticalRequest))
   return {
     intent,
     target,
-    prepareKnowledge:
-      !!scope.files.length &&
-      ['overview', 'table', 'analysis', 'lookup', 'general'].includes(intent),
+    evidence: {
+      direct,
+      calculation,
+      quote: direct && /\b(?:quote|verbatim|transcribe|exact (?:wording|text|sentence|phrase))\b/.test(contentRequest),
+      entityCount,
+      exhaustiveGroups,
+    },
+    // Only a named workbook overview needs metadata before the first model call.
+    // Other requests can use local tools immediately and discover MyAgent on demand.
+    prepareKnowledge: !!scope.files.length && intent === 'overview',
     maxTurns: ['metadata', 'tools'].includes(intent) ? 12 : intent === 'edit' ? 60 : 32,
   }
 }
@@ -176,14 +215,11 @@ export function routedDirectorySkill(
     knowledge: AgentSkill
     mutation: AgentSkill
   },
-): AgentSkill {
+): RoutedDirectorySkill {
   const active = new Set<string>(['metadata'])
   if (route.intent === 'tools') active.add('knowledge')
-  if (['lookup', 'general'].includes(route.intent)) {
-    active.add('reading')
-    active.add('knowledge')
-  }
-  if (['table', 'analysis', 'overview'].includes(route.intent)) active.add('knowledge')
+  if (['lookup', 'general'].includes(route.intent)) active.add('reading')
+  if (route.intent === 'overview') active.add('knowledge')
   if (['table', 'analysis', 'reviewed'].includes(route.intent)) {
     active.add('reading')
     active.add('analysis')
@@ -240,10 +276,87 @@ export function routedDirectorySkill(
   const composed = () =>
     composeSkills(
       'directory',
-      'Use the smallest sufficient tool path. Tools can be activated with discover_file_tools if a capability is missing. Use existing native inspection for file structure and source evidence. For data insights, large-file aggregates or statistics, use native analysis (discover_datasets/describe_dataset/query_data/analyze_data/query_sql) over the complete relevant table population; bounded reads and retrieval hits cannot establish whole-file statistics. Reuse prepared SQLite tables for follow-up questions. Prepare & export starts agent review and SQLite export in this chat; ordinary queries can reuse the prepared data without repeating preparation. Do not repeat identical reads when their evidence already answers the question. Cite returned RAG citation IDs as Markdown links; their registered source opens in the evidence viewer.',
+      'Use the smallest sufficient tool path. Tools can be activated with discover_file_tools if a capability is missing. RAG finds candidate locations and context. For exact wording, values or formulas, read the saved source directly with query_file or read_file before answering; an inspect_file inventory alone is insufficient. OCR text is recognized text and must be labeled as such unless visually checked. For data insights, large-file aggregates or statistics, use native analysis (discover_datasets/describe_dataset/query_data/analyze_data/query_sql) over the complete relevant table population; bounded reads and retrieval hits cannot establish whole-file statistics. Show each analytical result ID in the visible answer and cite its registered source link. When a table has only the structural grain "One source data record", report a mechanical row/nonblank/distinct count first; describe it as a count of business entities only conditionally (for example, "if one included row represents one employee"). Reuse prepared SQLite tables for follow-up questions. If no suitable native Ready table is available and an indexed MyAgent workbook may answer an exploratory question, activate knowledge tools on demand. For questions asking why a measured value changed, calculate the change with analytical tools and search selected narrative files for an explanation; cite both sources. If the selected evidence does not explain the change, say its cause is unknown. Prepare & export starts agent review and SQLite export in this chat; ordinary queries can reuse the prepared data without repeating preparation. Do not repeat identical reads when their evidence already answers the question. Cite returned RAG citation IDs as Markdown links; their registered source opens in the evidence viewer.',
       selectedParts(),
     )
   const repetitions = new Map<string, number>()
+  const inspected = new Map<string, string>()
+  const directReads = new Set<string>()
+  const directText = new Map<string, string[]>()
+  const calculatedPaths = new Set<string>()
+  const calculationReceipts = new Map<string, {
+    paths: string[]
+    structural: boolean
+    totalRows: number
+    displayedRows: number
+    truncated: boolean
+  }>()
+  const sourceKey = (path: string) => path.replace(/\\/g, '/').toLowerCase()
+  const parseObject = (output: string): Record<string, unknown> | null => {
+    try {
+      const value: unknown = JSON.parse(output)
+      return value && typeof value === 'object' && !Array.isArray(value)
+        ? value as Record<string, unknown> : null
+    } catch { return null }
+  }
+  const rememberDirectText = (path: string, content: string) => {
+    const key = sourceKey(path)
+    directReads.add(key)
+    const snippets = directText.get(key) ?? []
+    if (snippets.length < 20) snippets.push(content.slice(0, 64000))
+    directText.set(key, snippets)
+  }
+  const normalized = (value: string) => value.replace(/\\n/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase()
+  const hasResult = (text: string) => {
+    const limitation = /\b(?:cannot|can't|could not|couldn't|unable|not able|unavailable|insufficient|not verified|not confirmed)\b/i.test(text)
+    if (!limitation) return true
+    if (route.evidence.direct && /[“”"].{3,}[“”"]/.test(text)) return true
+    if (route.evidence.calculation && /\b(?:there (?:are|were)|(?:total|count|average|mean|median|sum|percentage|ratio) (?:is|was|equals?)|(?:is|was|equals?)\s+[$€£]?\d)\b/i.test(text)) return true
+    return false
+  }
+  const evidenceCorrection = (text: string): string | null => {
+    if (!hasResult(text)) return null
+    if (route.evidence.direct && !directReads.has(sourceKey(route.target ?? '')) &&
+      !(route.target === undefined && directReads.size > 0))
+      return 'The request asks for exact saved-file content. Search results only locate candidates. Open the selected source with inspect_file, then query_file using a content read tool (such as read_blocks, read_cells, read_range or read_slide), or use read_file when native inspection is unsupported. Cite the direct result and its saved-file location. If the source is only OCR text, label it as recognized text and say the wording has not been visually verified. If no direct reader can verify it, explain that limitation without presenting an exact quote or value.'
+    if (route.evidence.quote) {
+      const quotes = [
+        ...[...text.matchAll(/(?:^|\b(?:says|reads|states|quote|wording|text)(?: is)?\s*[:,-]?\s*)[“"]([^“”"\n]{4,500})[”"]/gim)].map(match => match[1]!),
+        ...text.split('\n').filter(line => /^>\s+\S/.test(line)).map(line => line.replace(/^>\s+/, '')),
+      ].filter(value => !/[/\\]|\.[a-z\d]{2,5}$/i.test(value))
+      if (quotes.length) {
+        const sources = route.target ? directText.get(sourceKey(route.target)) ?? [] : [...directText.values()].flat()
+        if (quotes.some(quote => !sources.some(source => normalized(source).includes(normalized(quote)))))
+          return 'The quoted passage does not match the direct saved-file read. Read the relevant source range again and copy the wording exactly, or describe it as an unverified OCR/extraction candidate without presenting it as a verbatim quote.'
+      }
+    }
+    if (route.evidence.calculation && !calculatedPaths.has(sourceKey(route.target ?? '')) &&
+      !(route.target === undefined && calculatedPaths.size > 0))
+      return 'The requested numerical conclusion needs a native analytical result. Use query_data, query_sql or analyze_data over the relevant Ready table and cite its result receipt and source coverage. Search hits, previews and worksheet dimensions do not establish totals or statistics. If a table is unavailable or needs review, state the specific blocker without presenting a calculated result.'
+    if (route.evidence.calculation) {
+      const relevant = [...calculationReceipts.entries()].filter(([, value]) =>
+        route.target ? value.paths.includes(sourceKey(route.target)) : true)
+      const primary = [...relevant].sort((left, right) =>
+        right[1].totalRows - left[1].totalRows || right[1].displayedRows - left[1].displayedRows)[0]
+      const corrections: string[] = []
+      const visibleText = text.replace(/\]\([^\n)]+\)/g, ']')
+      if (primary && !visibleText.includes(primary[0]))
+        corrections.push(`Show the primary analytical receipt ID in the visible answer so the result can be audited: ${primary[0]}. Keep the registered source citation link too; an ID hidden only in a link target or a generic "Analysis receipt" label is insufficient.`)
+      if (route.evidence.entityCount && relevant.some(([, value]) => value.structural) &&
+        !/\b(?:if|assuming|provided that|treating each|one (?:included )?(?:row|record) per|rows? (?:represent|correspond))\b/i.test(text))
+        corrections.push('The table policy establishes only a structural source-record grain, not that every row is a unique business entity. State the mechanical result first (included rows, nonblank values, or distinct values), then make the requested entity count conditional, such as "If each included row represents one employee, that corresponds to 500 employees." Do not state the entity count categorically.')
+      const limited = relevant
+        .map(([, value]) => value)
+        .filter(value => value.truncated && value.totalRows > value.displayedRows)
+        .sort((left, right) => right.totalRows - left.totalRows)[0]
+      if (route.evidence.exhaustiveGroups && limited &&
+        (!/\b(?:showing|displaying)\s+\d+\s+(?:of|out of)\s+\d+\b|\b(?:groups?|rows?|items?|products?)\s+(?:were |are )?(?:omitted|not shown)\b|\b(?:partial (?:list|result)|display (?:cap|limit)|concise preview)\b/i.test(visibleText) ||
+          visibleText.length > 8000))
+        corrections.push(`The grouped calculation covered ${limited.totalRows} groups, but the tool returned only ${limited.displayedRows} display rows. Do not imply that the displayed table is complete, call query_sql with LIMIT/OFFSET to page the exact-decimal result, or paste hundreds of rows into chat. Show at most 20 preview groups and explicitly say "showing ${Math.min(20, limited.displayedRows)} of ${limited.totalRows}; ${limited.totalRows - Math.min(20, limited.displayedRows)} not shown." Offer a narrower filter or an explicit full-result export.`)
+      if (corrections.length) return corrections.join('\n')
+    }
+    return null
+  }
   const stableKey = (value: unknown): string => {
     if (value === null || typeof value !== 'object') return JSON.stringify(value)
     if (Array.isArray(value)) return `[${value.map(stableKey).join(',')}]`
@@ -261,7 +374,9 @@ export function routedDirectorySkill(
       return [...composed().tools, discover]
     },
     buildContext: () => composed().buildContext?.() ?? '',
+    verifyEvidence: evidenceCorrection,
     verifyResponse: (text, calls) =>
+      evidenceCorrection(text) ??
       parts.analytics.verifyResponse?.(text, calls) ??
       parts.mutation.verifyResponse?.(text, calls) ??
       null,
@@ -316,7 +431,39 @@ export function routedDirectorySkill(
             isError: true,
           }
       }
-      return composed().executeTool(call, signal)
+      const result = await composed().executeTool(call, signal)
+      if (!result.isError) {
+        const receipt = parseObject(result.output)
+        if (call.name === 'inspect_file' && typeof receipt?.id === 'string' && typeof receipt.path === 'string')
+          inspected.set(receipt.id, receipt.path)
+        if (call.name === 'read_file' && typeof receipt?.path === 'string' && typeof receipt.sourceHash === 'string')
+          rememberDirectText(receipt.path, typeof receipt.untrustedDocumentText === 'string' ? receipt.untrustedDocumentText : '')
+        if (call.name === 'query_file' && typeof call.input?.inspectionId === 'string' &&
+          /^(?:read_|get_(?:cell|range|slide))/.test(String(call.input?.tool ?? ''))) {
+          const path = inspected.get(call.input.inspectionId)
+          if (path) rememberDirectText(path, result.output)
+        }
+        if (['query_data', 'query_sql', 'analyze_data'].includes(call.name) &&
+          typeof receipt?.id === 'string' && Array.isArray(receipt.sources)) {
+          const paths: string[] = []
+          for (const source of receipt.sources)
+            if (source && typeof source === 'object' && typeof source.path === 'string' && typeof source.hash === 'string') {
+              const key = sourceKey(source.path)
+              calculatedPaths.add(key)
+              paths.push(key)
+            }
+          const population = receipt.population && typeof receipt.population === 'object'
+            ? JSON.stringify(receipt.population) : ''
+          calculationReceipts.set(receipt.id, {
+            paths,
+            structural: /one source data record|structural/i.test(population),
+            totalRows: typeof receipt.totalResultRows === 'number' ? receipt.totalResultRows : 0,
+            displayedRows: typeof receipt.displayedRows === 'number' ? receipt.displayedRows : 0,
+            truncated: receipt.outputTruncated === true,
+          })
+        }
+      }
+      return result
     },
   }
 }

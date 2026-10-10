@@ -74,6 +74,20 @@ if (winArm64 && !process.env.ELECTRON_BUILDER_7Z_FILTER) {
   process.env.ELECTRON_BUILDER_7Z_FILTER = 'BCJ'
 }
 const winArch = winArm64 ? 'arm64' : 'x64'
+const embeddingRuntimeTargets =
+  process.platform === 'win32'
+    ? [`win32/${winArch}`]
+    : process.platform === 'darwin'
+      ? includeMacX64
+        ? ['darwin/arm64', 'darwin/x64']
+        : ['darwin/arm64']
+      : [`linux/${process.arch}`]
+const sharpRuntimePackages = embeddingRuntimeTargets.flatMap((target) => {
+  const platform = target.replace('/', '-')
+  return target.startsWith('win32/')
+    ? [`@img/sharp-${platform}`]
+    : [`@img/sharp-${platform}`, `@img/sharp-libvips-${platform}`]
+})
 const winSidecarTarget = winArm64 ? 'aarch64-pc-windows-msvc' : 'x86_64-pc-windows-msvc'
 // The standard sheets build uses the host MSVC target and writes target/release.
 // ARM64 is cross-compiled into its target-specific directory.
@@ -96,6 +110,13 @@ for (const rel of [
   '../../node_modules/ws',
   '../../node_modules/electron/dist/LICENSES.chromium.html',
   '../../node_modules/@embedpdf/pdfium/dist/pdfium.wasm',
+  '../../node_modules/@huggingface/transformers/dist/transformers.node.mjs',
+  '../../node_modules/onnxruntime-node/dist',
+  ...embeddingRuntimeTargets.map(
+    (target) => `../../node_modules/onnxruntime-node/bin/napi-v3/${target}`,
+  ),
+  ...sharpRuntimePackages.map((name) => `../../node_modules/${name}`),
+  '../../node_modules/@img',
   '../pdf/node_modules/harfbuzzjs/hb-subset.wasm',
 ]) {
   if (!existsSync(join(__dirname, rel))) {
@@ -245,7 +266,7 @@ const config = {
   directories: {
     output: process.env.BUILD_DIR || 'release',
   },
-  files: ['out/**'],
+  files: ['out/main/**', 'out/preload/**', 'out/renderer/**'],
   extraResources: [
     {
       from: 'build/THIRD-PARTY-NOTICES.txt',
@@ -255,6 +276,32 @@ const config = {
       from: '../../node_modules/electron/dist/LICENSES.chromium.html',
       to: 'LICENSES.chromium.html',
     },
+    // Native embeddings run in a Nawa worker. Keep the Node runtime and its
+    // N-API dependencies outside asar so dynamic imports and bindings resolve.
+    {
+      from: '../../node_modules/@huggingface/transformers/dist/transformers.node.mjs',
+      to: 'embedding/node_modules/@huggingface/transformers/dist/transformers.node.mjs',
+    },
+    {
+      from: '../../node_modules/@huggingface/transformers/package.json',
+      to: 'embedding/node_modules/@huggingface/transformers/package.json',
+    },
+    {
+      from: '../../node_modules/onnxruntime-node/package.json',
+      to: 'embedding/node_modules/onnxruntime-node/package.json',
+    },
+    {
+      from: '../../node_modules/onnxruntime-node/dist',
+      to: 'embedding/node_modules/onnxruntime-node/dist',
+    },
+    ...embeddingRuntimeTargets.map((target) => ({
+      from: `../../node_modules/onnxruntime-node/bin/napi-v3/${target}`,
+      to: `embedding/node_modules/onnxruntime-node/bin/napi-v3/${target}`,
+    })),
+    ...['onnxruntime-common', 'sharp', '@img', 'detect-libc', 'semver'].map((name) => ({
+      from: `../../node_modules/${name}`,
+      to: `embedding/node_modules/${name}`,
+    })),
     {
       from: '../docs/out',
       to: 'modules/docs',

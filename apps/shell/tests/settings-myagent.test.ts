@@ -12,6 +12,7 @@ it('opens MyAgent from Settings and retains the server draft across section chan
   const inspect = vi.fn().mockResolvedValue(structuredClone(snapshot))
   Object.assign(window, {
     aiOffice: { getTheme: async () => 'system', getDefaultSaveDir: async () => '', getAnalyticsEnabled: async () => true, getAutoSaveDefault: async () => ({ on: false }), getAiPanelPrefs: async () => ({ fontSize: 'default', spellcheck: true }), getUpdateChannel: async () => 'stable', getAppVersion: async () => '1.0.0' },
+    aiOfficeIntegrations: { status: async () => ({ cli: { status: 'missing', manual: '', location: '', launcherDir: '' }, agents: [] }) },
     nawaRag: { settings: async () => ({ settings: DEFAULT_RAG_SETTINGS, hasKey: true, databasePath: 'fixture.json' }) },
     nawaMyAgent: { inspect, local: async () => ({ settings: { mode: 'process', serverPath: '', configurationDirectory: 'C:\\MyAgent' }, serviceState: 'not-installed', processId: null }) },
   })
@@ -22,14 +23,15 @@ it('opens MyAgent from Settings and retains the server draft across section chan
   try {
     await act(async () => root.render(createElement(LocaleProvider, { initial: 'en' }, createElement(SettingsModal, { status: null, loggingOut: false, loginWaiting: false, loginUrl: null, urlCopied: false, onOpenLoginUrl: vi.fn(), onCopyLoginUrl: vi.fn(), onClose: vi.fn(), onLogin: vi.fn(), onLogout: vi.fn() }))))
     expect(inspect).not.toHaveBeenCalled()
-    await click('MyAgent')
+    await click('Integrations')
+    await act(async () => { const details = host.querySelector<HTMLDetailsElement>('.set-optional-integration')!; details.open = true; details.dispatchEvent(new Event('toggle')) })
     const input = host.querySelector<HTMLInputElement>('input[aria-label="MyAgent chat model"]')!
     expect(input).toBeTruthy()
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'retained-draft')
       input.dispatchEvent(new Event('input', { bubbles: true }))
     })
-    await click('General'); await click('MyAgent')
+    await click('General'); await click('Integrations')
     expect(host.querySelector<HTMLInputElement>('input[aria-label="MyAgent chat model"]')?.value).toBe('retained-draft')
     expect(inspect).toHaveBeenCalledTimes(1)
     expect([...host.querySelectorAll('button')].find(button => button.textContent === 'Save server settings')?.disabled).toBe(false)

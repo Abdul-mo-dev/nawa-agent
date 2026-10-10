@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events'
+import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WebContents } from 'electron'
 
@@ -12,7 +13,7 @@ vi.mock('node:fs/promises', () => ({
   rename: vi.fn(),
   rm: vi.fn().mockResolvedValue(undefined),
 }))
-vi.mock('../src/main/directory-actions/file-safety', () => ({ authorizePath: mocks.authorizePath }))
+vi.mock('../src/main/directory-actions/file-safety', async (importOriginal) => ({ ...await importOriginal<object>(), authorizePath: mocks.authorizePath }))
 vi.mock('../src/main/analytics/worker?modulePath', () => ({ default: 'analytics-worker.js' }))
 vi.mock('node:worker_threads', () => ({
   Worker: class TestWorker extends EventEmitter {
@@ -21,11 +22,13 @@ vi.mock('node:worker_threads', () => ({
     storeOptions: { readOnly: boolean; initialize: boolean }
     source: string
     eval: boolean
-    constructor(source: string, options: { eval: boolean; workerData: { job: { action: string }; storeOptions: { readOnly: boolean; initialize: boolean } } }) {
+    settings: typeof DEFAULT_ANALYTICS_SETTINGS
+    constructor(source: string, options: { eval: boolean; workerData: { job: { action: string }; settings: typeof DEFAULT_ANALYTICS_SETTINGS; storeOptions: { readOnly: boolean; initialize: boolean } } }) {
       super()
       this.source = source
       this.eval = options.eval
       this.job = options.workerData.job
+      this.settings = options.workerData.settings
       this.storeOptions = options.workerData.storeOptions
       TestWorker.instances.push(this)
       if (mocks.autoReady) void Promise.resolve().then(() => this.emit('message', { ready: true }))
@@ -44,7 +47,7 @@ import { DEFAULT_ANALYTICS_SETTINGS } from '../src/shared/analytics-api'
 const workers = () =>
   (
     Worker as unknown as {
-      instances: Array<EventEmitter & { source: string; eval: boolean; job: { action: string; payload?: unknown }; storeOptions: { readOnly: boolean; initialize: boolean } }>
+      instances: Array<EventEmitter & { source: string; eval: boolean; settings: typeof DEFAULT_ANALYTICS_SETTINGS; job: { action: string; paths?: string[]; indexAuthorized?: boolean; payload?: unknown }; storeOptions: { readOnly: boolean; initialize: boolean } }>
     }
   ).instances
 const settle = async () => {
@@ -66,6 +69,29 @@ afterEach(() => {
 })
 
 describe('analytics worker admission', () => {
+  it.each([false, true])('prepares selected tables on Index while preserving approval mode %s and saved settings', async (automatic) => {
+    const settings = { ...DEFAULT_ANALYTICS_SETTINGS, allowAgentPreparation: automatic, allowAgentApproval: automatic }
+    await service.saveSettings(settings)
+    const folder = resolve('selected-index'), file = resolve(folder, 'sales.xlsx'), document = resolve(folder, 'notes.docx')
+    const request = service.prepareSelected(7, folder, [file, document, file])
+    await settle()
+    expect(workers()[0].job).toMatchObject({ action: 'prepare', paths: [file], indexAuthorized: true })
+    expect(workers()[0].settings).toEqual({ ...settings, allowAgentPreparation: true })
+    expect(service.progress()).toMatchObject({ running: true, folder, paths: [file] })
+    const preparation = { readyTables: automatic ? 1 : 0, draftTables: automatic ? 0 : 1 }
+    workers()[0].emit('message', { result: { value: { preparation }, sources: [] } })
+    await expect(request).resolves.toEqual(preparation)
+    expect((await service.settings()).settings).toEqual(settings)
+  })
+  it('validates the entire selection before preparing any table and never walks the folder', async () => {
+    const folder = resolve('selected-index'), file = resolve(folder, 'sales.xlsx')
+    await expect(service.prepareSelected(1, folder, [file, resolve('outside', 'notes.docx')])).rejects.toThrow('inside the opened directory')
+    await expect(service.prepareSelected(1, folder, [])).rejects.toThrow('at least one')
+    await expect(service.prepareSelected(1, folder, Array(257).fill(file))).rejects.toThrow()
+    expect(workers()).toHaveLength(0)
+    await expect(service.prepareSelected(1, folder, [resolve(folder, 'notes.docx')])).resolves.toMatchObject({ selectedFileCount: 0, readyTables: 0, failedFiles: 0 })
+    expect(workers()).toHaveLength(0)
+  })
   it('requires saved consent for preparation and never admits model approval or clearing', async () => {
     const signal = new AbortController().signal
     await expect(service.selected(1, [], 'prepare', {}, signal)).rejects.toThrow('Prepare & export')

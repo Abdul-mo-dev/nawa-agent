@@ -45,6 +45,7 @@ export function PanelDialog({
       dir={dir}
       aria-labelledby={id}
       onCancel={(event) => {
+        event.stopPropagation()
         event.preventDefault()
         if (!closeDisabled) onClose()
       }}

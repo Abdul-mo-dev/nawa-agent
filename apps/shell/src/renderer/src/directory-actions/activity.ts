@@ -11,9 +11,25 @@ const SECRET =
 
 /** Skipped work is retained in diagnostics but is not an executed timeline step. */
 export function activitySteps(activity: DirectoryActivity) {
+  const internal = new Set<DirectoryActivityStep['kind']>([
+    'preparation',
+    'model',
+    'validation',
+    'storage',
+  ])
   return {
-    visible: activity.steps.filter((step) => step.status !== 'skipped'),
+    visible: activity.steps.filter(
+      (step) =>
+        step.status !== 'skipped' &&
+        (step.status === 'failed' || !internal.has(step.kind)),
+    ),
     skipped: activity.steps.filter((step) => step.status === 'skipped'),
+    diagnostic: activity.steps.filter(
+      (step) =>
+        step.status !== 'skipped' &&
+        step.status !== 'failed' &&
+        internal.has(step.kind),
+    ),
   }
 }
 
@@ -111,6 +127,8 @@ export function activityFacts(output: unknown): Record<string, unknown> | undefi
   if (!value || typeof value !== 'object') return undefined
   const facts: Record<string, unknown> = {}
   for (const key of [
+    'id',
+    'operation',
     'tool',
     'backend',
     'succeeded',

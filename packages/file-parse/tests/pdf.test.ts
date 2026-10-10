@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseFileToText } from '../src/index'
+import { parseFileToRag, parseFileToText } from '../src/index'
 import { buildPdfFixture, writeFixture } from './helpers/fixtures'
 
 describe('parseFileToText: pdf', () => {
@@ -16,5 +16,24 @@ describe('parseFileToText: pdf', () => {
     const result = await parseFileToText(path)
     expect(result.ok).toBe(false)
     expect(result.error).toBeTruthy()
+  })
+
+  it('indexes local OCR text on a page with no PDF text layer and preserves its page citation', async () => {
+    const path = writeFixture('scan.pdf', buildPdfFixture(''))
+    const result = await parseFileToRag(path, {
+      pdfPages: async (_bytes, pages) => {
+        expect(pages).toEqual([1])
+        return new Map([[1, 'Recognized invoice number 12345']])
+      },
+    })
+    expect(result.blocks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          page: 1,
+          text: expect.stringContaining('Recognized invoice number 12345'),
+        }),
+      ]),
+    )
+    expect(result.warnings.join(' ')).toContain('Local OCR recovered text on pages: 1')
   })
 })

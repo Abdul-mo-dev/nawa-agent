@@ -63,8 +63,8 @@ export function FileList({
         item.kind === 'file' && roots.some((root) => root.usable && isWithin(item.path, root.path)),
     )
   const statusPaths = new Set(statusFiles.map((item) => item.path))
-  const { statuses: ragStatuses, error: ragStatusError } = useRagStatuses(statusFiles)
-  const { statuses: analyticsStatuses, error: analyticsStatusError } =
+  const { statuses: ragStatuses, error: ragStatusError, progress: ragProgress } = useRagStatuses(statusFiles)
+  const { statuses: analyticsStatuses, error: analyticsStatusError, progress: analyticsProgress } =
     useAnalyticsStatuses(statusFiles)
   useEffect(() => {
     const el = scroll.current
@@ -284,12 +284,14 @@ export function FileList({
                   {item.name}
                 </span>
                 {tile && statusPaths.has(item.path) && (
-                  <RagBadge value={ragStatuses[item.path]} error={ragStatusError} />
+                  <RagBadge path={item.path} value={ragStatuses[item.path]} error={ragStatusError} progress={ragProgress} />
                 )}
                 {tile && statusPaths.has(item.path) && (
                   <AnalyticsBadge
+                    path={item.path}
                     value={analyticsStatuses[item.path]}
                     error={analyticsStatusError}
+                    progress={analyticsProgress}
                   />
                 )}
                 {item.starred && <Icon name="star" size={12} className="ex-starred-mark" />}
@@ -299,7 +301,7 @@ export function FileList({
                 <>
                   <div role="gridcell" className="ex-column-indexed">
                     {statusPaths.has(item.path) ? (
-                      <RagBadge value={ragStatuses[item.path]} error={ragStatusError} />
+                      <RagBadge path={item.path} value={ragStatuses[item.path]} error={ragStatusError} progress={ragProgress} />
                     ) : (
                       <span className="ex-column-empty">—</span>
                     )}
@@ -307,8 +309,10 @@ export function FileList({
                   <div role="gridcell" className="ex-column-data">
                     {statusPaths.has(item.path) ? (
                       <AnalyticsBadge
+                        path={item.path}
                         value={analyticsStatuses[item.path]}
                         error={analyticsStatusError}
+                        progress={analyticsProgress}
                       />
                     ) : (
                       <span className="ex-column-empty">—</span>

@@ -3,17 +3,17 @@ import { Worker } from 'node:worker_threads'
 import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { mkdir, readFile, writeFile, rename, rm } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { dirname, extname, join } from 'node:path'
 import workerPath from './worker?modulePath'
-import { ANALYTICS_CHANNEL, ANALYTICS_CHANGED, DEFAULT_ANALYTICS_SETTINGS, type AnalyticsSettings, type AnalyticsProgress, type AnalyticsEnvelope, type AnalyticsReadAction } from '../../shared/analytics-api'
-import { authorizePath } from '../directory-actions/file-safety'
+import { ANALYTICS_CHANNEL, ANALYTICS_CHANGED, ANALYTICS_FILE_EXTENSIONS, DEFAULT_ANALYTICS_SETTINGS, type AnalyticsSettings, type AnalyticsProgress, type AnalyticsEnvelope, type AnalyticsReadAction, type AnalyticsPreparationSummary } from '../../shared/analytics-api'
+import { authorizePath, samePath, validAbsolute, within } from '../directory-actions/file-safety'
 import { settings as validateSettings, object, text, list } from './validation'
 import type { AnalyticsJob } from './engine'
 interface Options { roots():Promise<string[]>;isHomeSender(sender:WebContents):boolean }
 interface Active { owner:number;worker:Worker;flag:Int32Array;abort:AbortController;writer:boolean }
 interface WorkerSlot { reader:boolean; write:boolean; initialize:boolean }
 const initial=():AnalyticsProgress=>({running:false,folder:'',current:'',scanned:0,imported:0,unchanged:0,failed:0,rows:0,message:'',incomplete:false})
-/** Scoped preparation and automatic clear-table approval each require saved user consent. */
+/** Agent preparation requires saved consent; explicit UI preparation preserves the saved approval mode. */
 export class AnalyticsService {
   private directory=join(app.getPath('userData'),'analytics')
   private databasePath=join(this.directory,'data-v1.sqlite3')
@@ -108,10 +108,10 @@ export class AnalyticsService {
       if(this.stopped||abort.signal.aborted)throw new Error('Analytics request cancelled.')
       const buffer=new SharedArrayBuffer(4),flag=new Int32Array(buffer)
       const source=this.workerSource??=readFileSync(workerPath,'utf8')
-      const effectiveSettings=job.preparationAuthorized?{...config,allowAgentPreparation:true,allowAgentApproval:job.action!=='prepare'}:config
+      const effectiveSettings=job.indexAuthorized?{...config,allowAgentPreparation:true}:job.preparationAuthorized?{...config,allowAgentPreparation:true,allowAgentApproval:job.action!=='prepare'}:config
       worker=new Worker(source,{eval:true,workerData:{databasePath:this.databasePath,roots,settings:effectiveSettings,job,cancel:buffer,deadline:Date.now()+(writer?24*3600*1000:config.queryTimeoutSeconds*1000),storeOptions:{readOnly:!slot.write,initialize:slot.initialize}},resourceLimits:{maxOldGenerationSizeMb:512}})
       this.active.set(id,{owner,worker,flag,abort,writer})
-      if(writer){this.state={...initial(),running:true,folder:job.folder??'',message:job.action==='review'?'Validating the approved table policy…':'Preparing local structured-data import…'};this.changed()}
+      if(writer){this.state={...initial(),running:true,folder:job.folder??'',paths:job.paths,message:job.action==='review'?'Validating the approved table policy…':'Preparing local structured-data import…'};this.changed()}
       const current=worker
       const result=await new Promise<unknown>((resolve,reject)=>{
         let ended=false,lastActivity=Date.now(),checking=false,killer:ReturnType<typeof setTimeout>|undefined
@@ -124,7 +124,7 @@ export class AnalyticsService {
           lastActivity=Date.now()
           if(raw.ready){if(slot?.initialize){this.databaseReady=true;this.wakeWorkers()}return}
           if(raw.heartbeat)return
-          if(raw.progress){if(writer){this.state={...raw.progress,running:true,folder:job.folder??this.state.folder};this.changed()}return}
+          if(raw.progress){if(writer){this.state={...raw.progress,running:true,paths:job.paths,folder:job.folder??this.state.folder};this.changed()}return}
           if(abort.signal.aborted){finish(new Error('Analytics request cancelled.'));return}
           finish(raw.error?new Error(raw.error):undefined,raw.result)
         }
@@ -155,6 +155,19 @@ export class AnalyticsService {
     if((action==='prepare'||action==='propose-policy')&&!preparation&&!(await this.config()).allowAgentPreparation)throw new Error('Click Prepare & export to prepare and review selected files with the agent. Source snapshots and table data will be stored locally without encryption.')
     return await this.request(owner,{action,paths,payload,...(preparation?{folder:preparation.folder,preparationAuthorized:true,reviewedDatasets:preparation.reviewedDatasets}:{})},signal) as AnalyticsEnvelope
   }
+  async prepareSelected(owner:number,folder:unknown,rawPaths:unknown):Promise<AnalyticsPreparationSummary>{
+    validAbsolute(folder)
+    const paths=list(rawPaths,'selected files',256).map(value=>text(value,'path',4096))
+    if(!paths.length)throw new Error('Select at least one file.')
+    const roots=await this.options.roots()
+    await authorizePath(roots,folder)
+    // Validate the whole selection before filtering narrative files or starting a writer.
+    for(const path of paths){validAbsolute(path);if(!within(folder,path)||samePath(folder,path))throw new Error('Select files inside the opened directory.');await authorizePath(roots,path)}
+    const tables=paths.filter((path,index)=>ANALYTICS_FILE_EXTENSIONS.includes(extname(path).toLowerCase() as typeof ANALYTICS_FILE_EXTENSIONS[number])&&!paths.slice(0,index).some(previous=>samePath(previous,path)))
+    if(!tables.length)return {selectedFileCount:0,imported:0,unchanged:0,failedFiles:0,unsupportedFiles:0,approvedTables:0,alreadyReady:0,readyTables:0,draftTables:0,reviewTables:0,blockedTables:0,issues:[],issuesTruncated:false}
+    const result=await this.request(owner,{action:'prepare',folder,paths:tables,indexAuthorized:true}) as AnalyticsEnvelope
+    return object(result.value).preparation as AnalyticsPreparationSummary
+  }
   stop():void{this.stopped=true;for(const item of this.requests.values())item.abort.abort();for(const item of this.active.values()){Atomics.store(item.flag,0,1);void item.worker.terminate()}this.active.clear()}
 }
 export function registerAnalyticsIpc(options:Options):AnalyticsService{
@@ -168,6 +181,7 @@ export function registerAnalyticsIpc(options:Options):AnalyticsService{
       case'progress':return service.progress()
       case'cancel':return service.cancel(owner)
       case'import':if(args[2]!==true)throw new Error('Confirm local snapshot/text storage before importing.');return service.request(owner,{action:'import',folder:text(args[0],'folder',4096),recursive:args[1]===true})
+      case'prepareSelected':return service.prepareSelected(owner,args[0],args[1])
       case'catalog':return service.request(owner,{action:'catalog',folder:text(args[0],'folder',4096),payload:{offset:args[1]??0}})
       case'clear':return service.request(owner,{action:'clear',folder:text(args[0],'folder',4096)})
       case'statuses':return service.request(owner,{action:'statuses',paths:list(args[0],'visible paths',256).map(v=>text(v,'path',4096)),verify:args[1]===true})

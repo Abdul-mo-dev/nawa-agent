@@ -4,6 +4,13 @@ import { createRoot } from 'react-dom/client'
 import { LocaleProvider, useI18n } from '../../apps/shell/src/renderer/src/locale'
 import { WorkspaceControlPanel } from '../../apps/shell/src/renderer/src/explorer/WorkspaceControlPanel'
 import { WorkspaceChat } from '../../apps/shell/src/renderer/src/WorkspaceChat'
+import { FileList } from '../../apps/shell/src/renderer/src/explorer/FileList'
+import { SettingsModal } from '../../apps/shell/src/renderer/src/SettingsModal'
+import { PanelDialog } from '../../apps/shell/src/renderer/src/explorer/PanelDialog'
+import { RagToolbar } from '../../apps/shell/src/renderer/src/rag/RagToolbar'
+import { AnalyticsToolbar } from '../../apps/shell/src/renderer/src/analytics/AnalyticsToolbar'
+import { DEFAULT_PREFERENCES } from '../../apps/shell/src/renderer/src/explorer/model'
+import { explorerText } from '../../apps/shell/src/renderer/src/explorer/strings'
 import { DEFAULT_RAG_SETTINGS } from '../../apps/shell/src/shared/rag-api'
 import { DEFAULT_ANALYTICS_SETTINGS } from '../../apps/shell/src/shared/analytics-api'
 import type { Dataset, TablePolicy } from '../../apps/shell/src/shared/analytics-api'
@@ -19,6 +26,10 @@ import './fixture.css'
 
 const clone = <T,>(value: T): T => structuredClone(value)
 const folder = 'C:\\Review workspace\\Quarterly reports'
+const fileStatusMode = new URLSearchParams(location.search).has('file-status')
+const fileStatusItems = ['revenue.xlsx', 'survey.xlsx', 'processing.pdf', 'failed.xlsx', 'partial.pdf', 'changed.xlsx', 'notes.txt'].map(name => ({
+  path: folder + '\\' + name, name, kind: 'file' as const, ext: name.split('.').at(-1)!, mtimeMs: Date.now(), sizeBytes: 24000,
+}))
 const config = { apiKey: 'fixture-key', baseUrl: 'http://127.0.0.1:8000/v1', model: 'local-model' }
 let settings = {
   provider: 'custom',
@@ -121,6 +132,8 @@ let preparedPolicy: Dataset['preparedPolicy']
 let agentApproved = false
 let running = false
 const state = {
+  indexRequests: [] as { folder: string; paths: string[]; consent: boolean }[],
+  preparationRequests: [] as { folder: string; paths: string[] }[],
   exportRequests: [] as { paths: string[]; folder: string | null }[],
   revealedPaths: [] as string[],
   toolCatalogRequests: [] as { query: string; offset: number; extensions?: string[] }[],
@@ -764,7 +777,10 @@ Object.assign(window, {
     initialize: async () => ({ databasePath: 'fixture/history.sqlite', imported: 0 }),
     list: async () => ({ conversations: [clone(record)], total: 1 }),
     get: async () => clone(record),
-    create: async () => clone(record),
+    create: async () => {
+      record = { ...record, id: crypto.randomUUID(), title: 'New conversation', revision: 0, draft: '', baselineId: null, lastChatAt: null, messageCount: 0, messages: [] }
+      return clone(record)
+    },
     save: async (input: Partial<typeof record> & { delta?: boolean; removedIds?: string[] }) => {
       if (state.failHistorySave) throw new Error('Local storage temporarily unavailable')
       const { delta, removedIds, ...next } = clone(input)
@@ -826,6 +842,10 @@ Object.assign(window, {
     revealDatabase: async () => {},
   },
   nawaRag: {
+    indexSelected: async (folder: string, paths: string[], consent: boolean) => {
+      state.indexRequests.push({ folder, paths: clone(paths), consent })
+      return { running: false, folder, scope: 'selected', current: '', scanned: paths.length, embedded: paths.length, failed: 0, chunks: 10, unchanged: 0, incomplete: false, message: '' }
+    },
     settings: async () => ({
       settings: clone(rag),
       hasKey: false,
@@ -836,8 +856,17 @@ Object.assign(window, {
       return { settings: clone(rag), hasKey: false, databasePath: 'fixture/search.sqlite' }
     },
     test: async () => ({ dimensions: 768, message: 'Connection successful.' }),
+    models: async () => ['local-embedding'],
     progress: async () => {
       state.ragProgressCalls++
+      if (fileStatusMode) return {
+        running: true, folder, scope: 'selected', current: fileStatusItems[2].path,
+        scanned: 2, embedded: 1, failed: 0, chunks: 4, unchanged: 0, incomplete: false,
+        message: 'Embedding document passages', files: [
+          { path: fileStatusItems[1].path, status: 'pending' },
+          { path: fileStatusItems[2].path, status: 'indexing', completedChunks: 4, totalChunks: 10 },
+        ],
+      }
       return {
         running,
         folder: 'C:\\Other directory',
@@ -857,7 +886,13 @@ Object.assign(window, {
     },
     clear: async () => {},
     statuses: async (paths: string[]) =>
-      paths.map((path) => ({ path, status: 'not-indexed', chunks: 0 })),
+      paths.map((path) => {
+        const index = fileStatusItems.findIndex(item => item.path === path)
+        return fileStatusMode ? {
+          path, status: ['embedded', 'not-indexed', 'embedding', 'failed', 'embedded', 'stale', 'not-indexed'][index] ?? 'not-indexed',
+          chunks: 10, partial: index === 4, error: index === 3 ? 'This file could not be read. Try saving it again.' : undefined,
+        } : { path, status: 'not-indexed', chunks: 0 }
+      }),
     cancel: async () => {
       running = false
     },
@@ -928,7 +963,22 @@ Object.assign(window, {
     },
   },
   nawaAnalytics: {
+    prepareSelected: async (folder: string, paths: string[]) => {
+      state.preparationRequests.push({ folder, paths: clone(paths) })
+      return { selectedFileCount: paths.length, imported: paths.length, unchanged: 0, failedFiles: 0, unsupportedFiles: 0, approvedTables: paths.length, alreadyReady: 0, readyTables: paths.length, draftTables: 0, reviewTables: 0, blockedTables: 0, issues: [], issuesTruncated: false }
+    },
     settings: async () => ({ settings: clone(analytics), databasePath: 'fixture/analysis.sqlite' }),
+    statuses: async (paths: string[]) =>
+      paths.map((path) => fileStatusMode ? ({
+        path, state: ['ready', 'importing', 'unsupported', 'failed', 'unsupported', 'not-imported', 'unsupported'][fileStatusItems.findIndex(item => item.path === path)],
+        tables: 1, rows: 500, message: path.endsWith('failed.xlsx') ? 'An amount could not be read on row 8.' : '',
+      }) : ({
+        path,
+        state: path === source.path ? 'needs-review' : 'not-imported',
+        tables: path === source.path ? 1 : 0,
+        rows: path === source.path ? 100 : 0,
+        message: path === source.path ? 'Review required' : 'Not prepared',
+      })),
     saveSettings: async (value: typeof analytics) => {
       analytics = clone(value)
     },
@@ -950,6 +1000,10 @@ Object.assign(window, {
     }),
     progress: async () => {
       state.analyticsProgressCalls++
+      if (fileStatusMode) return {
+        running: true, folder, current: fileStatusItems[1].path, paths: [fileStatusItems[1].path, fileStatusItems[5].path],
+        scanned: 1, imported: 0, failed: 0, rows: 42, currentRows: 42, message: 'Preparing selected table data', unchanged: 0, incomplete: false,
+      }
       return {
         running,
         folder: 'C:\\Other directory',
@@ -986,10 +1040,11 @@ function Fixture() {
     setSelectedDirectories(directories)
   }
   const [visible, setVisible] = useState(true),
-    [active, setActive] = useState<'ai' | 'ragAnalytics' | 'provider'>('ai'),
+    [settingsOpen, setSettingsOpen] = useState(false),
+    [fileTools, setFileTools] = useState<'search' | 'tables' | null>(null),
     [width, setWidth] = useState(360),
     [screen, setScreen] = useState(innerWidth)
-  const { setLang } = useI18n()
+  const { setLang, lang, dateLocale } = useI18n()
   useEffect(() => {
     const resize = () => setScreen(innerWidth)
     window.addEventListener('resize', resize)
@@ -1002,6 +1057,8 @@ function Fixture() {
     >
       <header className="fixture-controls">
         <button onClick={() => setVisible(true)}>Open sidebar</button>
+        <button onClick={() => setFileTools('search')}>Index selected files</button>
+        <button onClick={() => setFileTools('tables')}>Review table data</button>
         <button onClick={() => setWidth(300)}>300px</button>
         <button onClick={() => setWidth(360)}>360px</button>
         <button onClick={() => setWidth(560)}>560px</button>
@@ -1018,20 +1075,23 @@ function Fixture() {
         <main className="ex-center">
           <h1>Quarterly reports</h1>
           <p>Synthetic test workspace</p>
+          {fileStatusMode && <FileList items={fileStatusItems} roots={[{ path: folder, name: 'Quarterly reports', usable: true }]}
+            selected={new Set(selectedFiles)} cutPaths={new Set()} preferences={{ ...DEFAULT_PREFERENCES, view: 'details' }}
+            locale={dateLocale} text={explorerText(lang)}
+            onSelect={(path, options) => setSelectedFiles(previous => options.toggle
+              ? previous.includes(path) ? previous.filter(value => value !== path) : [...previous, path] : [path])}
+            onSelectAll={() => setSelectedFiles(fileStatusItems.map(item => item.path))}
+            onOpen={() => {}} onContext={() => {}} onRename={() => {}} onDelete={() => {}} onSort={() => {}} />}
         </main>
         <WorkspaceControlPanel
           visible={visible}
           drawer={screen < 1100}
-          active={active}
-          onChange={setActive}
+          settingsOpen={settingsOpen}
+          onOpenSettings={() => setSettingsOpen(true)}
           onClose={() => setVisible(false)}
-          assistantLabel="Nawa"
           closeLabel="Close sidebar"
           folder={folder}
           selectedFiles={selectedFiles}
-          onAddFolder={() => {
-            state.addFolderRequests++
-          }}
           assistant={
             <WorkspaceChat
               folder={folder}
@@ -1050,6 +1110,12 @@ function Fixture() {
           }
         />
       </div>
+      <PanelDialog open={!!fileTools} title={fileTools === 'search' ? 'Index selected files' : 'Review table data'} onClose={() => setFileTools(null)}>
+        {fileTools === 'search' && <RagToolbar folder={folder} selectedFiles={selectedFiles} inSidebar onSetup={() => { setFileTools(null); setSettingsOpen(true) }} />}
+        {fileTools === 'tables' && <AnalyticsToolbar folder={folder} inSidebar />}
+      </PanelDialog>
+      {settingsOpen && <SettingsModal initialSection="knowledge" status={null} loggingOut={false} loginWaiting={false} loginUrl={null} urlCopied={false}
+        onClose={() => setSettingsOpen(false)} onOpenLoginUrl={() => {}} onCopyLoginUrl={() => {}} onLogin={() => {}} onLogout={() => {}} />}
     </div>
   )
 }

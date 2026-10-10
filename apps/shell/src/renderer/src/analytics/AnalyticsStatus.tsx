@@ -1,29 +1,36 @@
-import { useEffect, useState } from 'react'
-import type { AnalyticsFileStatus } from '../../../shared/analytics-api'
-import './analytics.css'
-export function useAnalyticsStatuses(files:Array<{path:string;mtimeMs:number;sizeBytes:number}>){
-  const key=JSON.stringify(files.map(f=>[f.path,f.mtimeMs,f.sizeBytes]))
-  const [statuses,setStatuses]=useState<Record<string,AnalyticsFileStatus>>({}),[error,setError]=useState('')
-  useEffect(()=>{
-    let live=true,pending=false,force=true,again=false,timer:ReturnType<typeof setTimeout>|undefined
-    const paths=(JSON.parse(key) as [string,number,number][]).map(r=>r[0]).slice(0,256)
-    setStatuses({});setError('')
-    if(!window.nawaAnalytics){setError('Rebuild and restart the shell/preload to enable structured analytics.');return}
-    const refresh=async()=>{if(!live||!paths.length)return;if(pending){again=true;return}pending=true;const verify=force;force=false
-      try{const values=await window.nawaAnalytics.statuses(paths,verify);if(live){setStatuses(Object.fromEntries(values.map(v=>[v.path,v])));setError('')}}catch(e){if(live)setError(e instanceof Error?e.message:String(e))}
-      finally{pending=false;if(again&&live){again=false;schedule()}}
-    }
-    const schedule=()=>{if(timer)return;timer=setTimeout(()=>{timer=undefined;void refresh()},500)}
-    const verify=()=>{force=true;schedule()}
-    const off=window.nawaAnalytics.onChanged(schedule),offFiles=window.aiOffice.onFolderChanged(verify)
-    window.addEventListener('focus',verify);const interval=setInterval(schedule,10000);void refresh()
-    return()=>{live=false;clearTimeout(timer);clearInterval(interval);off();offFiles();window.removeEventListener('focus',verify)}
-  },[key])
-  return {statuses,error}
+import type { AnalyticsFileStatus, AnalyticsProgress } from '../../../shared/analytics-api'
+import { FileStatusIcon, type FileStatusState } from '../explorer/FileStatusIcon'
+import { pathKey } from '../explorer/model'
+import { useSidebarText } from '../explorer/sidebar-i18n'
+import { useFileStatuses } from '../explorer/useFileStatuses'
+
+export function useAnalyticsStatuses(files: Array<{ path: string; mtimeMs: number; sizeBytes: number }>) {
+  return useFileStatuses(files, window.nawaAnalytics, 'Analysis status is unavailable.')
 }
-export function AnalyticsBadge({value,error}:{value?:AnalyticsFileStatus;error?:string}){
-  const labels:Record<AnalyticsFileStatus['state'],string>={'not-imported':'Data: not imported',importing:'Data: importing…','needs-review':'Data: review needed',ready:'Data: ready',changed:'Data: changed',failed:'Data: failed',unsupported:'Data: no adapter'}
-  const label=error?'Data: unavailable':value?labels[value.state]:'Data: checking…'
-  const title=[label,error||value?.message,value?`${value.tables} tables · ${value.rows.toLocaleString()} approved rows`:'',value?.sourceHash?`Source SHA-256: ${value.sourceHash}`:''].filter(Boolean).join('\n')
-  return <span className={`nawa-data-badge is-${error?'failed':value?.state??'checking'}`} title={title} aria-label={title}>{value?.state==='ready'?'✓ ':''}{label}</span>
+
+export function AnalyticsBadge({ value, error, progress, path = value?.path }: {
+  value?: AnalyticsFileStatus; error?: string; progress?: AnalyticsProgress | null; path?: string
+}) {
+  const { s } = useSidebarText()
+  const current = progress?.running && path && pathKey(progress.current) === pathKey(path)
+  const queued = progress?.running && path && progress.paths?.some(candidate => pathKey(candidate) === pathKey(path))
+  let state: FileStatusState = 'waiting'
+  let label = 'Not prepared'
+  const details: string[] = []
+  if (error) { state = 'failed'; label = 'Status unavailable'; details.push(error) }
+  else if (current || value?.state === 'importing') {
+    state = 'busy'; label = 'Preparing data…'
+    if (current && progress?.message) details.push(progress.message)
+    if (current && progress?.currentRows) details.push(s('{count} rows processed', { count: progress.currentRows.toLocaleString() }))
+  } else if (queued && value?.state === 'not-imported') { label = 'Waiting to prepare data' }
+  else if (value?.state === 'ready') {
+    state = 'ready'; label = 'Ready for analysis'
+    details.push(s('{tables} tables · {rows} included rows', { tables: value.tables, rows: value.rows.toLocaleString() }))
+  } else if (value?.state === 'needs-review') { state = 'attention'; label = 'Needs a decision' }
+  else if (value?.state === 'changed') { state = 'attention'; label = 'File changed — data needs updating' }
+  else if (value?.state === 'failed') { state = 'failed'; label = 'Data preparation failed' }
+  else if (value?.state === 'unsupported') { state = 'unavailable'; label = 'No table data' }
+  else if (!value) { state = 'busy'; label = 'Checking file…' }
+  if (!error && value?.message && state !== 'busy') details.push(value.message)
+  return <FileStatusIcon state={state} label={s('Analysis') + ': ' + s(label)} details={details} />
 }
