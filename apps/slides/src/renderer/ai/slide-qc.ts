@@ -10,11 +10,7 @@ import {
   type AgentSkill,
   type AgentTransport,
 } from '@genoffice/agent-core'
-import {
-  getProviderAdapter,
-  modelLacksVision,
-  type AiSettings,
-} from '@genoffice/ai-provider/browser'
+import { modelSupportsVision, type AiSettings } from '@genoffice/ai-provider/browser'
 import { auditSlideLayout } from '@genoffice/pipelines/slides/layout-audit'
 import { createSlidesSkill, formatSlideDump, type DeckAccess } from './slides-skill'
 import qcVisualPrompt from './prompts/qc-visual.md?raw'
@@ -33,8 +29,7 @@ export function settingsSupportVision(
   settings: Pick<AiSettings, 'provider' | 'providers'>,
 ): boolean {
   try {
-    if (!getProviderAdapter(settings.provider).capabilities.vision) return false
-    return !modelLacksVision(settings.providers?.[settings.provider]?.model ?? '')
+    return modelSupportsVision(settings)
   } catch {
     return false
   }

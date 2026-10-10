@@ -603,7 +603,15 @@ export function buildCodexAppServerPrompt(
 export function parseCodexAppServerTurn(
   raw: string,
   tools: AgentToolDef[],
+  maxTokens?: number,
 ): { text: string; toolCalls: AgentToolCall[] } {
+  if (
+    maxTokens !== undefined &&
+    new TextEncoder().encode(raw).length > Math.max(1024, maxTokens) * 6
+  )
+    throw new Error(
+      'Codex returned an oversized response. Split the task into smaller operations; no returned tool call was executed.',
+    )
   let parsed: CodexAppServerTurn
   const trimmed = raw
     .trim()
@@ -700,8 +708,8 @@ const CODEX_PERMISSION_PROFILE = 'Nawa'
 /**
  * Codex keeps its own shell tool even when told not to use it, and the plain
  * read-only sandbox still lets that tool read the whole disk. A permission
- * profile confines reads to platform paths plus our temp dir. An explicit
- * `sandbox` would disable the profile, so it is only used in the fallback.
+ * profile confines reads to platform paths plus our temp dir. Older versions
+ * that cannot enforce that profile are rejected before starting a turn.
  */
 export function codexThreadStartParams(
   config: AiProviderConfig,
@@ -716,7 +724,10 @@ export function codexThreadStartParams(
     baseInstructions: CODEX_BASE_INSTRUCTIONS,
     ephemeral: true,
   }
-  if (mode === 'read-only') return { ...base, sandbox: 'read-only' }
+  if (mode !== 'profile')
+    throw new Error(
+      'Codex requires the Nawa restricted permission profile. Update Codex before using this provider.',
+    )
   return {
     ...base,
     config: {
@@ -733,8 +744,8 @@ export function activePermissionProfileId(result: unknown): string | undefined {
   return typeof active?.id === 'string' ? active.id : undefined
 }
 
-async function startNativeThread(
-  client: CodexAppServerClient,
+export async function startNativeThread(
+  client: Pick<CodexTurnTransport, 'request'>,
   config: AiProviderConfig,
   tempDir: string,
 ): Promise<string> {
@@ -748,17 +759,15 @@ async function startNativeThread(
       return threadIdFrom(profileResult)
     }
   } catch {
-    // Older Codex builds reject the profile keys; fall through to the sandbox.
     profileResult = undefined
   }
-  // A user config.toml sandbox_mode or an older Codex ignored the profile. Discard
-  // that thread before falling back so it does not linger under looser permissions.
+  // Discard a thread whose requested file isolation was not enforced.
   const abandoned = optionalThreadId(profileResult)
   if (abandoned) {
     await client.request('thread/delete', { threadId: abandoned }).catch(() => undefined)
   }
-  return threadIdFrom(
-    await client.request('thread/start', codexThreadStartParams(config, tempDir, 'read-only')),
+  throw new Error(
+    'Codex could not enforce the Nawa restricted permission profile. Update Codex or choose another model; no turn was started.',
   )
 }
 
@@ -885,7 +894,7 @@ async function runCodexAppServer(
         cb.signal,
         cb,
       )
-      const turn = parseCodexAppServerTurn(raw, tools)
+      const turn = parseCodexAppServerTurn(raw, tools, maxTokens)
       session.messageFingerprints = messages.map(fingerprint)
       if (turn.text) cb.onDelta(turn.text)
       for (const call of turn.toolCalls) cb.onToolCall(call)
@@ -924,11 +933,12 @@ export async function chatCodexAppServer(
   system: string,
   user: string,
   signal: AbortSignal,
+  maxTokens = 8192,
 ): Promise<AiChatResponse> {
   let content = ''
   // No sessionId: a one-shot chat/connection test is not reused, so it runs as
   // an ephemeral turn whose thread and temp dir are dropped when it ends.
-  await runCodexAppServer(config, system, [{ role: 'user', text: user }], [], 1024, {
+  await runCodexAppServer(config, system, [{ role: 'user', text: user }], [], maxTokens, {
     signal,
     onDelta: (text) => {
       content += text

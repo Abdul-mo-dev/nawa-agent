@@ -2210,6 +2210,25 @@ const aiProviderConfigSchema = z
     model: z.string(),
     baseUrl: z.string().optional(),
     cliPath: z.string().optional(),
+    policy: z
+      .object({
+        mode: z.enum(['local', 'cloud']).optional(),
+        contextTokens: z.number().int().min(4096).max(2_000_000).optional(),
+        outputTokens: z.number().int().min(1024).max(131072).optional(),
+        outputField: z.enum(['max_tokens', 'max_completion_tokens']).optional(),
+        vision: z.boolean().optional(),
+        tested: z
+          .object({
+            identity: z.string().max(8192),
+            at: z.number(),
+            tools: z.boolean(),
+            vision: z.boolean().optional(),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
 
@@ -2311,6 +2330,15 @@ const agentMessageSchema = z.union([
       toolCalls: z.array(agentToolCallSchema).optional(),
       // captured model thinking, echoed back for interleaved-thinking models
       reasoning: z.string().optional(),
+      providerState: z
+        .object({
+          protocol: z.literal('gemini'),
+          endpoint: z.string().max(4096),
+          model: z.string().max(256),
+          parts: z.array(z.record(z.string(), z.unknown())).max(1000),
+        })
+        .strict()
+        .optional(),
     })
     .strict(),
   z.object({ role: z.literal('tool'), results: z.array(agentToolResultSchema) }).strict(),

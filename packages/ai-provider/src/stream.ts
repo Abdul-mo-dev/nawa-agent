@@ -7,6 +7,9 @@ import { streamCodexAppServer } from './codex-app-server'
 import type { StreamCallbacks } from './protocols/shared'
 import { getProviderAdapter, type AiProtocol } from './registry'
 import type { AiProviderConfig, AiProviderId } from './types'
+import { prepareModelRequest } from './request-budget'
+import { modelSupportsVision } from './model-policy'
+import type { AiSettings } from './types'
 
 export { streamAnthropic } from './protocols/anthropic'
 export { streamGemini } from './protocols/gemini'
@@ -26,6 +29,25 @@ export async function streamForProvider(
 ): Promise<void> {
   const endpoint = getProviderAdapter(provider).resolveEndpoint(config)
   const { baseUrl } = endpoint
+  if (
+    messages.some((m) => m.role === 'user' && m.images?.length) &&
+    !modelSupportsVision({ provider, providers: { [provider]: config } } as AiSettings)
+  )
+    throw new Error(
+      'This model has no verified vision capability. Use OCR text or select and test a vision model in Settings.',
+    )
+  const budget = await prepareModelRequest(
+    provider,
+    config,
+    baseUrl,
+    system,
+    messages,
+    tools,
+    maxTokens,
+    cb.signal,
+  )
+  messages = budget.messages
+  maxTokens = budget.maxTokens
   if (endpoint.model) config = { ...config, model: endpoint.model }
   if (endpoint.protocol === 'codex-app-server') {
     return streamCodexAppServer(config, system, messages, tools, maxTokens, cb)

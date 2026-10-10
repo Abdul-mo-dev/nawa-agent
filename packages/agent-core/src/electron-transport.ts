@@ -4,6 +4,7 @@ import type {
   AgentToolDef,
   AgentTransport,
   AgentMessage,
+  AgentProviderState,
 } from './types'
 
 /**
@@ -15,7 +16,8 @@ export interface IpcStreamChunk {
   requestId: string
   /** 'ping' = wire-level keepalive; re-arms the silence watchdog and carries no payload;
    * 'reasoning' = model thinking delta (text carries it) */
-  type: 'delta' | 'reasoning' | 'tool-call' | 'done' | 'error' | 'ping'
+  type: 'delta' | 'reasoning' | 'provider-state' | 'tool-call' | 'done' | 'error' | 'ping'
+  providerState?: AgentProviderState | undefined
   text?: string
   toolCall?: AgentToolCall
   error?: string
@@ -111,6 +113,9 @@ export function createIpcTransport<S>(options: IpcTransportOptions<S>): AgentTra
         } else if (chunk.type === 'tool-call') {
           armSilence()
           if (chunk.toolCall) cb.onToolCall(chunk.toolCall)
+        } else if (chunk.type === 'provider-state') {
+          armSilence()
+          if (chunk.providerState) cb.onProviderState?.(chunk.providerState)
         } else if (chunk.type === 'done') {
           settle()
           if (chunk.stopReason) cb.onStopReason?.(chunk.stopReason)
@@ -134,7 +139,10 @@ export function createIpcTransport<S>(options: IpcTransportOptions<S>): AgentTra
       try {
         const settings = options.getSettings()
         const sessionKey = options.sessionKey?.(settings)
-        if (sessionKey !== previousSessionKey) { previousSessionKey = sessionKey; sessionId = crypto.randomUUID() }
+        if (sessionKey !== previousSessionKey) {
+          previousSessionKey = sessionKey
+          sessionId = crypto.randomUUID()
+        }
         // a rejected/thrown start would otherwise leave the run pending until the watchdog
         Promise.resolve(
           options.start({

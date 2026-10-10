@@ -2,6 +2,8 @@ import { normalizeChatModels } from './chat-models'
 import { defaultAiMediaSettings, resolveAiMediaSettings } from './media'
 import { defaultAiSearchSettings, resolveAiSearchSettings } from './search-settings'
 import type { AiProviderId, AiProviderMeta, AiSettings, LegacyAiSettings } from './types'
+import { modelPolicyOf, normalizeModelPolicy } from './model-policy'
+import { isLoopbackApiUrl } from './local-endpoint'
 
 /**
  * Genspark server-side LLM proxy endpoints. All three protocols share the
@@ -333,31 +335,11 @@ export function cloudToolsEnabled(settings: Pick<AiSettings, 'gskToolsEnabled'>)
 }
 
 /**
- * The stored provider selection is honored only when its config is usable
- * (api-key providers need a key and a model id; custom also needs a base URL).
- * Codex can auto-discover its executable. Anything else — including unknown
- * ids from a hand-edited
- * settings file — falls back to genspark, so a half-filled setup degrades
- * to the signed-in default instead of silently disabling AI.
+ * Preserve the user's provider even while configuration is incomplete.
+ * Request validation reports the missing setting; it never changes providers.
  */
 export function activeProvider(settings: AiSettings): AiProviderId {
-  const provider = settings.provider
-  if (provider === 'genspark') return 'genspark'
-  const meta = AI_PROVIDERS.find((m) => m.id === provider)
-  const config = settings.providers?.[provider]
-  if (!meta || !config) return 'genspark'
-  if (meta.needsCliPath) return provider
-  // Trim-aware: in-memory settings bypass the trimConfigs applied to
-  // persisted files, and a whitespace-only key/URL/model is a 401, not a config.
-  if (!config.model?.trim()) return 'genspark'
-  if (meta.needsBaseUrl) {
-    // Custom OpenAI-compatible endpoints (Ollama, LM Studio, vLLM) accept
-    // anonymous requests: base URL + model suffice, the key stays optional.
-    if (!config.baseUrl?.trim()) return 'genspark'
-    return provider
-  }
-  if (!config.apiKey?.trim()) return 'genspark'
-  return provider
+  return settings.provider
 }
 
 /**
@@ -389,13 +371,13 @@ const RETIRED_MODELS: Partial<Record<AiProviderId, Record<string, string>>> = {
 }
 
 /**
- * Per-turn output cap applied when the settings carry none. The historic 8192
- * was the budget a reasoning model burns on thinking before it writes any prose,
- * and too small for a large sheet DSL or long-form generation in one turn. Models
- * whose own ceiling is lower reject this and are retried at that ceiling
- * (see output-cap.ts).
+ * Cloud starting allowance. Local and saved-profile policies refine it and
+ * reserve at least half the configured context for input. Larger generation
+ * can use an explicit profile limit within the selected model's ceiling.
  */
-export const DEFAULT_MAX_OUTPUT_TOKENS = 32768
+export const DEFAULT_MAX_OUTPUT_TOKENS = 8192
+/** Leave room for prompt, tools and evidence on small local-model contexts. */
+export const DEFAULT_LOCAL_MAX_OUTPUT_TOKENS = 4096
 /** bounds accepted for AiSettings.maxOutputTokens: below the first a short answer cannot even finish, above the second one turn risks the whole context window */
 export const MIN_MAX_OUTPUT_TOKENS = 1024
 export const MAX_MAX_OUTPUT_TOKENS = 131072
@@ -409,10 +391,23 @@ export function clampMaxOutputTokens(value: unknown): number {
 
 /** The effective per-turn output cap of a settings object (clamped; absent → default) */
 export function maxOutputTokensOf(
-  settings: Pick<AiSettings, 'maxOutputTokens'> | null | undefined,
+  settings:
+    | (Pick<AiSettings, 'maxOutputTokens'> & Partial<Pick<AiSettings, 'provider' | 'providers'>>)
+    | null
+    | undefined,
 ): number {
-  return settings?.maxOutputTokens === undefined
-    ? DEFAULT_MAX_OUTPUT_TOKENS
+  if (settings?.provider && settings.providers?.[settings.provider])
+    return modelPolicyOf(
+      settings.provider,
+      settings.providers[settings.provider],
+      settings.maxOutputTokens,
+    ).outputTokens
+  const fallback =
+    settings?.provider === 'custom' && isLoopbackApiUrl(settings.providers?.custom?.baseUrl)
+      ? DEFAULT_LOCAL_MAX_OUTPUT_TOKENS
+      : DEFAULT_MAX_OUTPUT_TOKENS
+  return typeof settings?.maxOutputTokens !== 'number' || !Number.isFinite(settings.maxOutputTokens)
+    ? fallback
     : clampMaxOutputTokens(settings.maxOutputTokens)
 }
 
@@ -422,6 +417,7 @@ function trimConfigs(providers: AiSettings['providers']): AiSettings['providers'
   for (const [id, config] of Object.entries(trimmed)) {
     trimmed[id as AiProviderId] = {
       ...config,
+      ...(config.policy ? { policy: normalizeModelPolicy(config.policy) } : {}),
       apiKey: config.apiKey?.trim() ?? '',
       model: config.model?.trim() ?? '',
       ...(config.baseUrl !== undefined ? { baseUrl: config.baseUrl.trim() } : {}),
@@ -452,18 +448,29 @@ export function resolveAiSettings(
   defaults: AiSettings,
 ): AiSettings {
   if (!stored.providers) {
-    if (stored.apiKey) {
-      defaults.providers.custom = {
-        apiKey: stored.apiKey.trim(),
+    if (stored.apiKey || stored.baseUrl || stored.model) {
+      const custom = {
+        apiKey: stored.apiKey?.trim() ?? '',
         model: stored.model?.trim() ?? '',
         baseUrl: (stored.baseUrl ?? 'https://api.openai.com/v1').trim(),
       }
+      return {
+        ...defaults,
+        provider: stored.provider ?? 'custom',
+        providers: { ...defaults.providers, custom },
+      }
     }
-    return defaults
+    return { ...defaults, provider: stored.provider ?? defaults.provider }
   }
   return {
-    chatModels: normalizeChatModels(stored.chatModels ?? defaults.chatModels, Object.keys(defaults.providers)),
-    defaultChatModelId: typeof stored.defaultChatModelId === 'string' ? stored.defaultChatModelId : defaults.defaultChatModelId,
+    chatModels: normalizeChatModels(
+      stored.chatModels ?? defaults.chatModels,
+      Object.keys(defaults.providers),
+    ),
+    defaultChatModelId:
+      typeof stored.defaultChatModelId === 'string'
+        ? stored.defaultChatModelId
+        : defaults.defaultChatModelId,
     provider: stored.provider ?? defaults.provider,
     // Trim before migrating: a pasted " deepseek-reasoner " must still hit
     // the retired-id remap instead of being sent to the API verbatim.

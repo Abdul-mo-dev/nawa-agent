@@ -2,6 +2,7 @@ import { ANTHROPIC_BASE_URL } from './protocols/anthropic'
 import { GEMINI_BASE_URL } from './protocols/gemini'
 import { AI_PROVIDERS, DEEPSEEK_V41_FLASH, GENSPARK_LLM_BASE_URLS } from './providers'
 import type { AiProviderConfig, AiProviderId, AiProviderMeta } from './types'
+import { isLocalModelConnection } from './local-endpoint'
 
 /** Wire protocols every provider maps onto, including the official Codex app-server bridge. */
 export type AiProtocol = 'anthropic' | 'gemini' | 'openai-compatible' | 'codex-app-server'
@@ -9,7 +10,7 @@ export type AiProtocol = 'anthropic' | 'gemini' | 'openai-compatible' | 'codex-a
 export interface ProviderCapabilities {
   /** How the provider authenticates: app login, user key, or the Codex CLI's existing login. */
   auth: 'gsk-login' | 'api-key' | 'codex-chatgpt'
-  /** chat models accept image input (declarative; for custom endpoints it is assumed, not known) */
+  /** Provider defaults; selected-model policy and capability tests refine these. */
   vision: boolean
 }
 
@@ -279,13 +280,26 @@ export const AI_PROVIDER_ADAPTERS: Record<AiProviderId, ProviderAdapter> = {
   },
   custom: {
     meta: metaOf('custom'),
-    capabilities: { auth: 'api-key', vision: true },
+    capabilities: { auth: 'api-key', vision: false },
     resolveEndpoint(config) {
       if (!config.baseUrl) throw new Error('A custom provider requires a Base URL')
+      let officialOpenAi = false
+      try {
+        officialOpenAi = new URL(config.baseUrl).hostname === 'api.openai.com'
+      } catch {
+        /* Validation reports malformed URLs. */
+      }
       return {
         protocol: 'openai-compatible',
         baseUrl: config.baseUrl,
-        ...(modelHasFixedSampling(config.model) ? { omitTemperature: true } : {}),
+        ...(config.policy?.outputField
+          ? { useMaxCompletionTokens: config.policy.outputField === 'max_completion_tokens' }
+          : officialOpenAi
+            ? { useMaxCompletionTokens: true }
+            : {}),
+        ...(isLocalModelConnection('custom', config) || modelHasFixedSampling(config.model)
+          ? { omitTemperature: true }
+          : {}),
       }
     },
   },

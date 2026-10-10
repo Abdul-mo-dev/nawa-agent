@@ -1,7 +1,13 @@
 import { ChatModelsEditor } from './ChatModelsEditor'
+import { ModelPolicyEditor } from './ModelPolicyEditor'
 import { PanelActivityContext, usePanelActivity, type PanelActivity } from './explorer/panel-state'
 import { useSidebarText } from './explorer/sidebar-i18n'
-import { REDACTED_AI_KEY, validateChatModels } from '@genoffice/ai-provider/browser'
+import {
+  REDACTED_AI_KEY,
+  validateChatModels,
+  validateModelPolicy,
+  modelCapabilityIdentity,
+} from '@genoffice/ai-provider/browser'
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
@@ -14,7 +20,7 @@ import {
 } from '@genoffice/ui'
 import type { AiFontSize, AiPanelPrefs, AiPanelSide } from '@genoffice/ui'
 import {
-  DEFAULT_MAX_OUTPUT_TOKENS,
+  maxOutputTokensOf,
   MAX_MAX_OUTPUT_TOKENS,
   MIN_MAX_OUTPUT_TOKENS,
   clampMaxOutputTokens,
@@ -150,9 +156,20 @@ const SECTIONS: readonly { id: SettingsSection; labelKey: StringKey }[] = [
 ]
 
 function SectionIcon({ id }: { id: SettingsSection }) {
-  if (id === 'knowledge') return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true">
-    <path d="M2 3.5c2-1 4-1 6 0 2-1 4-1 6 0v9c-2-1-4-1-6 0-2-1-4-1-6 0Z M8 3.5v9" />
-  </svg>
+  if (id === 'knowledge')
+    return (
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        aria-hidden="true"
+      >
+        <path d="M2 3.5c2-1 4-1 6 0 2-1 4-1 6 0v9c-2-1-4-1-6 0-2-1-4-1-6 0Z M8 3.5v9" />
+      </svg>
+    )
   if (id === 'aiModel') {
     return (
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -376,13 +393,27 @@ export function AiModelPane({ t }: { t: TFunc }) {
     })
     touch()
   }
+  const parseOutputLimit = (draft: string) => {
+    const parsed = Number.parseInt(draft, 10)
+    return Number.isFinite(parsed)
+      ? clampMaxOutputTokens(parsed)
+      : maxOutputTokensOf({ ...settings, maxOutputTokens: undefined })
+  }
+  const withOutputLimit = (value: number) => ({
+    ...settings,
+    maxOutputTokens: value,
+    providers: {
+      ...settings.providers,
+      [settings.provider]: { ...config, policy: { ...config.policy, outputTokens: value } },
+    },
+  })
   /** Commit the output-cap input: clamp what was typed and drop a no-op edit */
   const commitMaxTokens = () => {
     if (maxTokensDraft === null) return
     setMaxTokensDraft(null)
-    const next = clampMaxOutputTokens(Number.parseInt(maxTokensDraft, 10))
-    if (next === (settings.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS)) return
-    setSettings({ ...settings, maxOutputTokens: next })
+    const next = parseOutputLimit(maxTokensDraft)
+    if (next === maxOutputTokensOf(settings)) return
+    setSettings(withOutputLimit(next))
     touch()
   }
   const selectProvider = (id: AiSettings['provider']) => {
@@ -396,13 +427,9 @@ export function AiModelPane({ t }: { t: TFunc }) {
   }
   const save = async () => {
     const next =
-      maxTokensDraft === null
-        ? settings
-        : {
-            ...settings,
-            maxOutputTokens: clampMaxOutputTokens(Number.parseInt(maxTokensDraft, 10)),
-          }
-    const profileError = validateChatModels(next)
+      maxTokensDraft === null ? settings : withOutputLimit(parseOutputLimit(maxTokensDraft))
+    const profileError =
+      validateChatModels(next) ?? validateModelPolicy(next.provider, next.providers[next.provider])
     if (profileError) {
       setError(profileError)
       return
@@ -439,9 +466,30 @@ export function AiModelPane({ t }: { t: TFunc }) {
     setTesting(true)
     setTestResult(null)
     window.aiOffice
-      .testAiSettings?.(settings)
+      .testAiSettings?.({
+        ...settings,
+        selectedChatModelId: undefined,
+        defaultChatModelId: undefined,
+      })
       .then((r) => {
         setTestResult(r ?? { ok: false })
+        if (r?.capabilities) {
+          const tested = r.capabilities
+          setSettings((current) => {
+            if (!current) return current
+            const connection = current.providers[provider]
+            if (modelCapabilityIdentity(provider, connection) !== tested.identity) return current
+            return {
+              ...current,
+              providers: {
+                ...current.providers,
+                [provider]: { ...connection, policy: { ...connection.policy, tested } },
+              },
+            }
+          })
+          setDirty(true)
+          setSaved(false)
+        }
         if (r?.ok && isCodex) {
           void refreshCodexModels(config.cliPath ?? '', config.model).catch(() => undefined)
         }
@@ -537,7 +585,7 @@ export function AiModelPane({ t }: { t: TFunc }) {
               <div className="set-field-text">
                 <div className="set-field-stack">
                   <label className="set-field-label" htmlFor={fieldId('set-ai-key')}>
-                    {t('setAiApiKey')}
+                    {provider === 'custom' ? s('API key (optional)') : t('setAiApiKey')}
                   </label>
                   <div className="set-field-desc">{t('setAiKeyHint')}</div>
                 </div>
@@ -582,7 +630,9 @@ export function AiModelPane({ t }: { t: TFunc }) {
                 className="set-input"
                 type="text"
                 value={config.baseUrl ?? ''}
-                placeholder={meta?.needsBaseUrl ? 'https://…/v1' : meta?.defaultBaseUrl}
+                placeholder={
+                  provider === 'custom' ? 'http://127.0.0.1:8082/v1' : meta?.defaultBaseUrl
+                }
                 spellCheck={false}
                 onChange={(e) => updateConfig({ baseUrl: e.target.value.trim() })}
               />
@@ -607,9 +657,7 @@ export function AiModelPane({ t }: { t: TFunc }) {
               min={MIN_MAX_OUTPUT_TOKENS}
               max={MAX_MAX_OUTPUT_TOKENS}
               step={1024}
-              value={
-                maxTokensDraft ?? String(settings.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS)
-              }
+              value={maxTokensDraft ?? String(maxOutputTokensOf(settings))}
               onChange={(e) => setMaxTokensDraft(e.target.value)}
               onBlur={commitMaxTokens}
             />
@@ -634,12 +682,45 @@ export function AiModelPane({ t }: { t: TFunc }) {
               }}
             />
           </div>
+          <ModelPolicyEditor
+            provider={provider}
+            config={config}
+            embedded
+            hideOutput
+            onChange={(value) => {
+              setSettings((current) =>
+                current
+                  ? { ...current, providers: { ...current.providers, [provider]: value } }
+                  : current,
+              )
+              touch()
+            }}
+          />
         </details>
         <ChatModelsEditor
           settings={settings}
           catalog={catalog}
           onChange={(next) => {
             setSettings(next)
+            touch()
+          }}
+          onTested={(id, tested) => {
+            setSettings((current) =>
+              current
+                ? {
+                    ...current,
+                    chatModels: current.chatModels?.map((model) =>
+                      model.id === id &&
+                      modelCapabilityIdentity(model.provider, model.config) === tested.identity
+                        ? {
+                            ...model,
+                            config: { ...model.config, policy: { ...model.config.policy, tested } },
+                          }
+                        : model,
+                    ),
+                  }
+                : current,
+            )
             touch()
           }}
         />
@@ -1217,20 +1298,33 @@ export function SettingsModal({
   const [closePrompt, setClosePrompt] = useState(false)
   const modal = useRef<HTMLDivElement>(null)
   const publish = useCallback((_tab: unknown, source: string, activity: PanelActivity | null) => {
-    setActivities(previous => {
-      if (!activity) { if (!previous[source]) return previous; const next = { ...previous }; delete next[source]; return next }
-      if (previous[source]?.kind === activity.kind && previous[source]?.text === activity.text && previous[source]?.dirty === activity.dirty) return previous
+    setActivities((previous) => {
+      if (!activity) {
+        if (!previous[source]) return previous
+        const next = { ...previous }
+        delete next[source]
+        return next
+      }
+      if (
+        previous[source]?.kind === activity.kind &&
+        previous[source]?.text === activity.text &&
+        previous[source]?.dirty === activity.dirty
+      )
+        return previous
       return { ...previous, [source]: activity }
     })
   }, [])
-  const busy = Object.values(activities).some(activity => activity.kind === 'busy')
-  const dirty = Object.values(activities).some(activity => activity.dirty || activity.kind === 'unsaved')
+  const busy = Object.values(activities).some((activity) => activity.kind === 'busy')
+  const dirty = Object.values(activities).some(
+    (activity) => activity.dirty || activity.kind === 'unsaved',
+  )
   const requestClose = useCallback(() => {
     if (busy) return
     if (dirty) setClosePrompt(true)
     else onClose()
   }, [busy, dirty, onClose])
-  const closeRef = useRef(requestClose); closeRef.current = requestClose
+  const closeRef = useRef(requestClose)
+  closeRef.current = requestClose
   const knowledgeLabel = s('Knowledge')
   const [theme, setTheme] = useState<UiTheme>('system')
   const [saveDir, setSaveDir] = useState('')
@@ -1275,27 +1369,47 @@ export function SettingsModal({
     const siblings: HTMLElement[] = []
     let branch: HTMLElement = element.parentElement!
     while (branch.parentElement) {
-      siblings.push(...[...branch.parentElement.children].filter((node): node is HTMLElement => node instanceof HTMLElement && node !== branch))
+      siblings.push(
+        ...[...branch.parentElement.children].filter(
+          (node): node is HTMLElement => node instanceof HTMLElement && node !== branch,
+        ),
+      )
       branch = branch.parentElement
     }
-    const inert = siblings.map(node => [node, node.inert] as const)
-    inert.forEach(([node]) => { node.inert = true })
+    const inert = siblings.map((node) => [node, node.inert] as const)
+    inert.forEach(([node]) => {
+      node.inert = true
+    })
     element.querySelector<HTMLElement>('.set-nav-item.active')?.focus()
     const handler = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return
       if (document.querySelector('dialog[open]')) return
-      if (e.key === 'Escape') { e.preventDefault(); closeRef.current() }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        closeRef.current()
+      }
       if (e.key !== 'Tab') return
-      const controls = [...element.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex="0"]')]
-        .filter(node => node.tabIndex >= 0 && node.getClientRects().length > 0)
-      const first = controls[0], last = controls.at(-1)
-      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus() }
-      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus() }
+      const controls = [
+        ...element.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex="0"]',
+        ),
+      ].filter((node) => node.tabIndex >= 0 && node.getClientRects().length > 0)
+      const first = controls[0],
+        last = controls.at(-1)
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault()
+        last?.focus()
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault()
+        first?.focus()
+      }
     }
     window.addEventListener('keydown', handler)
     return () => {
       window.removeEventListener('keydown', handler)
-      inert.forEach(([node, value]) => { node.inert = value })
+      inert.forEach(([node, value]) => {
+        node.inert = value
+      })
       if (previous?.isConnected) previous.focus()
     }
   }, [])
@@ -1322,288 +1436,330 @@ export function SettingsModal({
   const email = status?.email ?? ''
 
   return (
-    <PanelActivityContext.Provider value={publish}><div
-      className="set-overlay"
-      dir={dir}
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) requestClose()
-      }}
-    >
-      <div ref={modal} className="set-dialog" role="dialog" aria-modal="true" aria-label={t('settings')}>
-        <div className="set-header">
-          <h2 className="set-title">{t('settings')}</h2>
-          <button className="set-close" disabled={busy} onClick={requestClose} aria-label={t('cancel')}>
-            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-              <path
-                d="M2 2l10 10M12 2L2 12"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
-            </svg>
-          </button>
-        </div>
-        <div className="set-body">
-          <nav className="set-nav" aria-label={t('settings')}>
-            {SECTIONS.map((s) => (
-              <button
-                key={s.id}
-                className={`set-nav-item${section === s.id ? ' active' : ''}`}
-                aria-current={section === s.id}
-                onClick={() => {
-                  setSection(s.id)
-                  setVisited(previous => new Set([...previous, s.id]))
-                }}
-              >
-                <SectionIcon id={s.id} />
-                {s.id === 'knowledge' ? knowledgeLabel : t(s.labelKey)}
-                {s.id === 'integrations' && updateDue && (
-                  <span className="set-nav-dot" role="img" aria-label={t('intgUpdateDue')} />
-                )}
-              </button>
-            ))}
-          </nav>
-          <div className="set-pane">
-            {section === 'account' && (
-              <>
-                <h3 className="set-pane-title">{t('setSecAccount')}</h3>
-                <Field label={t('setEmail')} value={loggedIn ? email : t('setNotLoggedIn')} />
-                {loggedIn && (
-                  <Field
-                    label={t('credits')}
-                    value={
-                      status?.creditBalance === undefined
-                        ? '—'
-                        : Math.floor(status.creditBalance).toLocaleString('en-US')
-                    }
-                    action={
-                      <button
-                        className="set-btn"
-                        data-tip={t('creditsTip')}
-                        onClick={() => void window.aiOffice.openCreditUsage?.()}
-                      >
-                        {t('setViewUsage')}
-                      </button>
-                    }
-                  />
-                )}
-                <div className="set-pane-footer">
-                  {loggedIn ? (
-                    <button className="set-btn danger" disabled={loggingOut} onClick={onLogout}>
-                      {loggingOut ? t('loggingOut') : t('logout')}
-                    </button>
-                  ) : (
-                    <>
-                      {loginWaiting && loginUrl && (
-                        <>
-                          <button className="set-btn" onClick={onOpenLoginUrl}>
-                            {t('loginOpenManually')}
-                          </button>
-                          <button className="set-btn" onClick={onCopyLoginUrl}>
-                            {urlCopied ? t('loginCopied') : t('loginCopyUrl')}
-                          </button>
-                        </>
-                      )}
-                      <button className="set-btn primary" onClick={onLogin}>
-                        {loginWaiting ? t('waitingShort') : t('loginGenspark')}
-                      </button>
-                    </>
+    <PanelActivityContext.Provider value={publish}>
+      <div
+        className="set-overlay"
+        dir={dir}
+        onMouseDown={(e) => {
+          if (e.target === e.currentTarget) requestClose()
+        }}
+      >
+        <div
+          ref={modal}
+          className="set-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t('settings')}
+        >
+          <div className="set-header">
+            <h2 className="set-title">{t('settings')}</h2>
+            <button
+              className="set-close"
+              disabled={busy}
+              onClick={requestClose}
+              aria-label={t('cancel')}
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+                <path
+                  d="M2 2l10 10M12 2L2 12"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+          </div>
+          <div className="set-body">
+            <nav className="set-nav" aria-label={t('settings')}>
+              {SECTIONS.map((s) => (
+                <button
+                  key={s.id}
+                  className={`set-nav-item${section === s.id ? ' active' : ''}`}
+                  aria-current={section === s.id}
+                  onClick={() => {
+                    setSection(s.id)
+                    setVisited((previous) => new Set([...previous, s.id]))
+                  }}
+                >
+                  <SectionIcon id={s.id} />
+                  {s.id === 'knowledge' ? knowledgeLabel : t(s.labelKey)}
+                  {s.id === 'integrations' && updateDue && (
+                    <span className="set-nav-dot" role="img" aria-label={t('intgUpdateDue')} />
                   )}
-                </div>
-              </>
-            )}
-            <div hidden={section !== 'aiModel'}>{visited.has('aiModel') && <AiModelPane t={t} />}</div>
-            <div hidden={section !== 'aiMedia'}>{visited.has('aiMedia') && <AiMediaPane t={t} />}</div>
-            <div hidden={section !== 'knowledge'}>{visited.has('knowledge') && <KnowledgeSettings suspended={activities['myagent-settings']?.kind === 'busy'} />}</div>
-            {section === 'general' && (
-              <>
-                <h3 className="set-pane-title">{t('setSecGeneral')}</h3>
-                <div className="set-field">
-                  <div className="set-field-text">
-                    <label className="set-field-label">{t('language')}</label>
-                  </div>
-                  <Dropdown
-                    className="set-dd"
-                    value={lang}
-                    ariaLabel={t('language')}
-                    options={LANG_OPTIONS.map((opt) => ({ value: opt.value, label: opt.label }))}
-                    onPick={(v) => setLang(v as typeof lang)}
-                  />
-                </div>
-                <div className="set-field">
-                  <div className="set-field-text">
-                    <label className="set-field-label">{t('theme')}</label>
-                  </div>
-                  <Dropdown
-                    className="set-dd"
-                    value={theme}
-                    ariaLabel={t('theme')}
-                    options={THEME_OPTIONS.map((opt) => ({
-                      value: opt.value,
-                      label: t(opt.labelKey),
-                    }))}
-                    onPick={(v) => applyTheme(v as UiTheme)}
-                  />
-                </div>
-                <div className="set-field">
-                  <div className="set-field-text">
-                    <label className="set-field-label">{t('setAiPanelSide')}</label>
-                  </div>
-                  <Dropdown
-                    className="set-dd"
-                    value={aiPrefs.side}
-                    ariaLabel={t('setAiPanelSide')}
-                    options={[
-                      { value: 'left', label: t('aiPanelSideLeft') },
-                      { value: 'right', label: t('aiPanelSideRight') },
-                    ]}
-                    onPick={(side) => updateAiPrefs({ side: side as AiPanelSide })}
-                  />
-                </div>
-                <div className="set-field">
-                  <div className="set-field-text">
-                    <label className="set-field-label">{t('setAiFontSize')}</label>
-                  </div>
-                  {aiPrefs.fontSize === 'custom' && (
-                    <CustomFontSizeInput
-                      value={aiPrefs.customFontSize}
-                      label={t('aiFontSizeCustom')}
-                      onCommit={(px) => updateAiPrefs({ customFontSize: px })}
+                </button>
+              ))}
+            </nav>
+            <div className="set-pane">
+              {section === 'account' && (
+                <>
+                  <h3 className="set-pane-title">{t('setSecAccount')}</h3>
+                  <Field label={t('setEmail')} value={loggedIn ? email : t('setNotLoggedIn')} />
+                  {loggedIn && (
+                    <Field
+                      label={t('credits')}
+                      value={
+                        status?.creditBalance === undefined
+                          ? '—'
+                          : Math.floor(status.creditBalance).toLocaleString('en-US')
+                      }
+                      action={
+                        <button
+                          className="set-btn"
+                          data-tip={t('creditsTip')}
+                          onClick={() => void window.aiOffice.openCreditUsage?.()}
+                        >
+                          {t('setViewUsage')}
+                        </button>
+                      }
                     />
                   )}
-                  <Dropdown
-                    className="set-dd"
-                    value={aiPrefs.fontSize}
-                    ariaLabel={t('setAiFontSize')}
-                    options={AI_FONT_SIZE_OPTIONS.map((opt) => ({
-                      value: opt.value,
-                      label: t(opt.labelKey),
-                    }))}
-                    onPick={(v) => {
-                      const fontSize = v as AiFontSize
-                      // start the custom size from the preset being left so nothing jumps
-                      updateAiPrefs(
-                        fontSize === 'custom' && aiPrefs.fontSize !== 'custom'
-                          ? { fontSize, customFontSize: aiPanelFontPx(aiPrefs) }
-                          : { fontSize },
-                      )
-                    }}
-                  />
-                </div>
-                <div className="set-field">
-                  <div className="set-field-text">
-                    <div className="set-field-stack">
-                      <div className="set-field-label">{t('setAiSpellcheck')}</div>
-                      <div className="set-field-desc">{t('setAiSpellcheckDesc')}</div>
-                    </div>
+                  <div className="set-pane-footer">
+                    {loggedIn ? (
+                      <button className="set-btn danger" disabled={loggingOut} onClick={onLogout}>
+                        {loggingOut ? t('loggingOut') : t('logout')}
+                      </button>
+                    ) : (
+                      <>
+                        {loginWaiting && loginUrl && (
+                          <>
+                            <button className="set-btn" onClick={onOpenLoginUrl}>
+                              {t('loginOpenManually')}
+                            </button>
+                            <button className="set-btn" onClick={onCopyLoginUrl}>
+                              {urlCopied ? t('loginCopied') : t('loginCopyUrl')}
+                            </button>
+                          </>
+                        )}
+                        <button className="set-btn primary" onClick={onLogin}>
+                          {loginWaiting ? t('waitingShort') : t('loginGenspark')}
+                        </button>
+                      </>
+                    )}
                   </div>
-                  <button
-                    className="set-switch"
-                    role="switch"
-                    aria-checked={aiPrefs.spellcheck}
-                    aria-label={t('setAiSpellcheck')}
-                    onClick={() => updateAiPrefs({ spellcheck: !aiPrefs.spellcheck })}
-                  />
-                </div>
-                <Field
-                  label={t('saveLocation')}
-                  value={saveDir || '—'}
-                  valueTitle={saveDir}
-                  action={
-                    <button className="set-btn" onClick={changeSaveDir}>
-                      {t('setChange')}
-                    </button>
-                  }
-                />
-                <div className="set-field">
-                  <div className="set-field-text">
-                    <div className="set-field-stack">
-                      <div className="set-field-label">{t('setAutoSave')}</div>
-                      <div className="set-field-desc">{t('setAutoSaveDesc')}</div>
+                </>
+              )}
+              <div hidden={section !== 'aiModel'}>
+                {visited.has('aiModel') && <AiModelPane t={t} />}
+              </div>
+              <div hidden={section !== 'aiMedia'}>
+                {visited.has('aiMedia') && <AiMediaPane t={t} />}
+              </div>
+              <div hidden={section !== 'knowledge'}>
+                {visited.has('knowledge') && (
+                  <KnowledgeSettings suspended={activities['myagent-settings']?.kind === 'busy'} />
+                )}
+              </div>
+              {section === 'general' && (
+                <>
+                  <h3 className="set-pane-title">{t('setSecGeneral')}</h3>
+                  <div className="set-field">
+                    <div className="set-field-text">
+                      <label className="set-field-label">{t('language')}</label>
                     </div>
+                    <Dropdown
+                      className="set-dd"
+                      value={lang}
+                      ariaLabel={t('language')}
+                      options={LANG_OPTIONS.map((opt) => ({ value: opt.value, label: opt.label }))}
+                      onPick={(v) => setLang(v as typeof lang)}
+                    />
                   </div>
-                  <button
-                    className="set-switch"
-                    role="switch"
-                    aria-checked={autoSaveOn}
-                    aria-label={t('setAutoSave')}
-                    onClick={() => {
-                      const next = !autoSaveOn
-                      setAutoSaveOn(next)
-                      void window.aiOffice.setAutoSaveDefault?.(next).catch(() => {})
-                    }}
-                  />
-                </div>
-                <div className="set-field">
-                  <div className="set-field-text">
-                    <div className="set-field-stack">
-                      <div className="set-field-label">{t('setAnalytics')}</div>
-                      <div className="set-field-desc">{t('setAnalyticsDesc')}</div>
+                  <div className="set-field">
+                    <div className="set-field-text">
+                      <label className="set-field-label">{t('theme')}</label>
                     </div>
+                    <Dropdown
+                      className="set-dd"
+                      value={theme}
+                      ariaLabel={t('theme')}
+                      options={THEME_OPTIONS.map((opt) => ({
+                        value: opt.value,
+                        label: t(opt.labelKey),
+                      }))}
+                      onPick={(v) => applyTheme(v as UiTheme)}
+                    />
                   </div>
-                  <button
-                    className="set-switch"
-                    role="switch"
-                    aria-checked={analyticsOn}
-                    aria-label={t('setAnalytics')}
-                    disabled={analyticsSaving}
-                    onClick={() => {
-                      const next = !analyticsOn
-                      setAnalyticsSaving(true)
-                      void window.aiOffice
-                        .setAnalyticsEnabled(next)
-                        .then((persisted) => {
-                          if (persisted) setAnalyticsOn(next)
-                        })
-                        .catch(() => {})
-                        .finally(() => setAnalyticsSaving(false))
-                    }}
+                  <div className="set-field">
+                    <div className="set-field-text">
+                      <label className="set-field-label">{t('setAiPanelSide')}</label>
+                    </div>
+                    <Dropdown
+                      className="set-dd"
+                      value={aiPrefs.side}
+                      ariaLabel={t('setAiPanelSide')}
+                      options={[
+                        { value: 'left', label: t('aiPanelSideLeft') },
+                        { value: 'right', label: t('aiPanelSideRight') },
+                      ]}
+                      onPick={(side) => updateAiPrefs({ side: side as AiPanelSide })}
+                    />
+                  </div>
+                  <div className="set-field">
+                    <div className="set-field-text">
+                      <label className="set-field-label">{t('setAiFontSize')}</label>
+                    </div>
+                    {aiPrefs.fontSize === 'custom' && (
+                      <CustomFontSizeInput
+                        value={aiPrefs.customFontSize}
+                        label={t('aiFontSizeCustom')}
+                        onCommit={(px) => updateAiPrefs({ customFontSize: px })}
+                      />
+                    )}
+                    <Dropdown
+                      className="set-dd"
+                      value={aiPrefs.fontSize}
+                      ariaLabel={t('setAiFontSize')}
+                      options={AI_FONT_SIZE_OPTIONS.map((opt) => ({
+                        value: opt.value,
+                        label: t(opt.labelKey),
+                      }))}
+                      onPick={(v) => {
+                        const fontSize = v as AiFontSize
+                        // start the custom size from the preset being left so nothing jumps
+                        updateAiPrefs(
+                          fontSize === 'custom' && aiPrefs.fontSize !== 'custom'
+                            ? { fontSize, customFontSize: aiPanelFontPx(aiPrefs) }
+                            : { fontSize },
+                        )
+                      }}
+                    />
+                  </div>
+                  <div className="set-field">
+                    <div className="set-field-text">
+                      <div className="set-field-stack">
+                        <div className="set-field-label">{t('setAiSpellcheck')}</div>
+                        <div className="set-field-desc">{t('setAiSpellcheckDesc')}</div>
+                      </div>
+                    </div>
+                    <button
+                      className="set-switch"
+                      role="switch"
+                      aria-checked={aiPrefs.spellcheck}
+                      aria-label={t('setAiSpellcheck')}
+                      onClick={() => updateAiPrefs({ spellcheck: !aiPrefs.spellcheck })}
+                    />
+                  </div>
+                  <Field
+                    label={t('saveLocation')}
+                    value={saveDir || '—'}
+                    valueTitle={saveDir}
+                    action={
+                      <button className="set-btn" onClick={changeSaveDir}>
+                        {t('setChange')}
+                      </button>
+                    }
                   />
-                </div>
-              </>
-            )}
-            {section === 'integrations' && (
-              <IntegrationsPane t={t} onStatus={(st) => onSkillUpdateDue?.(skillUpdateDue(st))} />
-            )}
-            <div hidden={section !== 'integrations'}>
-              {visited.has('integrations') && <details className="set-optional-integration" onToggle={event => { if (event.currentTarget.open) setMyAgentVisited(true) }}>
-                <summary>{s('MyAgent server (optional)')}</summary>
-                {myAgentVisited && <MyAgentSettings hideConnection connectionPending={!!activities['search-settings']?.dirty || ['unsaved', 'busy'].includes(activities['search-settings']?.kind ?? '')} />}
-              </details>}
+                  <div className="set-field">
+                    <div className="set-field-text">
+                      <div className="set-field-stack">
+                        <div className="set-field-label">{t('setAutoSave')}</div>
+                        <div className="set-field-desc">{t('setAutoSaveDesc')}</div>
+                      </div>
+                    </div>
+                    <button
+                      className="set-switch"
+                      role="switch"
+                      aria-checked={autoSaveOn}
+                      aria-label={t('setAutoSave')}
+                      onClick={() => {
+                        const next = !autoSaveOn
+                        setAutoSaveOn(next)
+                        void window.aiOffice.setAutoSaveDefault?.(next).catch(() => {})
+                      }}
+                    />
+                  </div>
+                  <div className="set-field">
+                    <div className="set-field-text">
+                      <div className="set-field-stack">
+                        <div className="set-field-label">{t('setAnalytics')}</div>
+                        <div className="set-field-desc">{t('setAnalyticsDesc')}</div>
+                      </div>
+                    </div>
+                    <button
+                      className="set-switch"
+                      role="switch"
+                      aria-checked={analyticsOn}
+                      aria-label={t('setAnalytics')}
+                      disabled={analyticsSaving}
+                      onClick={() => {
+                        const next = !analyticsOn
+                        setAnalyticsSaving(true)
+                        void window.aiOffice
+                          .setAnalyticsEnabled(next)
+                          .then((persisted) => {
+                            if (persisted) setAnalyticsOn(next)
+                          })
+                          .catch(() => {})
+                          .finally(() => setAnalyticsSaving(false))
+                      }}
+                    />
+                  </div>
+                </>
+              )}
+              {section === 'integrations' && (
+                <IntegrationsPane t={t} onStatus={(st) => onSkillUpdateDue?.(skillUpdateDue(st))} />
+              )}
+              <div hidden={section !== 'integrations'}>
+                {visited.has('integrations') && (
+                  <details
+                    className="set-optional-integration"
+                    onToggle={(event) => {
+                      if (event.currentTarget.open) setMyAgentVisited(true)
+                    }}
+                  >
+                    <summary>{s('MyAgent server (optional)')}</summary>
+                    {myAgentVisited && (
+                      <MyAgentSettings
+                        hideConnection
+                        connectionPending={
+                          !!activities['search-settings']?.dirty ||
+                          ['unsaved', 'busy'].includes(activities['search-settings']?.kind ?? '')
+                        }
+                      />
+                    )}
+                  </details>
+                )}
+              </div>
+              {section === 'about' && (
+                <>
+                  <h3 className="set-pane-title">{t('setSecAbout')}</h3>
+                  <Field label={t('versionLabel')} value={appVersion || '—'} />
+                  <div className="set-field">
+                    <div className="set-field-text">
+                      <label className="set-field-label">{t('updateChannel')}</label>
+                    </div>
+                    <Dropdown
+                      className="set-dd"
+                      value={channel}
+                      ariaLabel={t('updateChannel')}
+                      options={CHANNEL_OPTIONS.map((opt) => ({
+                        value: opt.value,
+                        label: t(opt.labelKey),
+                      }))}
+                      onPick={(v) => {
+                        const next = v === 'beta' ? 'beta' : 'stable'
+                        setChannel(next)
+                        void window.aiOffice.setUpdateChannel(next)
+                      }}
+                    />
+                  </div>
+                </>
+              )}
             </div>
-            {section === 'about' && (
-              <>
-                <h3 className="set-pane-title">{t('setSecAbout')}</h3>
-                <Field label={t('versionLabel')} value={appVersion || '—'} />
-                <div className="set-field">
-                  <div className="set-field-text">
-                    <label className="set-field-label">{t('updateChannel')}</label>
-                  </div>
-                  <Dropdown
-                    className="set-dd"
-                    value={channel}
-                    ariaLabel={t('updateChannel')}
-                    options={CHANNEL_OPTIONS.map((opt) => ({
-                      value: opt.value,
-                      label: t(opt.labelKey),
-                    }))}
-                    onPick={(v) => {
-                      const next = v === 'beta' ? 'beta' : 'stable'
-                      setChannel(next)
-                      void window.aiOffice.setUpdateChannel(next)
-                    }}
-                  />
-                </div>
-              </>
-            )}
           </div>
+          {closePrompt && (
+            <div className="set-close-prompt" role="alert">
+              <span>{s('Discard unsaved settings?')}</span>
+              <button type="button" className="set-btn" onClick={() => setClosePrompt(false)}>
+                {s('Keep editing')}
+              </button>
+              <button type="button" className="set-btn danger" disabled={busy} onClick={onClose}>
+                {s('Discard and close')}
+              </button>
+            </div>
+          )}
         </div>
-        {closePrompt && <div className="set-close-prompt" role="alert">
-          <span>{s('Discard unsaved settings?')}</span>
-          <button type="button" className="set-btn" onClick={() => setClosePrompt(false)}>{s('Keep editing')}</button>
-          <button type="button" className="set-btn danger" disabled={busy} onClick={onClose}>{s('Discard and close')}</button>
-        </div>}
       </div>
-    </div></PanelActivityContext.Provider>
+    </PanelActivityContext.Provider>
   )
 }

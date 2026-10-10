@@ -132,6 +132,8 @@ export interface DirectoryApproval {
 export interface DirectoryCommit {
   path: string
   operation: DirectoryOperation
+  /** SHA-256 of the exact proposal, used to recognize a completed action on resume. */
+  proposalHash?: string
   backupPath?: string
   destination?: string
   permanent?: boolean

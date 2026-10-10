@@ -1,9 +1,11 @@
 import type { AgentSkill, ExecutedToolCall } from './skill'
+import { boundedToolEvidence } from './evidence-preview'
 import type {
   AgentImage,
   AgentMessage,
   AgentStreamHandle,
   AgentToolCall,
+  AgentProviderState,
   AgentToolResult,
   AgentTransport,
   ToolExecution,
@@ -170,6 +172,10 @@ function messageSize(m: AgentMessage): number {
     return m.results.reduce((n, r) => n + utf8Size(r.output) + 40, 0)
   }
   let n = utf8Size(m.text)
+  if (m.role === 'assistant') {
+    n += utf8Size(m.reasoning ?? '')
+    if (m.providerState) n += utf8Size(JSON.stringify(m.providerState))
+  }
   if (m.role === 'user' && m.images) {
     n += m.images.reduce((s, img) => s + img.base64.length, 0)
   }
@@ -225,6 +231,7 @@ export class AgentLoop<TSnapshot = unknown> {
   private turnStopReason: string | null = null
   private turnText = ''
   private turnReasoning = ''
+  private turnProviderState: AgentProviderState | undefined
   private toolCalls: AgentToolCall[] = []
   /** tools actually executed during this run, fed to skill.verifyResponse */
   private executedCalls: ExecutedToolCall[] = []
@@ -384,7 +391,7 @@ export class AgentLoop<TSnapshot = unknown> {
     // Reasoning echo only matters inside a run's own tool loop; drop it from
     // finished runs so it stops costing tokens on every later request.
     this.history = this.history.map((m) =>
-      m.role === 'assistant' && m.reasoning ? { ...m, reasoning: undefined } : m,
+      m.role === 'assistant' ? { ...m, reasoning: undefined, providerState: undefined } : m,
     )
     if (userMsg.role === 'user') {
       userMsg = { ...userMsg, text: sanitizeAgentPayload(userMsg.text) }
@@ -536,7 +543,7 @@ export class AgentLoop<TSnapshot = unknown> {
         r.output.length > STALE_TOOL_OUTPUT_MAX
           ? {
               ...r,
-              output: `${r.output.slice(0, STALE_TOOL_OUTPUT_MAX)}\n…(output truncated: too long)`,
+              output: boundedToolEvidence(r.output, STALE_TOOL_OUTPUT_MAX),
             }
           : r,
       )
@@ -581,6 +588,7 @@ export class AgentLoop<TSnapshot = unknown> {
     const generation = this.generation
     this.turnText = ''
     this.turnReasoning = ''
+    this.turnProviderState = undefined
     this.toolCalls = []
     this.turnStopReason = null
     // Some transports emit an extra onDone after cancel — this turn may finalize only once
@@ -603,6 +611,10 @@ export class AgentLoop<TSnapshot = unknown> {
         onReasoning: (text) => {
           if (generation !== this.generation || settled) return
           this.turnReasoning += text
+        },
+        onProviderState: (state) => {
+          if (generation !== this.generation || settled) return
+          this.turnProviderState = state
         },
         onToolCall: (call) => {
           if (generation !== this.generation || settled) return
@@ -691,9 +703,8 @@ export class AgentLoop<TSnapshot = unknown> {
         this.verifyRetryUsed = true
         this.history.push({ role: 'assistant', text: this.turnText })
         this.history.push({ role: 'user', text: correction })
-        // No onTurnEnd here: UIs use it to seal the current assistant bubble,
-        // which would keep the rejected claim visible. Without it, the
-        // corrective turn's cumulative onText overwrites the bubble in place.
+        // Clear the rejected draft before a corrective tool-only turn can seal it.
+        events?.onText?.('')
         this.startTurn()
         return
       }
@@ -768,6 +779,7 @@ export class AgentLoop<TSnapshot = unknown> {
       toolCalls: toolCalls.map(({ id, name, input }) => ({ id, name, input })),
       // interleaved-thinking models degrade in tool loops unless their reasoning is echoed back
       ...(this.turnReasoning ? { reasoning: this.turnReasoning } : {}),
+      ...(this.turnProviderState ? { providerState: this.turnProviderState } : {}),
     })
     const generation = this.generation
     const results: AgentToolResult[] = []

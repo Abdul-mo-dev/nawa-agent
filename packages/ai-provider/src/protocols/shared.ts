@@ -1,4 +1,4 @@
-import type { AgentToolCall } from '@genoffice/agent-core'
+import type { AgentToolCall, AgentProviderState } from '@genoffice/agent-core'
 
 // ---- streaming (SSE line splitting shared by all providers) ----
 
@@ -82,6 +82,7 @@ export interface StreamCallbacks {
   onToolCall: (call: AgentToolCall) => void
   /** raw model reasoning deltas (reasoning_content); stored so interleaved-thinking models get it echoed back */
   onReasoningDelta?: (text: string) => void
+  onProviderState?: (state: AgentProviderState) => void
   /** normalized stop reason ('max_tokens' when the output was cut off by the token limit) */
   onStopReason?: (reason: string) => void
   /** bytes arrived on the wire (fires per network chunk, including SSE pings; used for keepalive) */

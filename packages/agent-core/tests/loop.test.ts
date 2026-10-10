@@ -1049,7 +1049,10 @@ describe('AgentLoop compaction', () => {
     expect(toolMsgs).toHaveLength(3)
     const first = toolMsgs[0] as { results: Array<{ output: string }> }
     const last = toolMsgs[2] as { results: Array<{ output: string }> }
-    expect(first.results[0]!.output).toContain('…(output truncated: too long)')
+    expect(JSON.parse(first.results[0]!.output)).toMatchObject({
+      contextTruncated: true,
+      contextNotice: expect.stringContaining('not a complete read'),
+    })
     expect(first.results[0]!.output.length).toBeLessThan(1_200)
     expect(last.results[0]!.output).toBe(big)
   })
@@ -1299,14 +1302,25 @@ describe('AgentLoop: verifyResponse (claimed-action guard)', () => {
       executed.some((c) => c.name === 'do_thing') ? null : 'call the tool first',
     )
     const onDone = vi.fn()
+    let visibleText = ''
+    const sealedDrafts: string[] = []
     const loop = new AgentLoop({
       transport,
       skill: { ...makeSkill(), verifyResponse },
-      events: { onDone },
+      events: {
+        onDone,
+        onText: (text) => {
+          visibleText = text
+        },
+        onTurnEnd: () => {
+          sealedDrafts.push(visibleText)
+        },
+      },
     })
     loop.run('locate the row')
     for (let i = 0; i < 4; i++) await flush()
     expect(transport.requests).toHaveLength(3)
+    expect(sealedDrafts).toEqual([''])
     // the guard fired once on the unbacked claim; after the corrective turn
     // ran the tool, the run completed without re-verifying (once per run)
     expect(verifyResponse).toHaveBeenCalledTimes(1)

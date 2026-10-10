@@ -16,6 +16,14 @@ export interface AgentToolCall {
   truncated?: boolean | undefined
 }
 
+/** Opaque provider transcript. Never used as tool arguments or portable history. */
+export interface AgentProviderState {
+  protocol: 'gemini'
+  endpoint: string
+  model: string
+  parts: Record<string, unknown>[]
+}
+
 export interface AgentToolResult {
   id: string
   /** tool name (Gemini addresses function responses by name, not id) */
@@ -41,6 +49,7 @@ export type AgentMessage =
       text: string
       toolCalls?: AgentToolCall[] | undefined
       reasoning?: string | undefined
+      providerState?: AgentProviderState | undefined
     }
   | { role: 'tool'; results: AgentToolResult[] }
 
@@ -100,6 +109,7 @@ export interface AgentStreamCallbacks {
   onDelta(text: string): void
   /** raw model reasoning delta; the loop stores it on the assistant message for interleaved-thinking echo */
   onReasoning?(text: string): void
+  onProviderState?(state: AgentProviderState): void
   /** complete parsed tool call (arguments finished streaming) */
   onToolCall(call: AgentToolCall): void
   /** Phase changes within the model stream (thinking / responding / tool-input); older transports may omit this */

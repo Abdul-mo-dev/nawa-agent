@@ -26,9 +26,23 @@ import './fixture.css'
 
 const clone = <T,>(value: T): T => structuredClone(value)
 const folder = 'C:\\Review workspace\\Quarterly reports'
+const employeeFile = folder + '\\employee-data.xlsx'
 const fileStatusMode = new URLSearchParams(location.search).has('file-status')
-const fileStatusItems = ['revenue.xlsx', 'survey.xlsx', 'processing.pdf', 'failed.xlsx', 'partial.pdf', 'changed.xlsx', 'notes.txt'].map(name => ({
-  path: folder + '\\' + name, name, kind: 'file' as const, ext: name.split('.').at(-1)!, mtimeMs: Date.now(), sizeBytes: 24000,
+const fileStatusItems = [
+  'revenue.xlsx',
+  'survey.xlsx',
+  'processing.pdf',
+  'failed.xlsx',
+  'partial.pdf',
+  'changed.xlsx',
+  'notes.txt',
+].map((name) => ({
+  path: folder + '\\' + name,
+  name,
+  kind: 'file' as const,
+  ext: name.split('.').at(-1)!,
+  mtimeMs: Date.now(),
+  sizeBytes: 24000,
 }))
 const config = { apiKey: 'fixture-key', baseUrl: 'http://127.0.0.1:8000/v1', model: 'local-model' }
 let settings = {
@@ -132,6 +146,7 @@ let preparedPolicy: Dataset['preparedPolicy']
 let agentApproved = false
 let running = false
 const state = {
+  analyticsRequests: [] as { action: string; payload: any }[],
   indexRequests: [] as { folder: string; paths: string[]; consent: boolean }[],
   preparationRequests: [] as { folder: string; paths: string[] }[],
   exportRequests: [] as { paths: string[]; folder: string | null }[],
@@ -180,6 +195,41 @@ const stream = async (request: any) => {
   const turn = (turns.get(request.sessionId) ?? 0) + 1
   turns.set(request.sessionId, turn)
   await new Promise((resolve) => setTimeout(resolve, 50))
+  if (state.scenario === 'employee-count') {
+    if (turn === 1)
+      emit({
+        type: 'tool-call',
+        toolCall: {
+          id: 'inspect-employees',
+          name: 'inspect_file',
+          input: { path: employeeFile },
+        },
+      })
+    else if (turn === 2)
+      emit({
+        type: 'delta',
+        text: 'I need to know which column contains the employee records. Could you specify the column header?',
+      })
+    else if (turn === 3)
+      emit({
+        type: 'tool-call',
+        toolCall: {
+          id: 'count-employees',
+          name: 'query_data',
+          input: {
+            datasetIds: ['ready-employees'],
+            metrics: [{ op: 'count', as: 'included_records' }],
+          },
+        },
+      })
+    else
+      emit({
+        type: 'delta',
+        text: 'There are 500 included records. If each row represents one employee, that corresponds to 500 employees. Receipt analysis_employee_count. [Source](RAG:analysis_employee_count:1)',
+      })
+    emit({ type: 'done' })
+    return
+  }
   if (request.system.includes('The user clicked Prepare & export.')) {
     const calls = [
       { name: 'prepare_data', input: {} },
@@ -509,6 +559,55 @@ Object.assign(window, {
   },
   nawaDirectory: {
     analytics: async (_run: string, action: string, payload: any) => {
+      state.analyticsRequests.push({ action, payload: clone(payload) })
+      if (state.scenario === 'employee-count') {
+        if (action === 'discover')
+          return {
+            datasets: [
+              {
+                id: 'ready-employees',
+                path: employeeFile,
+                sourceHash: source.contentHash,
+                generation: 'employees-v1',
+                name: 'Data',
+                sheet: 'Data',
+                range: 'Data!A2:E501',
+                status: 'ready',
+                grain: 'One source data record',
+                columns: [
+                  { id: 'c0', name: 'id', type: 'text' },
+                  { id: 'c1', name: 'name', type: 'text' },
+                ],
+                totalColumns: 2,
+                moreColumns: false,
+              },
+            ],
+            nextOffset: null,
+          }
+        if (action === 'query') {
+          runSources.get(_run)?.set(employeeFile, { ...source, path: employeeFile })
+          return {
+            id: 'analysis_employee_count',
+            operation: 'query',
+            sources: [
+              {
+                path: employeeFile,
+                hash: source.contentHash,
+                datasetId: 'ready-employees',
+                generation: 'employees-v1',
+              },
+            ],
+            population: {
+              sourceRows: [{ rows: 500, excludedByPolicy: 1, grain: 'One source data record' }],
+            },
+            rows: [{ included_records: '500' }],
+            totalResultRows: 1,
+            displayedRows: 1,
+            warnings: [],
+          }
+        }
+        throw new Error('Unexpected employee-count analytical action: ' + action)
+      }
       if (action === 'prepare')
         return {
           preparation: {
@@ -778,7 +877,17 @@ Object.assign(window, {
     list: async () => ({ conversations: [clone(record)], total: 1 }),
     get: async () => clone(record),
     create: async () => {
-      record = { ...record, id: crypto.randomUUID(), title: 'New conversation', revision: 0, draft: '', baselineId: null, lastChatAt: null, messageCount: 0, messages: [] }
+      record = {
+        ...record,
+        id: crypto.randomUUID(),
+        title: 'New conversation',
+        revision: 0,
+        draft: '',
+        baselineId: null,
+        lastChatAt: null,
+        messageCount: 0,
+        messages: [],
+      }
       return clone(record)
     },
     save: async (input: Partial<typeof record> & { delta?: boolean; removedIds?: string[] }) => {
@@ -844,7 +953,19 @@ Object.assign(window, {
   nawaRag: {
     indexSelected: async (folder: string, paths: string[], consent: boolean) => {
       state.indexRequests.push({ folder, paths: clone(paths), consent })
-      return { running: false, folder, scope: 'selected', current: '', scanned: paths.length, embedded: paths.length, failed: 0, chunks: 10, unchanged: 0, incomplete: false, message: '' }
+      return {
+        running: false,
+        folder,
+        scope: 'selected',
+        current: '',
+        scanned: paths.length,
+        embedded: paths.length,
+        failed: 0,
+        chunks: 10,
+        unchanged: 0,
+        incomplete: false,
+        message: '',
+      }
     },
     settings: async () => ({
       settings: clone(rag),
@@ -859,14 +980,29 @@ Object.assign(window, {
     models: async () => ['local-embedding'],
     progress: async () => {
       state.ragProgressCalls++
-      if (fileStatusMode) return {
-        running: true, folder, scope: 'selected', current: fileStatusItems[2].path,
-        scanned: 2, embedded: 1, failed: 0, chunks: 4, unchanged: 0, incomplete: false,
-        message: 'Embedding document passages', files: [
-          { path: fileStatusItems[1].path, status: 'pending' },
-          { path: fileStatusItems[2].path, status: 'indexing', completedChunks: 4, totalChunks: 10 },
-        ],
-      }
+      if (fileStatusMode)
+        return {
+          running: true,
+          folder,
+          scope: 'selected',
+          current: fileStatusItems[2].path,
+          scanned: 2,
+          embedded: 1,
+          failed: 0,
+          chunks: 4,
+          unchanged: 0,
+          incomplete: false,
+          message: 'Embedding document passages',
+          files: [
+            { path: fileStatusItems[1].path, status: 'pending' },
+            {
+              path: fileStatusItems[2].path,
+              status: 'indexing',
+              completedChunks: 4,
+              totalChunks: 10,
+            },
+          ],
+        }
       return {
         running,
         folder: 'C:\\Other directory',
@@ -887,11 +1023,25 @@ Object.assign(window, {
     clear: async () => {},
     statuses: async (paths: string[]) =>
       paths.map((path) => {
-        const index = fileStatusItems.findIndex(item => item.path === path)
-        return fileStatusMode ? {
-          path, status: ['embedded', 'not-indexed', 'embedding', 'failed', 'embedded', 'stale', 'not-indexed'][index] ?? 'not-indexed',
-          chunks: 10, partial: index === 4, error: index === 3 ? 'This file could not be read. Try saving it again.' : undefined,
-        } : { path, status: 'not-indexed', chunks: 0 }
+        const index = fileStatusItems.findIndex((item) => item.path === path)
+        return fileStatusMode
+          ? {
+              path,
+              status:
+                [
+                  'embedded',
+                  'not-indexed',
+                  'embedding',
+                  'failed',
+                  'embedded',
+                  'stale',
+                  'not-indexed',
+                ][index] ?? 'not-indexed',
+              chunks: 10,
+              partial: index === 4,
+              error: index === 3 ? 'This file could not be read. Try saving it again.' : undefined,
+            }
+          : { path, status: 'not-indexed', chunks: 0 }
       }),
     cancel: async () => {
       running = false
@@ -965,20 +1115,49 @@ Object.assign(window, {
   nawaAnalytics: {
     prepareSelected: async (folder: string, paths: string[]) => {
       state.preparationRequests.push({ folder, paths: clone(paths) })
-      return { selectedFileCount: paths.length, imported: paths.length, unchanged: 0, failedFiles: 0, unsupportedFiles: 0, approvedTables: paths.length, alreadyReady: 0, readyTables: paths.length, draftTables: 0, reviewTables: 0, blockedTables: 0, issues: [], issuesTruncated: false }
+      return {
+        selectedFileCount: paths.length,
+        imported: paths.length,
+        unchanged: 0,
+        failedFiles: 0,
+        unsupportedFiles: 0,
+        approvedTables: paths.length,
+        alreadyReady: 0,
+        readyTables: paths.length,
+        draftTables: 0,
+        reviewTables: 0,
+        blockedTables: 0,
+        issues: [],
+        issuesTruncated: false,
+      }
     },
     settings: async () => ({ settings: clone(analytics), databasePath: 'fixture/analysis.sqlite' }),
     statuses: async (paths: string[]) =>
-      paths.map((path) => fileStatusMode ? ({
-        path, state: ['ready', 'importing', 'unsupported', 'failed', 'unsupported', 'not-imported', 'unsupported'][fileStatusItems.findIndex(item => item.path === path)],
-        tables: 1, rows: 500, message: path.endsWith('failed.xlsx') ? 'An amount could not be read on row 8.' : '',
-      }) : ({
-        path,
-        state: path === source.path ? 'needs-review' : 'not-imported',
-        tables: path === source.path ? 1 : 0,
-        rows: path === source.path ? 100 : 0,
-        message: path === source.path ? 'Review required' : 'Not prepared',
-      })),
+      paths.map((path) =>
+        fileStatusMode
+          ? {
+              path,
+              state: [
+                'ready',
+                'importing',
+                'unsupported',
+                'failed',
+                'unsupported',
+                'not-imported',
+                'unsupported',
+              ][fileStatusItems.findIndex((item) => item.path === path)],
+              tables: 1,
+              rows: 500,
+              message: path.endsWith('failed.xlsx') ? 'An amount could not be read on row 8.' : '',
+            }
+          : {
+              path,
+              state: path === source.path ? 'needs-review' : 'not-imported',
+              tables: path === source.path ? 1 : 0,
+              rows: path === source.path ? 100 : 0,
+              message: path === source.path ? 'Review required' : 'Not prepared',
+            },
+      ),
     saveSettings: async (value: typeof analytics) => {
       analytics = clone(value)
     },
@@ -1000,10 +1179,21 @@ Object.assign(window, {
     }),
     progress: async () => {
       state.analyticsProgressCalls++
-      if (fileStatusMode) return {
-        running: true, folder, current: fileStatusItems[1].path, paths: [fileStatusItems[1].path, fileStatusItems[5].path],
-        scanned: 1, imported: 0, failed: 0, rows: 42, currentRows: 42, message: 'Preparing selected table data', unchanged: 0, incomplete: false,
-      }
+      if (fileStatusMode)
+        return {
+          running: true,
+          folder,
+          current: fileStatusItems[1].path,
+          paths: [fileStatusItems[1].path, fileStatusItems[5].path],
+          scanned: 1,
+          imported: 0,
+          failed: 0,
+          rows: 42,
+          currentRows: 42,
+          message: 'Preparing selected table data',
+          unchanged: 0,
+          incomplete: false,
+        }
       return {
         running,
         folder: 'C:\\Other directory',
@@ -1075,13 +1265,32 @@ function Fixture() {
         <main className="ex-center">
           <h1>Quarterly reports</h1>
           <p>Synthetic test workspace</p>
-          {fileStatusMode && <FileList items={fileStatusItems} roots={[{ path: folder, name: 'Quarterly reports', usable: true }]}
-            selected={new Set(selectedFiles)} cutPaths={new Set()} preferences={{ ...DEFAULT_PREFERENCES, view: 'details' }}
-            locale={dateLocale} text={explorerText(lang)}
-            onSelect={(path, options) => setSelectedFiles(previous => options.toggle
-              ? previous.includes(path) ? previous.filter(value => value !== path) : [...previous, path] : [path])}
-            onSelectAll={() => setSelectedFiles(fileStatusItems.map(item => item.path))}
-            onOpen={() => {}} onContext={() => {}} onRename={() => {}} onDelete={() => {}} onSort={() => {}} />}
+          {fileStatusMode && (
+            <FileList
+              items={fileStatusItems}
+              roots={[{ path: folder, name: 'Quarterly reports', usable: true }]}
+              selected={new Set(selectedFiles)}
+              cutPaths={new Set()}
+              preferences={{ ...DEFAULT_PREFERENCES, view: 'details' }}
+              locale={dateLocale}
+              text={explorerText(lang)}
+              onSelect={(path, options) =>
+                setSelectedFiles((previous) =>
+                  options.toggle
+                    ? previous.includes(path)
+                      ? previous.filter((value) => value !== path)
+                      : [...previous, path]
+                    : [path],
+                )
+              }
+              onSelectAll={() => setSelectedFiles(fileStatusItems.map((item) => item.path))}
+              onOpen={() => {}}
+              onContext={() => {}}
+              onRename={() => {}}
+              onDelete={() => {}}
+              onSort={() => {}}
+            />
+          )}
         </main>
         <WorkspaceControlPanel
           visible={visible}
@@ -1110,12 +1319,39 @@ function Fixture() {
           }
         />
       </div>
-      <PanelDialog open={!!fileTools} title={fileTools === 'search' ? 'Index selected files' : 'Review table data'} onClose={() => setFileTools(null)}>
-        {fileTools === 'search' && <RagToolbar folder={folder} selectedFiles={selectedFiles} inSidebar onSetup={() => { setFileTools(null); setSettingsOpen(true) }} />}
+      <PanelDialog
+        open={!!fileTools}
+        title={fileTools === 'search' ? 'Index selected files' : 'Review table data'}
+        onClose={() => setFileTools(null)}
+      >
+        {fileTools === 'search' && (
+          <RagToolbar
+            folder={folder}
+            selectedFiles={selectedFiles}
+            inSidebar
+            onSetup={() => {
+              setFileTools(null)
+              setSettingsOpen(true)
+            }}
+          />
+        )}
         {fileTools === 'tables' && <AnalyticsToolbar folder={folder} inSidebar />}
       </PanelDialog>
-      {settingsOpen && <SettingsModal initialSection="knowledge" status={null} loggingOut={false} loginWaiting={false} loginUrl={null} urlCopied={false}
-        onClose={() => setSettingsOpen(false)} onOpenLoginUrl={() => {}} onCopyLoginUrl={() => {}} onLogin={() => {}} onLogout={() => {}} />}
+      {settingsOpen && (
+        <SettingsModal
+          initialSection="knowledge"
+          status={null}
+          loggingOut={false}
+          loginWaiting={false}
+          loginUrl={null}
+          urlCopied={false}
+          onClose={() => setSettingsOpen(false)}
+          onOpenLoginUrl={() => {}}
+          onCopyLoginUrl={() => {}}
+          onLogin={() => {}}
+          onLogout={() => {}}
+        />
+      )}
     </div>
   )
 }

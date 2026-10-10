@@ -51,6 +51,52 @@ afterAll(async () => {
 })
 
 describe('history cancellation through the worker, IPC and preload', () => {
+  it('persists committed and partial action checkpoints even when the request failed', async () => {
+    const conversation = await api.create({ folder: null, folderName: 'Actions' })
+    const action = {
+      path: join(electron.directory, 'saved.docx'),
+      operation: 'update' as const,
+      proposalHash: 'a'.repeat(64),
+    }
+    await api.save({
+      id: conversation.id,
+      revision: conversation.revision,
+      draft: '',
+      modelId: 'local',
+      baselineId: null,
+      lastChatAt: 1,
+      messages: [
+        {
+          id: 'saved',
+          role: 'assistant',
+          text: 'saved receipt',
+          contextKey: 'scope',
+          createdAt: 1,
+          request: { id: 'request', phase: 'receipt', outcome: 'failed', action },
+        },
+        {
+          id: 'partial',
+          role: 'assistant',
+          text: 'partial receipt',
+          contextKey: 'scope',
+          createdAt: 2,
+          request: {
+            id: 'request',
+            phase: 'receipt',
+            outcome: 'cancelled',
+            action: { ...action, status: 'partial', warnings: ['One operation failed.'] },
+          },
+        },
+      ],
+    })
+    const restored = await api.get(conversation.id)
+    expect(restored.messages[0].request?.action).toEqual(action)
+    expect(restored.messages[1].request?.action).toEqual({
+      ...action,
+      status: 'partial',
+      warnings: ['One operation failed.'],
+    })
+  })
   it('resolves intentional cancellations at the IPC boundary for both scan operations', async () => {
     const conversation = await api.create({ folder: null, folderName: 'Test' })
     for (const operation of ['capture', 'compare']) {

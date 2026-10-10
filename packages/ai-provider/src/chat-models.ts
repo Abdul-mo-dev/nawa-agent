@@ -1,4 +1,5 @@
 import type { AiProviderId, AiProviderConfig, AiSettings } from './types'
+import { normalizeModelPolicy, validateModelPolicy } from './model-policy'
 
 export interface AiChatModel {
   id: string
@@ -34,6 +35,7 @@ export function normalizeChatModels(input: unknown, providers: readonly string[]
       name,
       provider: value.provider as AiProviderId,
       config: {
+        ...(value.config.policy ? { policy: normalizeModelPolicy(value.config.policy) } : {}),
         model,
         apiKey: clean(value.config.apiKey, 16384),
         ...(typeof value.config.baseUrl === 'string'
@@ -60,6 +62,8 @@ export function applyChatModel(settings: AiSettings, requestedId?: string | null
     ...settings,
     selectedChatModelId: id,
     provider: profile.provider,
+    // The global connection's output cap must not follow a saved profile.
+    maxOutputTokens: profile.config.policy?.outputTokens,
     providers: { ...settings.providers, [profile.provider]: { ...profile.config } },
   }
 }
@@ -93,6 +97,8 @@ export function validateChatModels(settings: AiSettings): string | null {
         return `Invalid base URL for ${model.name}.`
       }
     }
+    const policyError = validateModelPolicy(model.provider, model.config)
+    if (policyError) return `${model.name}: ${policyError}`
   }
   if (settings.defaultChatModelId && !ids.has(settings.defaultChatModelId))
     return 'Choose an existing default chat model.'

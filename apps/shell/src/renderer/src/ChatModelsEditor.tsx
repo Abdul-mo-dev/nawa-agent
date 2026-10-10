@@ -5,19 +5,24 @@ import {
   REDACTED_AI_KEY,
   applyChatModel,
   validateChatModels,
+  modelPolicyOf,
   type AiChatModel,
 } from '@genoffice/ai-provider/browser'
 import type { AiCatalogEntry } from '../../shared/home-api'
 import './chat-models-settings.css'
+import { ModelPolicyEditor } from './ModelPolicyEditor'
+import type { AiModelPolicy } from '@genoffice/ai-provider/browser'
 
 export function ChatModelsEditor({
   settings,
   catalog,
   onChange,
+  onTested,
 }: {
   settings: AiSettings
   catalog: AiCatalogEntry[]
   onChange: (settings: AiSettings) => void
+  onTested?: (id: string, tested: NonNullable<AiModelPolicy['tested']>) => void
 }) {
   const { s } = useSidebarText()
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -34,11 +39,12 @@ export function ChatModelsEditor({
   const add = () => {
     const provider = settings.provider
     const source = settings.providers[provider]
+    const policy = modelPolicyOf(provider, source, settings.maxOutputTokens)
     const profile: AiChatModel = {
       id: crypto.randomUUID(),
-      name: `${catalog.find((c) => c.id === provider)?.label || provider} ${models.length + 1}`,
+      name: `${s(policy.local ? 'Local' : 'Cloud')} ${models.length + 1}`,
       provider,
-      config: { ...source },
+      config: { ...source, policy: { ...source.policy, outputTokens: policy.outputTokens } },
     }
     onChange({ ...settings, chatModels: [...models, profile] })
     setExpanded(profile.id)
@@ -156,13 +162,13 @@ export function ChatModelsEditor({
                       <input
                         aria-label={`Model ${index + 1} base URL`}
                         value={model.config.baseUrl || ''}
-                        placeholder={meta?.defaultBaseUrl || 'http://127.0.0.1:8000/v1'}
+                        placeholder={meta?.defaultBaseUrl || 'http://127.0.0.1:8082/v1'}
                         spellCheck={false}
                         onChange={(event) => config({ baseUrl: event.target.value })}
                       />
                     </label>
                     <label>
-                      {s('API key')}
+                      {s(model.provider === 'custom' ? 'API key (optional)' : 'API key')}
                       <input
                         aria-label={`Model ${index + 1} API key`}
                         type="password"
@@ -186,16 +192,16 @@ export function ChatModelsEditor({
                         {s('Remove saved key')}
                       </button>
                     )}
-                    <small>
-                      {s(
-                        'For a local server without authentication, enter a placeholder key such as “local”.',
-                      )}
-                    </small>
                   </>
                 ) : (
                   <small>{s('Uses the external provider’s existing sign-in.')}</small>
                 )}
               </div>
+              <ModelPolicyEditor
+                provider={model.provider}
+                config={model.config}
+                onChange={(value) => update(model.id, { config: value })}
+              />
               <div className="nawa-model-actions">
                 <button
                   type="button"
@@ -217,10 +223,11 @@ export function ChatModelsEditor({
                       const result = await window.aiOffice.testAiSettings(
                         applyChatModel(settings, model.id),
                       )
+                      if (result.capabilities) onTested?.(model.id, result.capabilities)
                       setTestMessage({
                         id: model.id,
                         text: result.ok
-                          ? 'Connection successful.'
+                          ? 'Tool calling verified.'
                           : result.error || 'Connection failed.',
                       })
                     } catch (cause) {

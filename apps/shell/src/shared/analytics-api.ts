@@ -2,7 +2,7 @@
 export const ANALYTICS_CHANNEL = 'nawa:analytics'
 export const ANALYTICS_CHANGED = 'nawa:analytics-changed'
 export const ANALYTICS_VERSION = '1.0.0'
-export const ANALYTICS_FILE_EXTENSIONS = ['.csv', '.tsv', '.jsonl', '.ndjson', '.json', '.xlsx', '.xlsm'] as const
+export { ANALYTICAL_FILE_EXTENSIONS as ANALYTICS_FILE_EXTENSIONS } from './file-capabilities'
 export type DataType = 'text' | 'integer' | 'decimal' | 'real' | 'date' | 'boolean'
 export interface DataColumn {
   id: string
@@ -31,7 +31,12 @@ export interface TablePolicy {
   formulaPolicy: 'reject' | 'saved-cache'
   confirmed: boolean
 }
-export interface SourceRef { path: string; hash: string; datasetId: string; generation: string }
+export interface SourceRef {
+  path: string
+  hash: string
+  datasetId: string
+  generation: string
+}
 export interface Dataset {
   id: string
   path: string
@@ -51,7 +56,13 @@ export interface Dataset {
   profile: Record<string, unknown>
   preview: { row: number; values: string[] }[]
   importedAt: number
-  preparedPolicy?: { policy: TablePolicy; validatedRows: number; excludedRows: number; createdAt: number; notes?: string[] }
+  preparedPolicy?: {
+    policy: TablePolicy
+    validatedRows: number
+    excludedRows: number
+    createdAt: number
+    notes?: string[]
+  }
   preparationError?: string
   approval?: { by: 'user' | 'agent'; at: number; reason: string }
 }
@@ -69,12 +80,18 @@ export interface AnalyticsSettings {
 export const DEFAULT_ANALYTICS_SETTINGS: AnalyticsSettings = {
   allowAgentPreparation: false,
   allowAgentApproval: false,
-  maxFileMiB: 2048, maxRows: 2000000, maxColumns: 512,
-  queryTimeoutSeconds: 45, maxGroups: 20000, resultRows: 100, retainedResults: 500,
+  maxFileMiB: 2048,
+  maxRows: 2000000,
+  maxColumns: 512,
+  queryTimeoutSeconds: 45,
+  maxGroups: 20000,
+  resultRows: 100,
+  retainedResults: 500,
 }
 export interface AnalyticsFileStatus {
   path: string
-  state: 'not-imported' | 'importing' | 'needs-review' | 'ready' | 'changed' | 'failed' | 'unsupported'
+  state:
+    'not-imported' | 'importing' | 'needs-review' | 'ready' | 'changed' | 'failed' | 'unsupported'
   message: string
   tables: number
   rows: number
@@ -106,7 +123,14 @@ export interface AnalyticsPreparationSummary {
   draftTables: number
   reviewTables: number
   blockedTables: number
-  issues: { kind: string; path: string; reason: string; datasetId?: string; name?: string; sheet?: string }[]
+  issues: {
+    kind: string
+    path: string
+    reason: string
+    datasetId?: string
+    name?: string
+    sheet?: string
+  }[]
   issuesTruncated: boolean
 }
 export interface AnalyticsTableExport {
@@ -128,9 +152,18 @@ export interface AnalyticsPrepareExportResult {
   preparation: AnalyticsPreparationSummary
   sources: SourceRef[]
 }
-export type FilterOp = 'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'in' | 'contains' | 'is-null' | 'not-null'
-export interface DataFilter { column: string; op: FilterOp; value?: unknown }
-export interface GroupSpec { column: string; period?: 'day' | 'month' | 'year'; as?: string }
+export type FilterOp =
+  'eq' | 'ne' | 'gt' | 'gte' | 'lt' | 'lte' | 'in' | 'contains' | 'is-null' | 'not-null'
+export interface DataFilter {
+  column: string
+  op: FilterOp
+  value?: unknown
+}
+export interface GroupSpec {
+  column: string
+  period?: 'day' | 'month' | 'year'
+  as?: string
+}
 export interface DataMetric {
   op: 'count' | 'count-distinct' | 'sum' | 'mean' | 'min' | 'max' | 'ratio-of-sums'
   column?: string
@@ -138,7 +171,12 @@ export interface DataMetric {
   multiplyBy?: 1 | 100
   as: string
 }
-export interface JoinSpec { datasetId: string; leftKeys: string[]; rightKeys: string[]; kind: 'left' | 'inner' }
+export interface JoinSpec {
+  datasetId: string
+  leftKeys: string[]
+  rightKeys: string[]
+  kind: 'left' | 'inner'
+}
 export interface DataQuery {
   datasetIds: string[]
   filters?: DataFilter[]
@@ -178,10 +216,30 @@ export interface AnalyticsResult {
   summary?: Record<string, unknown>
   request: unknown
 }
-export type AnalyticsAgentAction = 'discover' | 'describe' | 'query' | 'sql' | 'analyze' | 'result' | 'drill' | 'verify' | 'prepare' | 'propose-policy' | 'export-sqlite'
+export type AnalyticsAgentAction =
+  | 'discover'
+  | 'describe'
+  | 'query'
+  | 'sql'
+  | 'analyze'
+  | 'result'
+  | 'drill'
+  | 'verify'
+  | 'prepare'
+  | 'propose-policy'
+  | 'export-sqlite'
 /** Compatibility alias for existing directory clients. Direct review/clear actions remain UI-only. */
 export type AnalyticsReadAction = AnalyticsAgentAction
-export interface AnalyticsEnvelope { value: unknown; sources: SourceRef[]; policyChanges?: { datasetId: string; previousGeneration: string; generation: string; sourceHash: string }[] }
+export interface AnalyticsEnvelope {
+  value: unknown
+  sources: SourceRef[]
+  policyChanges?: {
+    datasetId: string
+    previousGeneration: string
+    generation: string
+    sourceHash: string
+  }[]
+}
 export interface AnalyticsApi {
   settings(): Promise<{ settings: AnalyticsSettings; databasePath: string; backend: string }>
   saveSettings(settings: AnalyticsSettings): Promise<void>
@@ -191,9 +249,22 @@ export interface AnalyticsApi {
   progress(): Promise<AnalyticsProgress>
   cancel(): Promise<void>
   statuses(paths: string[], verify?: boolean): Promise<AnalyticsFileStatus[]>
-  catalog(folder: string, offset?: number): Promise<{ datasets: Dataset[]; files: AnalyticsFileStatus[]; truncated: boolean; total: number; nextOffset: number | null }>
+  catalog(
+    folder: string,
+    offset?: number,
+  ): Promise<{
+    datasets: Dataset[]
+    files: AnalyticsFileStatus[]
+    truncated: boolean
+    total: number
+    nextOffset: number | null
+  }>
   review(datasetId: string, expectedGeneration: string, policy: TablePolicy): Promise<Dataset>
   clear(folder: string): Promise<void>
   onChanged(callback: () => void): () => void
 }
-declare global { interface Window { nawaAnalytics: AnalyticsApi } }
+declare global {
+  interface Window {
+    nawaAnalytics: AnalyticsApi
+  }
+}

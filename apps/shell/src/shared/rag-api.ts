@@ -59,6 +59,8 @@ export interface RagFileStatus {
   warnings?: string[]
   partial?: boolean
   verified?: boolean
+  /** Native format catalog. External MyAgent adapters may have different support. */
+  unsupported?: boolean
 }
 export interface RagProgress {
   running: boolean

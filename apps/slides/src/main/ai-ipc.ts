@@ -1,3 +1,4 @@
+import { testModelCapabilities } from '@genoffice/ai-provider'
 import {
   assertDirectoryStageCapability,
   assertDirectoryStageMedia,
@@ -128,7 +129,7 @@ export function registerAiIpc(): void {
   ipcMain.handle('ai:get-settings', (): AiSettings => {
     const stored = readAiSettings()
     const settings = resolveAiSettings(stored, defaultAiSettings())
-    // a stored BYOK provider is honored when usable; half-filled configs fall back to genspark
+    // Preserve the configured provider; request validation reports incomplete connections.
     settings.provider = activeProvider(settings)
     settings.settingsRevision = aiSettingsStore.revision(AI_SETTINGS_PATH())
     return redactAiSettings(settings)
@@ -158,6 +159,18 @@ export function registerAiIpc(): void {
     )
   })
 
+  ipcMain.handle('ai:test-model', async (_event, input: AiSettings) => {
+    const settings = applyChatModel(
+      restoreRedactedAiKeys(input, toolAiSettings()),
+      input.selectedChatModelId,
+    )
+    const provider = settings.provider
+    let config = settings.providers[provider]
+    if (!config) return { ok: false, error: 'Choose a configured model before testing.' }
+    if (provider === 'genspark' && !config.apiKey) config = { ...config, apiKey: gskApiKey() }
+    return testModelCapabilities(provider, config)
+  })
+
   ipcMain.handle('ai:log-run-failure', (_event, entry: AiRunFailure) => {
     appendRunFailure(entry)
   })
@@ -176,7 +189,7 @@ export function registerAiIpc(): void {
     const send = (chunk: AiStreamChunk) => {
       if (!event.sender.isDestroyed()) event.sender.send('ai:stream-chunk', chunk)
     }
-    if (!config || (provider !== 'codex' && !config.apiKey)) {
+    if (!config || (provider !== 'codex' && provider !== 'custom' && !config.apiKey?.trim())) {
       send({
         requestId,
         type: 'error',
@@ -205,6 +218,8 @@ export function registerAiIpc(): void {
         signal: controller.signal,
         onDelta: (text) => send({ requestId, type: 'delta', text }),
         onReasoningDelta: (text) => send({ requestId, type: 'reasoning', text }),
+        onProviderState: (providerState) =>
+          send({ requestId, type: 'provider-state', providerState }),
         onToolCall: (toolCall) => send({ requestId, type: 'tool-call', toolCall }),
         onActivity: ping,
         onStopReason: (reason) => {

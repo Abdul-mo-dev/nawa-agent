@@ -44,23 +44,53 @@ const bounds = async () =>
 try {
   await page.goto(server.resolvedUrls.local[0] + 'tools/sidebar-review/', { timeout: 60000 })
   await page.getByRole('textbox', { name: 'Message Nawa' }).waitFor()
-  check('Opened folder name row is removed', await page.locator('.nawa-workspace-context').count() === 0)
-  check('New chat and More are immediately before the settings gear', await page.locator('.nawa-workspace-tabs-header').evaluate(node => {
-    const actions = node.querySelector('.nawa-workspace-chat-actions')
-    return actions?.nextElementSibling?.classList.contains('nawa-workspace-settings') && actions.querySelectorAll('button').length === 2
-  }))
+  check(
+    'Opened folder name row is removed',
+    (await page.locator('.nawa-workspace-context').count()) === 0,
+  )
+  check(
+    'New chat and More are immediately before the settings gear',
+    await page.locator('.nawa-workspace-tabs-header').evaluate((node) => {
+      const actions = node.querySelector('.nawa-workspace-chat-actions')
+      return (
+        actions?.nextElementSibling?.classList.contains('nawa-workspace-settings') &&
+        actions.querySelectorAll('button').length === 2
+      )
+    }),
+  )
   const beforeIndexModels = await page.evaluate(() => window.sidebarFixture.state.requests.length)
   await page.locator('.nawa-index-selected').click()
-  await page.waitForFunction(() => window.sidebarFixture.state.preparationRequests.length === 1 && window.sidebarFixture.state.indexRequests.length === 1)
-  check('Index starts embeddings and native table preparation for the same selection without a model or export request', await page.evaluate(before => {
-    const state = window.sidebarFixture.state
-    return state.indexRequests[0].paths.length === 2 && JSON.stringify(state.indexRequests[0].paths) === JSON.stringify(state.preparationRequests[0].paths)
-      && state.requests.length === before && state.exportRequests.length === 0
-  }, beforeIndexModels))
-  check('File checks are optional', !(await visible(page.getByRole('button', { name: 'Check again' }))))
-  check('Selected files stay in the main panel', await page.locator('.ws-chat-scope').count() === 0)
+  await page.waitForFunction(
+    () =>
+      window.sidebarFixture.state.preparationRequests.length === 1 &&
+      window.sidebarFixture.state.indexRequests.length === 1,
+  )
+  check(
+    'Index starts embeddings and native table preparation for the same selection without a model or export request',
+    await page.evaluate((before) => {
+      const state = window.sidebarFixture.state
+      return (
+        state.indexRequests[0].paths.length === 2 &&
+        JSON.stringify(state.indexRequests[0].paths) ===
+          JSON.stringify(state.preparationRequests[0].paths) &&
+        state.requests.length === before &&
+        state.exportRequests.length === 0
+      )
+    }, beforeIndexModels),
+  )
+  check(
+    'File checks are optional',
+    !(await visible(page.getByRole('button', { name: 'Check again' }))),
+  )
+  check(
+    'Selected files stay in the main panel',
+    (await page.locator('.ws-chat-scope').count()) === 0,
+  )
   await page.getByRole('button', { name: 'More chat options', exact: true }).click()
-  check('Prepare/export is available in More', await visible(page.getByRole('button', { name: 'Prepare & export', exact: true })))
+  check(
+    'Prepare/export is available in More',
+    await visible(page.getByRole('button', { name: 'Prepare & export', exact: true })),
+  )
   const beforeExportModels = await page.evaluate(() => window.sidebarFixture.state.requests.length)
   await page.getByRole('button', { name: 'Prepare & export', exact: true }).click()
   await page.getByText('SQLite export complete:', { exact: false }).waitFor()
@@ -131,7 +161,10 @@ try {
     'External scope offers a folder action',
     await page.evaluate(() => window.sidebarFixture.state.addFolderRequests === 1),
   )
-  check('External selection shows an actionable warning without a second file list', await page.locator('.ws-chat-scope').count() === 0)
+  check(
+    'External selection shows an actionable warning without a second file list',
+    (await page.locator('.ws-chat-scope').count()) === 0,
+  )
   await page.evaluate(() => window.sidebarFixture.restoreSelection())
   await page.waitForFunction(
     () => document.querySelector('.ws-chat-footer button[aria-label="Send"]')?.disabled === false,
@@ -145,23 +178,52 @@ try {
   const transcript = await page.locator('.ws-chat-scroll').boundingBox()
   check('Chat has room for the transcript', transcript.height > 250)
 
-  check('Chat contains no knowledge or model settings forms', await page.locator('.nawa-workspace-control-panel .set-input').count() === 0)
+  check(
+    'Chat contains no knowledge or model settings forms',
+    (await page.locator('.nawa-workspace-control-panel .set-input').count()) === 0,
+  )
   await page.getByRole('button', { name: 'Knowledge settings', exact: true }).click()
   const settingsDialog = page.getByRole('dialog', { name: 'Settings', exact: true })
   await settingsDialog.waitFor()
-  const section = async (name) => settingsDialog.locator('.set-nav-item').filter({ hasText: name }).click()
-  check('Gear opens main Settings on Knowledge', await settingsDialog.locator('.set-nav-item.active').innerText() === 'Knowledge')
-  check('Knowledge has one llama.cpp connection', await settingsDialog.getByLabel('Server address', { exact: true }).count() === 1 && await settingsDialog.getByText('llama.cpp', { exact: true }).first().isVisible())
-  check('Advanced embedding and analysis controls start collapsed', await page.locator('.nawa-embedding-advanced[open], .nawa-analysis-limits[open]').count() === 0)
-  check('Credentials and technical limits stay out of the default form', !(await page.getByLabel('API key (optional)', { exact: true }).isVisible()) && !(await page.getByText('Maximum source file size (MiB)', { exact: true }).isVisible()))
+  const section = async (name) =>
+    settingsDialog.locator('.set-nav-item').filter({ hasText: name }).click()
+  check(
+    'Gear opens main Settings on Knowledge',
+    (await settingsDialog.locator('.set-nav-item.active').innerText()) === 'Knowledge',
+  )
+  check(
+    'Knowledge has one llama.cpp connection',
+    (await settingsDialog.getByLabel('Server address', { exact: true }).count()) === 1 &&
+      (await settingsDialog.getByText('llama.cpp', { exact: true }).first().isVisible()),
+  )
+  check(
+    'Advanced embedding and analysis controls start collapsed',
+    (await page.locator('.nawa-embedding-advanced[open], .nawa-analysis-limits[open]').count()) ===
+      0,
+  )
+  check(
+    'Credentials and technical limits stay out of the default form',
+    !(await page.getByLabel('API key (optional)', { exact: true }).isVisible()) &&
+      !(await page.getByText('Maximum source file size (MiB)', { exact: true }).isVisible()),
+  )
   await settingsDialog.getByRole('button', { name: 'Load models', exact: true }).click()
-  check('Llama.cpp model is selected from the server', await settingsDialog.getByLabel('Embedding model', { exact: true }).inputValue() === 'local-embedding')
+  check(
+    'Llama.cpp model is selected from the server',
+    (await settingsDialog.getByLabel('Embedding model', { exact: true }).inputValue()) ===
+      'local-embedding',
+  )
   await settingsDialog.getByRole('button', { name: 'Test connection', exact: true }).click()
   await settingsDialog.getByText('Connection successful.', { exact: true }).waitFor()
-  await settingsDialog.getByLabel('Server address', { exact: true }).fill('http://127.0.0.1:8099/v1')
+  await settingsDialog
+    .getByLabel('Server address', { exact: true })
+    .fill('http://127.0.0.1:8099/v1')
   await section(/^General$/)
   await section(/^Knowledge$/)
-  check('Knowledge edits survive main section changes', await settingsDialog.getByLabel('Server address', { exact: true }).inputValue() === 'http://127.0.0.1:8099/v1')
+  check(
+    'Knowledge edits survive main section changes',
+    (await settingsDialog.getByLabel('Server address', { exact: true }).inputValue()) ===
+      'http://127.0.0.1:8099/v1',
+  )
   await page.keyboard.press('Escape')
   await settingsDialog.getByRole('button', { name: 'Keep editing', exact: true }).click()
   check('Escape protects unsaved settings', await settingsDialog.isVisible())
@@ -169,34 +231,105 @@ try {
   await shot('main-settings-knowledge')
   await page.setViewportSize({ width: 520, height: 720 })
   await settingsDialog.getByLabel('Server address', { exact: true }).focus()
-  check('Resizing with Settings open keeps the form interactive', await settingsDialog.getByLabel('Server address', { exact: true }).evaluate(node => node === document.activeElement && !node.closest('[inert]')))
+  check(
+    'Resizing with Settings open keeps the form interactive',
+    await settingsDialog
+      .getByLabel('Server address', { exact: true })
+      .evaluate((node) => node === document.activeElement && !node.closest('[inert]')),
+  )
   await page.setViewportSize({ width: 1440, height: 900 })
   await section(/^AI Model$/)
   await page.locator('input[id$="-set-ai-model"]').waitFor()
-  check('Keys remain protected in main model settings', await page.locator('input[id$="-set-ai-key"]').inputValue() === '')
+  check(
+    'Local model settings preserve the saved output limit',
+    (await page.locator('input[id$="-set-ai-max-tokens"]').inputValue()) === '8192',
+  )
+  check(
+    'Custom connection suggests the local chat server',
+    (await page.locator('input[id$="-set-ai-base-url"]').getAttribute('placeholder')) ===
+      'http://127.0.0.1:8082/v1',
+  )
+  check(
+    'Keys remain protected in main model settings',
+    (await page.locator('input[id$="-set-ai-key"]').inputValue()) === '',
+  )
+  const modelCards = settingsDialog.locator('.nawa-model-card')
+  await modelCards.first().locator('summary').first().click()
+  check(
+    'Profile limits start collapsed',
+    !(await modelCards.first().getByLabel('Context limit (tokens)').isVisible()),
+  )
+  await modelCards.first().locator('.nawa-model-policy summary').click()
+  check(
+    'Local profile starts with a 16K context and 4K output',
+    (await modelCards.first().getByLabel('Context limit (tokens)').inputValue()) === '16384' &&
+      (await modelCards.first().getByLabel('Output limit (tokens)').inputValue()) === '4096',
+  )
+  await modelCards.first().getByLabel('Output limit (tokens)').fill('2048')
+  await modelCards.nth(1).locator('summary').first().click()
+  await modelCards.nth(1).locator('.nawa-model-policy summary').click()
+  check(
+    'Changing one profile limit preserves the other profile',
+    (await modelCards.nth(1).getByLabel('Output limit (tokens)').inputValue()) === '4096',
+  )
+  await shot('main-settings-model-limits')
+  await modelCards.first().locator('summary').first().click()
+  await modelCards.nth(1).locator('summary').first().click()
   await page.locator('input[id$="-set-ai-model"]').fill('edited-model')
   await section(/^Knowledge$/)
   await section(/^AI Model$/)
-  check('Model draft survives section switches', await page.locator('input[id$="-set-ai-model"]').inputValue() === 'edited-model')
-  await page.evaluate(() => { window.sidebarFixture.state.failSave = true })
+  check(
+    'Model draft survives section switches',
+    (await page.locator('input[id$="-set-ai-model"]').inputValue()) === 'edited-model',
+  )
+  await page.evaluate(() => {
+    window.sidebarFixture.state.failSave = true
+  })
   await settingsDialog.getByRole('button', { name: 'Save', exact: true }).click()
-  await settingsDialog.getByRole('alert').filter({ hasText: 'Could not save model settings' }).waitFor()
-  check('Failed model save keeps the draft', await page.locator('input[id$="-set-ai-model"]').inputValue() === 'edited-model')
-  await page.evaluate(() => { window.sidebarFixture.state.failSave = false })
+  await settingsDialog
+    .getByRole('alert')
+    .filter({ hasText: 'Could not save model settings' })
+    .waitFor()
+  check(
+    'Failed model save keeps the draft',
+    (await page.locator('input[id$="-set-ai-model"]').inputValue()) === 'edited-model',
+  )
+  await page.evaluate(() => {
+    window.sidebarFixture.state.failSave = false
+  })
   await settingsDialog.getByRole('button', { name: 'Save', exact: true }).click()
   await page.waitForFunction(() => window.sidebarFixture.state.saved === 1)
-  check('Saving preserves the protected model key', await page.evaluate(() => window.sidebarFixture.settings().providers.custom.apiKey === 'fixture-key'))
+  check(
+    'Saving preserves the protected model key',
+    await page.evaluate(
+      () => window.sidebarFixture.settings().providers.custom.apiKey === 'fixture-key',
+    ),
+  )
   await page.locator('input[id$="-set-ai-model"]').fill('draft-model')
   await page.evaluate(() => window.sidebarFixture.externalModelChange('newer-model'))
   await settingsDialog.getByRole('button', { name: 'Save', exact: true }).click()
-  await settingsDialog.getByRole('alert').filter({ hasText: 'Model settings changed in another editor' }).waitFor()
-  check('Stale settings cannot overwrite a newer save', await page.evaluate(() => window.sidebarFixture.state.saved === 1))
+  await settingsDialog
+    .getByRole('alert')
+    .filter({ hasText: 'Model settings changed in another editor' })
+    .waitFor()
+  check(
+    'Stale settings cannot overwrite a newer save',
+    await page.evaluate(() => window.sidebarFixture.state.saved === 1),
+  )
   await settingsDialog.getByRole('button', { name: 'Reload current settings', exact: true }).click()
   await section(/^Knowledge$/)
   await page.keyboard.press('Escape')
   await settingsDialog.waitFor({ state: 'hidden' })
-  check('Settings closes back to the chat gear', await page.getByRole('button', { name: 'Knowledge settings', exact: true }).evaluate(node => node === document.activeElement))
-  check('Opening settings preserves the chat draft', await page.getByRole('textbox', { name: 'Message Nawa' }).inputValue() === 'Retained draft')
+  check(
+    'Settings closes back to the chat gear',
+    await page
+      .getByRole('button', { name: 'Knowledge settings', exact: true })
+      .evaluate((node) => node === document.activeElement),
+  )
+  check(
+    'Opening settings preserves the chat draft',
+    (await page.getByRole('textbox', { name: 'Message Nawa' }).inputValue()) === 'Retained draft',
+  )
   await page.evaluate(() => {
     window.sidebarFixture.state.failHistorySave = true
   })
@@ -288,26 +421,48 @@ try {
       .evaluate((e) => e === document.activeElement),
   )
 
-  await page.getByRole('dialog', { name: 'Review table data', exact: true }).getByRole('button', { name: 'Close', exact: true }).click()
+  await page
+    .getByRole('dialog', { name: 'Review table data', exact: true })
+    .getByRole('button', { name: 'Close', exact: true })
+    .click()
   await page.getByRole('button', { name: 'New chat', exact: true }).click()
   await page.locator('.ws-chat-empty').waitFor()
-  check('New chat still resets the conversation from the panel header', await page.locator('.ws-chat-log .ws-chat-msg').count() === 0)
+  check(
+    'New chat still resets the conversation from the panel header',
+    (await page.locator('.ws-chat-log .ws-chat-msg').count()) === 0,
+  )
   await page.setViewportSize({ width: 520, height: 720 })
   await page.getByRole('button', { name: 'Knowledge settings', exact: true }).click()
   await settingsDialog.waitFor()
-  check('Knowledge fits a narrow window', await settingsDialog.evaluate(node => node.scrollWidth <= node.clientWidth + 1))
+  check(
+    'Knowledge fits a narrow window',
+    await settingsDialog.evaluate((node) => node.scrollWidth <= node.clientWidth + 1),
+  )
   await shot('main-settings-narrow')
   await page.keyboard.press('Escape')
   await settingsDialog.waitFor({ state: 'hidden' })
-  check('Settings stays above the narrow chat drawer', await page.locator('.nawa-workspace-control-panel.is-drawer').isVisible())
+  check(
+    'Settings stays above the narrow chat drawer',
+    await page.locator('.nawa-workspace-control-panel.is-drawer').isVisible(),
+  )
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.getByRole('button', { name: 'Arabic dark', exact: true }).click()
   await page.getByRole('button', { name: 'إعدادات المعرفة', exact: true }).click()
   const arabicSettings = page.locator('.set-dialog')
   await arabicSettings.getByRole('heading', { name: 'المعرفة', exact: true }).waitFor()
-  check('Knowledge settings follow Arabic direction', await arabicSettings.evaluate(node => getComputedStyle(node).direction === 'rtl'))
-  check('Server address remains readable left to right', await arabicSettings.getByLabel('عنوان الخادم', { exact: true }).getAttribute('dir') === 'ltr')
-  check('Arabic settings fit the dialog', await arabicSettings.evaluate(node => node.scrollWidth <= node.clientWidth + 1))
+  check(
+    'Knowledge settings follow Arabic direction',
+    await arabicSettings.evaluate((node) => getComputedStyle(node).direction === 'rtl'),
+  )
+  check(
+    'Server address remains readable left to right',
+    (await arabicSettings.getByLabel('عنوان الخادم', { exact: true }).getAttribute('dir')) ===
+      'ltr',
+  )
+  check(
+    'Arabic settings fit the dialog',
+    await arabicSettings.evaluate((node) => node.scrollWidth <= node.clientWidth + 1),
+  )
   await shot('main-settings-arabic-dark')
   check('No renderer errors', errors.length === 0)
   console.log('Screenshots: ' + output)

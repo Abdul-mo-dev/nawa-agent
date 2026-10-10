@@ -267,6 +267,7 @@ export async function chatAnthropic(
   system: string,
   user: string,
   baseUrl = ANTHROPIC_BASE_URL,
+  maxTokens = 8192,
 ): Promise<AiChatResponse> {
   const response = await aiFetch(`${baseUrl.replace(/\/$/, '')}/v1/messages`, {
     method: 'POST',
@@ -282,7 +283,7 @@ export async function chatAnthropic(
     },
     body: JSON.stringify({
       model: config.model,
-      max_tokens: 8192,
+      max_tokens: maxTokens,
       system,
       messages: [{ role: 'user', content: user }],
     }),

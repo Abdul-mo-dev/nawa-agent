@@ -237,7 +237,7 @@ export interface HomeApi extends WorkspaceApi {
   getAiProviders(): AiCatalogEntry[]
   /** live Codex model catalog discovered through the current or overridden app-server */
   getCodexModels(cliPath?: string): Promise<CodexModelCatalog>
-  /** one-shot round trip against the given (possibly unsaved) settings — the settings-UI connection test */
+  /** Synthetic tool/result round trip, plus optional vision check; accepts unsaved settings. */
   testAiSettings(settings: AiSettings): Promise<AiChatResponse>
   /** image generation / media analysis provider catalog */
   getAiMediaProviders(): AiMediaProviderMeta[]

@@ -1,4 +1,4 @@
-import type { AgentMessage, AgentToolDef } from '@genoffice/agent-core'
+import type { AgentMessage, AgentToolCall, AgentToolDef } from '@genoffice/agent-core'
 import { aiFetch } from '../fetch'
 import { httpBodyDetail } from '../http-error'
 import { gensparkAttributionHeaders, opencodeSessionHeaders } from '../providers'
@@ -15,7 +15,21 @@ import {
 
 export const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta'
 
-function geminiContents(messages: AgentMessage[]): unknown[] {
+function geminiContents(
+  messages: AgentMessage[],
+  config: AiProviderConfig,
+  baseUrl: string,
+): unknown[] {
+  const originalCallIds = new Set(
+    messages.flatMap((message) =>
+      message.role === 'assistant'
+        ? (message.providerState?.parts.flatMap((part) => {
+            const call = part.functionCall as { id?: string } | undefined
+            return typeof call?.id === 'string' ? [call.id] : []
+          }) ?? [])
+        : [],
+    ),
+  )
   return messages.map((m) => {
     if (m.role === 'user') {
       if (!m.images?.length) return { role: 'user', parts: [{ text: m.text }] }
@@ -28,6 +42,18 @@ function geminiContents(messages: AgentMessage[]): unknown[] {
       }
     }
     if (m.role === 'assistant') {
+      if (m.providerState) {
+        const state = m.providerState
+        if (
+          state.protocol !== 'gemini' ||
+          state.model !== config.model ||
+          state.endpoint !== baseUrl.replace(/\/$/, '')
+        )
+          throw new Error(
+            'The model changed during an active tool turn. Start a new request with the selected model.',
+          )
+        return { role: 'model', parts: state.parts }
+      }
       const parts: unknown[] = []
       if (m.text) parts.push({ text: m.text })
       for (const call of m.toolCalls ?? []) {
@@ -41,6 +67,7 @@ function geminiContents(messages: AgentMessage[]): unknown[] {
       role: 'user',
       parts: m.results.map((r) => ({
         functionResponse: {
+          ...(originalCallIds.has(r.id) ? { id: r.id } : {}),
           name: r.name,
           response: r.isError ? { error: r.output } : { result: r.output },
         },
@@ -54,7 +81,12 @@ function geminiContents(messages: AgentMessage[]): unknown[] {
  * `streamGenerateContent` without SSE framing yields an array of chunks; a gateway
  * may also send a single `generateContent`-shaped object — handle both.
  */
-function emitGeminiJsonMessage(bodyText: string, cb: StreamCallbacks): void {
+function emitGeminiJsonMessage(
+  bodyText: string,
+  cb: StreamCallbacks,
+  config: AiProviderConfig,
+  baseUrl: string,
+): void {
   let parsed: unknown
   try {
     parsed = JSON.parse(bodyText)
@@ -66,7 +98,9 @@ function emitGeminiJsonMessage(bodyText: string, cb: StreamCallbacks): void {
       content?: {
         parts?: Array<{
           text?: string
-          functionCall?: { name?: string; args?: Record<string, unknown> }
+          thought?: boolean
+          functionCall?: { id?: string; name?: string; args?: Record<string, unknown> }
+          [key: string]: unknown
         }>
       }
       finishReason?: string
@@ -75,6 +109,8 @@ function emitGeminiJsonMessage(bodyText: string, cb: StreamCallbacks): void {
     error?: { message?: string } | string
   }>
   let emitted = false
+  const parts: Record<string, unknown>[] = []
+  const calls: AgentToolCall[] = []
   let stopReason: string | undefined
   let abnormalFinish: string | undefined
   for (const event of events) {
@@ -86,20 +122,29 @@ function emitGeminiJsonMessage(bodyText: string, cb: StreamCallbacks): void {
     if (finishReason === 'MAX_TOKENS') stopReason = 'max_tokens'
     else if (finishReason && finishReason !== 'STOP') abnormalFinish = finishReason
     for (const part of event.candidates?.[0]?.content?.parts ?? []) {
+      parts.push(part)
       if (part.text) {
         emitted = true
-        cb.onDelta(part.text)
+        if (part.thought) cb.onReasoningDelta?.(part.text)
+        else cb.onDelta(part.text)
       }
       if (part.functionCall?.name) {
         emitted = true
-        cb.onToolCall({
-          id: crypto.randomUUID(),
+        calls.push({
+          id: typeof part.functionCall.id === 'string' ? part.functionCall.id : crypto.randomUUID(),
           name: part.functionCall.name,
           input: part.functionCall.args ?? {},
         })
       }
     }
   }
+  if (parts.length)
+    cb.onProviderState?.({
+      protocol: 'gemini',
+      endpoint: baseUrl.replace(/\/$/, ''),
+      model: config.model,
+      parts,
+    })
   if (!emitted) {
     throw new Error(
       abnormalFinish
@@ -107,12 +152,15 @@ function emitGeminiJsonMessage(bodyText: string, cb: StreamCallbacks): void {
         : `Gemini returned no content: ${httpBodyDetail(bodyText)}`,
     )
   }
+  for (const call of calls)
+    cb.onToolCall({ ...call, ...(stopReason === 'max_tokens' ? { truncated: true } : {}) })
   if (stopReason) cb.onStopReason?.(stopReason)
 }
 
 /** Per-endpoint request shaping resolved from the provider registry. */
 export interface GeminiRequestOptions {
   omitTemperature?: boolean | undefined
+  maxTokens?: number | undefined
 }
 
 export async function streamGemini(
@@ -158,7 +206,7 @@ async function geminiTurn(
     },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: system }] },
-      contents: geminiContents(messages),
+      contents: geminiContents(messages, config, baseUrl),
       ...(tools.length > 0
         ? {
             tools: [
@@ -191,12 +239,14 @@ async function geminiTurn(
   const jsonBody = await jsonBodyInsteadOfSse(response)
   if (jsonBody !== null) {
     throwIfCreditsNotice(jsonBody)
-    return emitGeminiJsonMessage(jsonBody, cb)
+    return emitGeminiJsonMessage(jsonBody, cb, config, baseUrl)
   }
   let stopReason: string | undefined
   let abnormalFinish: string | undefined
   let sawFinish = false
   let emitted = false
+  const parts: Record<string, unknown>[] = []
+  const calls: AgentToolCall[] = []
   for await (const line of sseLines(response.body, onBytes)) {
     if (!line.startsWith('data:')) continue
     const payload = line.slice(5).trim()
@@ -210,7 +260,9 @@ async function geminiTurn(
           content?: {
             parts?: Array<{
               text?: string
-              functionCall?: { name?: string; args?: Record<string, unknown> }
+              thought?: boolean
+              functionCall?: { id?: string; name?: string; args?: Record<string, unknown> }
+              [key: string]: unknown
             }>
           }
           finishReason?: string
@@ -230,21 +282,30 @@ async function geminiTurn(
     if (finishReason === 'MAX_TOKENS') stopReason = 'max_tokens'
     else if (finishReason && finishReason !== 'STOP') abnormalFinish = finishReason
     for (const part of event.candidates?.[0]?.content?.parts ?? []) {
+      parts.push(part)
       if (part.text) {
         emitted = true
-        cb.onDelta(part.text)
+        if (part.thought) cb.onReasoningDelta?.(part.text)
+        else cb.onDelta(part.text)
       }
       // Gemini emits function calls whole, never as partial JSON
       if (part.functionCall?.name) {
         emitted = true
-        cb.onToolCall({
-          id: crypto.randomUUID(),
+        calls.push({
+          id: typeof part.functionCall.id === 'string' ? part.functionCall.id : crypto.randomUUID(),
           name: part.functionCall.name,
           input: part.functionCall.args ?? {},
         })
       }
     }
   }
+  if (parts.length)
+    cb.onProviderState?.({
+      protocol: 'gemini',
+      endpoint: baseUrl.replace(/\/$/, ''),
+      model: config.model,
+      parts,
+    })
   // A safety/recitation stop that produced nothing, or a stream with no message
   // framing at all (gateway soft-failure), would otherwise look like an empty
   // success; a genuine empty turn still carries finishReason=STOP and passes
@@ -254,6 +315,8 @@ async function geminiTurn(
   if (!emitted && !sawFinish) {
     throw new Error('Gemini returned no content (empty stream)')
   }
+  for (const call of calls)
+    cb.onToolCall({ ...call, ...(stopReason === 'max_tokens' ? { truncated: true } : {}) })
   if (stopReason) cb.onStopReason?.(stopReason)
 }
 
@@ -278,7 +341,10 @@ export async function chatGemini(
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: system }] },
       contents: [{ role: 'user', parts: [{ text: user }] }],
-      generationConfig: { ...(options.omitTemperature ? {} : { temperature: 0.3 }) },
+      generationConfig: {
+        ...(options.omitTemperature ? {} : { temperature: 0.3 }),
+        ...(options.maxTokens ? { maxOutputTokens: options.maxTokens } : {}),
+      },
     }),
   })
   wd.touch()

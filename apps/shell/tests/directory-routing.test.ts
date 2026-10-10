@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest'
 import { directoryRoute, routedDirectorySkill } from '../src/renderer/src/directory-actions/routing'
-import type { AgentSkill } from '@genoffice/agent-core'
+import { AgentLoop, type AgentSkill, type AgentStreamRequest } from '@genoffice/agent-core'
 import { analyticsSkill } from '../src/renderer/src/analytics/skill'
 import { prepareMyAgentKnowledgeSkill } from '../src/renderer/src/rag/myagent-skill'
 
@@ -10,6 +10,97 @@ const scope = {
   files: ['C:\\sample files\\employee-data.xlsx', 'C:\\sample files\\notes.txt'],
   directories: [],
 }
+
+it.each([
+  'how may employee in employee-data.xlsx',
+  'how many employee in employee-data.xlsx',
+  'how manny employees in employee-data.xlsx',
+  'how mnay employees in employee-data.xlsx',
+  'how may rows does employee-data.xlsx contain',
+])('offers native analysis and requires a count receipt for %s', (task) => {
+  const selected = {
+    ...scope,
+    files: [
+      ...scope.files,
+      ...Array.from({ length: 21 }, (_, i) => `C:\\sample files\\other-${i}.xlsx`),
+    ],
+  }
+  expect(directoryRoute(task, selected)).toMatchObject({
+    intent: 'table',
+    target: scope.files[0],
+    evidence: { calculation: true },
+  })
+  const skill = evidenceSkill(task, selected.files)
+  expect(skill.tools.map((tool) => tool.name)).toContain('query_data')
+  expect(skill.verifyEvidence('There are 500 employees.')).toContain('native analytical result')
+})
+
+it.each([
+  'how may I inspect employee-data.xlsx',
+  'how may employee-data.xlsx be improved',
+  'how may we interpret employee-data.xlsx',
+])('keeps modal questions out of the count route: %s', (task) => {
+  expect(directoryRoute(task, scope).evidence.calculation).toBe(false)
+})
+
+it('retries a premature column question with native analysis instead of finalizing it', async () => {
+  const skill = evidenceSkill('how may employee in employee-data.xlsx')
+  const requests: AgentStreamRequest[] = []
+  const finished = vi.fn(),
+    failed = vi.fn()
+  const loop = new AgentLoop({
+    skill,
+    transport: {
+      stream(request, cb) {
+        requests.push(request)
+        queueMicrotask(() => {
+          if (requests.length === 1)
+            cb.onToolCall({
+              id: 'inspect',
+              name: 'inspect_file',
+              input: { path: scope.files[0] },
+            })
+          else if (requests.length === 2)
+            cb.onDelta(
+              'I need to know which column contains employees. Please specify the column header.',
+            )
+          else if (requests.length === 3)
+            cb.onToolCall({
+              id: 'count',
+              name: 'query_data',
+              input: {
+                datasetIds: ['ready-employees'],
+                metrics: [{ op: 'count', as: 'included_records' }],
+              },
+            })
+          else
+            cb.onDelta(
+              'There are 42 included records. If each row represents one employee, that is 42 employees. Receipt receipt-1.',
+            )
+          cb.onDone()
+        })
+        return { cancel() {} }
+      },
+    },
+    validateResponse: (text) => {
+      const correction = skill.verifyEvidence(text)
+      if (correction) throw new Error(correction)
+    },
+    events: { onDone: finished, onError: failed },
+  })
+  loop.run('how may employee in employee-data.xlsx')
+  await vi.waitFor(() => expect(finished).toHaveBeenCalledOnce())
+  expect(failed).not.toHaveBeenCalled()
+  expect(
+    requests[2].messages.some(
+      (message) =>
+        message.role === 'user' &&
+        message.text.includes('Do not ask the user to identify a column'),
+    ),
+  ).toBe(true)
+  expect(finished.mock.calls[0][0].text).toContain('42 included records')
+  expect(finished.mock.calls[0][0].text).not.toContain('specify the column')
+})
 
 it.each([
   'prepare these tables for analysis',
@@ -384,21 +475,36 @@ it('advertises eight focused tools for an overview and retains native/SQL discov
 function evidenceSkill(task: string, files = scope.files) {
   const selected = { ...scope, files }
   const part = (names: string[], execute: AgentSkill['executeTool']): AgentSkill => ({
-    id: names[0], systemPrompt: '',
-    tools: names.map(name => ({ name, description: '', inputSchema: {} })),
+    id: names[0],
+    systemPrompt: '',
+    tools: names.map((name) => ({ name, description: '', inputSchema: {} })),
     executeTool: execute,
   })
   return routedDirectorySkill(directoryRoute(task, selected), {
-    reader: part(['read_file'], call => ({ output: JSON.stringify({ path: call.input.path, sourceHash: 'a'.repeat(64), untrustedDocumentText: 'Verified source text' }), summary: 'read' })),
-    inspection: part(['search_contents', 'inspect_file', 'query_file'], call => ({
-      output: call.name === 'inspect_file'
-        ? JSON.stringify({ id: 'inspection-1', path: call.input.path, sourceHash: 'a'.repeat(64) })
-        : call.name === 'search_contents'
-          ? JSON.stringify({ hits: [{ path: files[0], sourceHash: 'a'.repeat(64), excerpt: 'Candidate text' }] })
-          : 'Verified source text',
+    reader: part(['read_file'], (call) => ({
+      output: JSON.stringify({
+        path: call.input.path,
+        sourceHash: 'a'.repeat(64),
+        untrustedDocumentText: 'Verified source text',
+      }),
+      summary: 'read',
+    })),
+    inspection: part(['search_contents', 'inspect_file', 'query_file'], (call) => ({
+      output:
+        call.name === 'inspect_file'
+          ? JSON.stringify({
+              id: 'inspection-1',
+              path: call.input.path,
+              sourceHash: 'a'.repeat(64),
+            })
+          : call.name === 'search_contents'
+            ? JSON.stringify({
+                hits: [{ path: files[0], sourceHash: 'a'.repeat(64), excerpt: 'Candidate text' }],
+              })
+            : 'Verified source text',
       summary: call.name,
     })),
-    analytics: part(['query_data', 'query_sql', 'analyze_data'], call => ({
+    analytics: part(['query_data', 'query_sql', 'analyze_data'], (call) => ({
       output: JSON.stringify({
         id: 'receipt-1',
         sources: [{ path: call.input.path ?? files[0], hash: 'a'.repeat(64) }],
@@ -415,41 +521,136 @@ function evidenceSkill(task: string, files = scope.files) {
   })
 }
 
+it.each([
+  ['كم عدد الموظفين في employee-data.xlsx', 'table'],
+  ['employee-data.xlsx の従業員は何人ですか', 'table'],
+  ['employee-data.xlsx 中有多少员工', 'table'],
+  ['متوسط المبلغ لكل منتج في employee-data.xlsx', 'table'],
+  ['employee-data.xlsx の各製品の平均を計算', 'table'],
+  ['تحليل employee-data.xlsx', 'analysis'],
+  ['employee-data.xlsx の統計を分析', 'analysis'],
+  ['تمهيد: احفظ employee-data.xlsx', 'edit'],
+  ['employee-data.xlsx を編集', 'edit'],
+])('routes multilingual task %s to native %s', (task, intent) => {
+  expect(directoryRoute(task, scope).intent).toBe(intent)
+})
+
+it.each([
+  [
+    'كم عدد الموظفين في employee-data.xlsx',
+    '42 سجلاً. إذا كان كل صف يمثل موظفاً، فالعدد 42. receipt-1',
+  ],
+  [
+    'employee-data.xlsx の従業員は何人ですか',
+    '42 行です。各行が従業員一人を表すと仮定すると、42 人です。receipt-1',
+  ],
+])('checks the receipt and accepts a conditional entity count: %s', async (task, answer) => {
+  const skill = evidenceSkill(task)
+  expect(skill.verifyEvidence(answer)).toContain('native analytical result')
+  await skill.executeTool({ id: 'query', name: 'query_data', input: {} })
+  expect(skill.verifyEvidence(answer)).toBeNull()
+  expect(skill.verifyEvidence('42 receipt-1')).toContain('structural source-record grain')
+})
+
+it('requires a visible receipt even when the language intent classifier did not infer a calculation', async () => {
+  const skill = evidenceSkill('tell me something about employee-data.xlsx')
+  await skill.executeTool({
+    id: 'discover',
+    name: 'discover_file_tools',
+    input: { capability: 'analysis' },
+  })
+  await skill.executeTool({ id: 'query', name: 'query_data', input: {} })
+  expect(skill.verifyEvidence('42')).toContain('receipt-1')
+})
+
+it.each(['اقتباس حرفي من notes.txt', 'notes.txt の原文を引用', '逐字引用 notes.txt'])(
+  'verifies quotes regardless of answer language: %s',
+  async (task) => {
+    const skill = evidenceSkill(task)
+    await skill.executeTool({ id: 'read', name: 'read_file', input: { path: scope.files[1] } })
+    expect(skill.verifyEvidence('引用: 「Invented passage」')).toContain('does not match')
+    expect(skill.verifyEvidence('النص: “Verified source text”')).toBeNull()
+  },
+)
+
 it('uses RAG for candidate lookup without forcing a direct read', async () => {
   const skill = evidenceSkill('find Hollie Parker in employee-data.xlsx')
-  await skill.executeTool({ id: 'search', name: 'search_contents', input: { query: 'Hollie Parker' } })
-  expect(skill.verifyResponse?.('Found a candidate in employee-data.xlsx.', [{ name: 'search_contents', ok: true }])).toBeNull()
+  await skill.executeTool({
+    id: 'search',
+    name: 'search_contents',
+    input: { query: 'Hollie Parker' },
+  })
+  expect(
+    skill.verifyResponse?.('Found a candidate in employee-data.xlsx.', [
+      { name: 'search_contents', ok: true },
+    ]),
+  ).toBeNull()
 })
 
 it('requires a content read of the named saved file for verbatim answers', async () => {
   const skill = evidenceSkill('quote the exact wording in notes.txt')
   await skill.executeTool({ id: 'search', name: 'search_contents', input: { query: 'wording' } })
-  expect(skill.verifyResponse?.('“Candidate text”', [{ name: 'search_contents', ok: true }])).toContain('exact saved-file content')
+  expect(
+    skill.verifyResponse?.('“Candidate text”', [{ name: 'search_contents', ok: true }]),
+  ).toContain('exact saved-file content')
   await skill.executeTool({ id: 'inspect', name: 'inspect_file', input: { path: scope.files[1] } })
-  expect(skill.verifyResponse?.('“Candidate text”', [{ name: 'inspect_file', ok: true }])).toContain('exact saved-file content')
-  await skill.executeTool({ id: 'context', name: 'query_file', input: { inspectionId: 'inspection-1', tool: 'get_document_context' } })
-  expect(skill.verifyResponse?.('“Candidate text”', [{ name: 'query_file', ok: true }])).toContain('exact saved-file content')
-  await skill.executeTool({ id: 'blocks', name: 'query_file', input: { inspectionId: 'inspection-1', tool: 'read_blocks' } })
+  expect(
+    skill.verifyResponse?.('“Candidate text”', [{ name: 'inspect_file', ok: true }]),
+  ).toContain('exact saved-file content')
+  await skill.executeTool({
+    id: 'context',
+    name: 'query_file',
+    input: { inspectionId: 'inspection-1', tool: 'get_document_context' },
+  })
+  expect(skill.verifyResponse?.('“Candidate text”', [{ name: 'query_file', ok: true }])).toContain(
+    'exact saved-file content',
+  )
+  await skill.executeTool({
+    id: 'blocks',
+    name: 'query_file',
+    input: { inspectionId: 'inspection-1', tool: 'read_blocks' },
+  })
   expect(skill.verifyEvidence('“Candidate text”')).toContain('quoted passage does not match')
-  expect(skill.verifyResponse?.('“Verified source text”', [{ name: 'query_file', ok: true }])).toBeNull()
+  expect(
+    skill.verifyResponse?.('“Verified source text”', [{ name: 'query_file', ok: true }]),
+  ).toBeNull()
 })
 
 it('requires a native calculation receipt from the named table', async () => {
   const skill = evidenceSkill('how many employees in employee-data.xlsx')
   await skill.executeTool({ id: 'search', name: 'search_contents', input: { query: 'employees' } })
-  expect(skill.verifyResponse?.('There are 42 employees.', [{ name: 'search_contents', ok: true }])).toContain('native analytical result')
+  expect(
+    skill.verifyResponse?.('There are 42 employees.', [{ name: 'search_contents', ok: true }]),
+  ).toContain('native analytical result')
   await skill.executeTool({ id: 'wrong', name: 'query_data', input: { path: scope.files[1] } })
-  expect(skill.verifyResponse?.('There are 42 employees.', [{ name: 'query_data', ok: true }])).toContain('native analytical result')
+  expect(
+    skill.verifyResponse?.('There are 42 employees.', [{ name: 'query_data', ok: true }]),
+  ).toContain('native analytical result')
   await skill.executeTool({ id: 'count', name: 'query_data', input: { path: scope.files[0] } })
-  expect(skill.verifyResponse?.('There are 42 employees.', [{ name: 'query_data', ok: true }])).toContain('receipt-1')
-  expect(skill.verifyResponse?.('There are 42 employees. Receipt receipt-1.', [{ name: 'query_data', ok: true }])).toContain('structural source-record grain')
-  expect(skill.verifyResponse?.('There are 42 included records. If each included row represents one employee, that corresponds to 42 employees. Receipt receipt-1.', [{ name: 'query_data', ok: true }])).toBeNull()
+  expect(
+    skill.verifyResponse?.('There are 42 employees.', [{ name: 'query_data', ok: true }]),
+  ).toContain('receipt-1')
+  expect(
+    skill.verifyResponse?.('There are 42 employees. Receipt receipt-1.', [
+      { name: 'query_data', ok: true },
+    ]),
+  ).toContain('structural source-record grain')
+  expect(
+    skill.verifyResponse?.(
+      'There are 42 included records. If each included row represents one employee, that corresponds to 42 employees. Receipt receipt-1.',
+      [{ name: 'query_data', ok: true }],
+    ),
+  ).toBeNull()
 })
 
 it('allows an explicit inability to verify without fabricating an exact answer', () => {
   const skill = evidenceSkill('quote the exact wording in notes.txt')
-  expect(skill.verifyResponse?.('I cannot verify the exact wording from the available reader.', [])).toBeNull()
-  expect(skill.verifyEvidence('I cannot verify the source, but it says “Candidate text”.')).toContain('exact saved-file content')
+  expect(
+    skill.verifyResponse?.('I cannot verify the exact wording from the available reader.', []),
+  ).toBeNull()
+  expect(
+    skill.verifyEvidence('I cannot verify the source, but it says “Candidate text”.'),
+  ).toContain('exact saved-file content')
   expect(skill.systemPrompt).toContain('OCR text is recognized text')
 })
 
@@ -457,21 +658,49 @@ it('retains the evidence gate after the single corrective turn', () => {
   const exact = evidenceSkill('what is the formula in cell B2 of employee-data.xlsx')
   expect(exact.verifyEvidence('Cell B2 is =SUM(A1:A2).')).toContain('exact saved-file content')
   const calculation = evidenceSkill('what is the exact number of employees in employee-data.xlsx')
-  expect(calculation.verifyEvidence('There are 42 employees.')).toContain('native analytical result')
-  expect(directoryRoute('what is the exact number of employees in employee-data.xlsx', scope).evidence).toEqual({ direct: false, calculation: true, quote: false, entityCount: true, exhaustiveGroups: false })
-  expect(directoryRoute('what is the total in cell B2 of employee-data.xlsx', scope).evidence).toEqual({ direct: true, calculation: false, quote: false, entityCount: false, exhaustiveGroups: false })
-  expect(directoryRoute('how many rows are in employee-data.xlsx', scope).evidence.entityCount).toBe(false)
+  expect(calculation.verifyEvidence('There are 42 employees.')).toContain(
+    'native analytical result',
+  )
+  expect(
+    directoryRoute('what is the exact number of employees in employee-data.xlsx', scope).evidence,
+  ).toEqual({
+    direct: false,
+    calculation: true,
+    quote: false,
+    entityCount: true,
+    exhaustiveGroups: false,
+  })
+  expect(
+    directoryRoute('what is the total in cell B2 of employee-data.xlsx', scope).evidence,
+  ).toEqual({
+    direct: true,
+    calculation: false,
+    quote: false,
+    entityCount: false,
+    exhaustiveGroups: false,
+  })
+  expect(
+    directoryRoute('how many rows are in employee-data.xlsx', scope).evidence.entityCount,
+  ).toBe(false)
 })
 
 it('does not present a bounded grouped result as the complete list', async () => {
   const sales = 'C:\\sample files\\sales-data.xlsx'
-  const skill = evidenceSkill('what is the average amount of each product in sales-data.xlsx', [sales])
+  const skill = evidenceSkill('what is the average amount of each product in sales-data.xlsx', [
+    sales,
+  ])
   await skill.executeTool({
     id: 'average',
     name: 'query_data',
     input: { path: sales, mockTotalRows: 490, mockDisplayedRows: 100, mockTruncated: true },
   })
-  expect(skill.verifyEvidence('All 490 products are listed. [Analysis receipt](RAG:receipt-1:1)')).toContain('visible answer')
-  expect(skill.verifyEvidence('All 490 products are listed. Receipt receipt-1.')).toContain('returned only 100 display rows')
-  expect(skill.verifyEvidence('Showing 20 of 490 product groups; 470 not shown. Receipt receipt-1.')).toBeNull()
+  expect(
+    skill.verifyEvidence('All 490 products are listed. [Analysis receipt](RAG:receipt-1:1)'),
+  ).toContain('visible answer')
+  expect(skill.verifyEvidence('All 490 products are listed. Receipt receipt-1.')).toContain(
+    'returned only 100 display rows',
+  )
+  expect(
+    skill.verifyEvidence('Showing 20 of 490 product groups; 470 not shown. Receipt receipt-1.'),
+  ).toBeNull()
 })

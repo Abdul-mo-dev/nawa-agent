@@ -9,47 +9,14 @@ import {
   xmlBlocks,
 } from './rag-text'
 import { decodeXml } from './rag-xml'
+import { RAG_TEXT_EXTENSIONS, RAG_OFFICE_EXTENSIONS, RAG_IMAGE_EXTENSIONS } from './formats'
 import type { RagDocument } from './rag-types'
 export type { RagBlock, RagDocument } from './rag-types'
 export interface RagOcrOptions {
   pdfPages?: (bytes: Uint8Array, pages: number[]) => Promise<Map<number, string>>
   image?: (bytes: Uint8Array) => Promise<string | null>
 }
-const plain = new Set([
-  'txt',
-  'md',
-  'markdown',
-  'csv',
-  'tsv',
-  'json',
-  'jsonl',
-  'ndjson',
-  'xml',
-  'html',
-  'htm',
-  'log',
-  'py',
-  'js',
-  'jsx',
-  'ts',
-  'tsx',
-  'cs',
-  'rs',
-  'go',
-  'java',
-  'c',
-  'cpp',
-  'h',
-  'hpp',
-  'sql',
-  'yaml',
-  'yml',
-  'toml',
-  'ini',
-  'sh',
-  'ps1',
-  'css',
-])
+const plain = new Set<string>(RAG_TEXT_EXTENSIONS)
 const code = new Set([
   'py',
   'js',
@@ -132,22 +99,7 @@ export async function parseFileToRag(path: string, ocr?: RagOcrOptions): Promise
     const { archiveDocument } = await import('./rag-archive')
     return archiveDocument(await readFile(path), title, (entry) => parseFileToRag(entry, ocr))
   }
-  if (
-    [
-      'docx',
-      'docm',
-      'dotx',
-      'dotm',
-      'xlsx',
-      'xlsm',
-      'xltx',
-      'xltm',
-      'pptx',
-      'pptm',
-      'ppsx',
-      'ppsm',
-    ].includes(ext)
-  ) {
+  if ((RAG_OFFICE_EXTENSIONS as readonly string[]).includes(ext)) {
     const office = await import('./rag-office'),
       bytes = await readFile(path)
     let document: RagDocument
@@ -231,7 +183,7 @@ export async function parseFileToRag(path: string, ocr?: RagOcrOptions): Promise
       ],
     }
   }
-  if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'tif', 'tiff'].includes(ext)) {
+  if ((RAG_IMAGE_EXTENSIONS as readonly string[]).includes(ext)) {
     if (!ocr?.image) throw new Error('Image OCR is unavailable in this environment.')
     const text = (await ocr.image(await readFile(path)))?.trim() ?? ''
     if (!text)

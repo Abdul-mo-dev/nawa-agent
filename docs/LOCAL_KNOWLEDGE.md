@@ -4,6 +4,10 @@ Nawa extracts, OCRs and indexes selected local files itself. New embedding setti
 
 ## Use it
 
+For the complete question-to-answer process, see [Selected files chat flow](SELECTED_FILES_CHAT_FLOW.md).
+
+For local chat configuration and a 4 GB GPU starting profile, see [Local llama.cpp setup](LOCAL_LLAMA_CPP.md). Its chat server and the embedding server below have separate models and settings.
+
 1. Open a workspace directory and select the individual files the chat may use.
 2. Open **Settings → Knowledge**, or use the chat gear to open that tab directly. Enable file search, enter the llama.cpp server address, and click **Load models**. Select the loaded embedding model, test the connection, and save. Nawa verifies actual embeddings; a loaded chat model alone is insufficient. Credentials, prefixes and chunking are under **Advanced embedding settings**.
 3. Click **Index** at the top of chat. It starts embeddings for the selected files and prepares supported tables for native analysis, using the approval mode saved in Knowledge settings. The two operations run independently; an embedding connection error does not block table preparation. Search and analysis status appear in the main file table. Hover or focus each icon for errors, warnings, processing stages and measured embedding passage progress where available. Click Index again after changing a source file or the embedding profile. The main file panel’s **More actions** retains indexing and table-review tools.

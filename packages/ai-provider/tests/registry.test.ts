@@ -230,7 +230,11 @@ describe('provider registry', () => {
   it('uses the configured base URL for custom and rejects a missing one', () => {
     expect(
       AI_PROVIDER_ADAPTERS.custom.resolveEndpoint(config('m', 'http://localhost:1234/v1')),
-    ).toEqual({ protocol: 'openai-compatible', baseUrl: 'http://localhost:1234/v1' })
+    ).toEqual({
+      protocol: 'openai-compatible',
+      baseUrl: 'http://localhost:1234/v1',
+      omitTemperature: true,
+    })
     expect(() => AI_PROVIDER_ADAPTERS.custom.resolveEndpoint(config('m'))).toThrow(
       'A custom provider requires a Base URL',
     )

@@ -16,7 +16,7 @@ import {
   type StreamCallbacks,
 } from './shared'
 
-function openAiMessages(
+export function openAiMessages(
   system: string,
   messages: AgentMessage[],
   echoReasoning: boolean,
@@ -114,6 +114,8 @@ function emitOpenAiJsonMessage(bodyText: string, cb: StreamCallbacks): void {
 /** Per-endpoint request shaping resolved from the provider registry. */
 export interface OpenAiRequestOptions {
   omitTemperature?: boolean | undefined
+  /** Output cap for one-shot calls; streaming uses its explicit maxTokens argument. */
+  maxTokens?: number | undefined
   /** send the output cap as OpenAI's renamed `max_completion_tokens` (GPT-5.x/o-series 400 on `max_tokens`) */
   useMaxCompletionTokens?: boolean | undefined
   /** vendor-specific fields merged into the request body (e.g. DeepSeek's `thinking`) */
@@ -338,6 +340,12 @@ export async function chatOpenAiCompatible(
         { role: 'system', content: system },
         { role: 'user', content: user },
       ],
+      ...(options.maxTokens !== undefined
+        ? {
+            [options.useMaxCompletionTokens ? 'max_completion_tokens' : 'max_tokens']:
+              options.maxTokens,
+          }
+        : {}),
       ...(options.omitTemperature ? {} : { temperature: 0.3 }),
       ...options.bodyExtras,
     }),

@@ -1,3 +1,4 @@
+import { testModelCapabilities } from '@genoffice/ai-provider'
 import { assertDirectoryStageCapability } from '../../../../packages/electron-utils/src/directory-stage'
 import { createHash, randomUUID } from 'node:crypto'
 import {
@@ -3267,7 +3268,7 @@ export function registerSheetsAiIpc(): void {
     sessionFor(event)
     const stored = readAiSettings()
     const settings = resolveAiSettings(stored, defaultAiSettings())
-    // a stored BYOK provider is honored when usable; half-filled configs fall back to genspark
+    // Preserve the configured provider; request validation reports incomplete connections.
     settings.provider = activeProvider(settings)
     settings.settingsRevision = aiSettingsStore.revision(SETTINGS_PATH())
     return redactAiSettings(settings)
@@ -3300,6 +3301,18 @@ export function registerSheetsAiIpc(): void {
     )
   })
 
+  ipcMain.handle('ai:test-model', async (_event, input: AiSettings) => {
+    const settings = applyChatModel(
+      restoreRedactedAiKeys(input, toolAiSettings()),
+      input.selectedChatModelId,
+    )
+    const provider = settings.provider
+    let config = settings.providers[provider]
+    if (!config) return { ok: false, error: 'Choose a configured model before testing.' }
+    if (provider === 'genspark' && !config.apiKey) config = { ...config, apiKey: gskApiKey() }
+    return testModelCapabilities(provider, config)
+  })
+
   ipcMain.handle(IPC_CHANNELS.aiChat, async (event, input: unknown) => {
     sessionFor(event)
     const request = aiChatRequestSchema.parse(input)
@@ -3309,7 +3322,7 @@ export function registerSheetsAiIpc(): void {
     if (provider === 'genspark' && config && !config.apiKey) {
       config = { ...config, apiKey: gskApiKey() }
     }
-    if (!config || (provider !== 'codex' && !config.apiKey)) {
+    if (!config || (provider !== 'codex' && provider !== 'custom' && !config.apiKey?.trim())) {
       return {
         ok: false,
         error: provider === 'genspark' ? tm('errGskNotLoggedIn') : tm('errNoApiKey', { provider }),
@@ -3317,7 +3330,12 @@ export function registerSheetsAiIpc(): void {
     }
     if (provider !== 'codex' && !config.model) return { ok: false, error: tm('errNoModel') }
     try {
-      const result = await chatForProvider(provider, config, request.system, request.user)
+      const result = await chatForProvider(
+        provider,
+        { ...config, policy: { ...config.policy, outputTokens: maxOutputTokensOf(settings) } },
+        request.system,
+        request.user,
+      )
       // the one-shot path reports HTTP failures as ok:false with the raw body —
       // replace capacity/rate-limit dumps with the localized "busy" message
       if (!result.ok && isAiOverloadedError(result.error)) {
@@ -3346,7 +3364,7 @@ export function registerSheetsAiIpc(): void {
     const send = (chunk: AiStreamChunk) => {
       if (!event.sender.isDestroyed()) event.sender.send(IPC_CHANNELS.aiStreamChunk, chunk)
     }
-    if (!config || (provider !== 'codex' && !config.apiKey)) {
+    if (!config || (provider !== 'codex' && provider !== 'custom' && !config.apiKey?.trim())) {
       send({
         requestId,
         type: 'error',
@@ -3375,6 +3393,8 @@ export function registerSheetsAiIpc(): void {
         signal: controller.signal,
         onDelta: (text) => send({ requestId, type: 'delta', text }),
         onReasoningDelta: (text) => send({ requestId, type: 'reasoning', text }),
+        onProviderState: (providerState) =>
+          send({ requestId, type: 'provider-state', providerState }),
         onToolCall: (toolCall) => send({ requestId, type: 'tool-call', toolCall }),
         onActivity: ping,
         onStopReason: (reason) => {

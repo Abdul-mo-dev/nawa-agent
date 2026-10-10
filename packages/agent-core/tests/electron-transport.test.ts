@@ -42,6 +42,7 @@ function setup(
   const cb = {
     onDelta: vi.fn(),
     onReasoning: vi.fn(),
+    onProviderState: vi.fn(),
     onToolCall: vi.fn(),
     onStopReason: vi.fn(),
     onDone: vi.fn(),
@@ -54,6 +55,19 @@ function setup(
 }
 
 describe('createIpcTransport', () => {
+  it('forwards opaque provider state only to the matching active request', () => {
+    const { cb, emit } = setup()
+    const providerState = {
+      protocol: 'gemini' as const,
+      model: 'gemini-3',
+      endpoint: 'https://example',
+      parts: [{ thoughtSignature: 'opaque', functionCall: { name: 'read', args: {} } }],
+    }
+    emit({ type: 'provider-state', providerState })
+    emit({ type: 'provider-state', providerState, requestId: 'stale' })
+    expect(cb.onProviderState).toHaveBeenCalledExactlyOnceWith(providerState)
+    expect(cb.onDelta).not.toHaveBeenCalled()
+  })
   it('starts one request with settings and forwards deltas and tool calls', () => {
     const { started, cb, emit } = setup()
     expect(started).toHaveLength(1)

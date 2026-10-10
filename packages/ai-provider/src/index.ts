@@ -11,6 +11,14 @@ export {
 } from './chat-models'
 export { REDACTED_AI_KEY, redactAiSettings, restoreRedactedAiKeys } from './credentials'
 export type { AiChatModel } from './chat-models'
+export {
+  agentPolicyOf,
+  modelPolicyOf,
+  modelSupportsVision,
+  modelCapabilityIdentity,
+} from './model-policy'
+export type { AiModelPolicy } from './types'
+export { testModelCapabilities } from './capability-test'
 export type {
   AiChatRequest,
   AiChatResponse,
@@ -36,6 +44,7 @@ export type {
 export {
   AI_PROVIDERS,
   DEFAULT_MAX_OUTPUT_TOKENS,
+  DEFAULT_LOCAL_MAX_OUTPUT_TOKENS,
   GENSPARK_LLM_BASE_URLS,
   MAX_MAX_OUTPUT_TOKENS,
   MIN_MAX_OUTPUT_TOKENS,
@@ -46,6 +55,7 @@ export {
   maxOutputTokensOf,
   resolveAiSettings,
 } from './providers'
+export { isLoopbackApiUrl, usesLocalOpenAi } from './local-endpoint'
 export {
   AI_MEDIA_PROVIDERS,
   GEMINI_MEDIA_BASE_URL,

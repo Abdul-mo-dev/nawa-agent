@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { copyFile, lstat, mkdir, readdir, rm } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { parseFileToRag } from '@genoffice/file-parse'
+import { fileCapabilities } from '../../shared/file-capabilities'
 import type { FileSearchResult } from '../../shared/file-search-api'
 import type { RagFileStatus, RagProgress, RagSettings } from '../../shared/rag-api'
 import { authorizePath, regularFile, hashFile, within } from '../directory-actions/file-safety'
@@ -116,7 +117,7 @@ export class RagEngine {
           if (old && old.status !== 'embedding')
             this.store.state(path, 'stale', `File unavailable: ${errorText(e)}`)
         }
-        out.push(this.store.view(path, profile))
+        out.push({ ...this.store.view(path, profile), unsupported: !fileCapabilities(path).search })
       }
       return out
     }
@@ -289,7 +290,8 @@ export class RagEngine {
               vectors[item.index] = value.vector
             })
             progress.chunks += embedded.length
-            if (fileProgress) fileProgress.completedChunks = (fileProgress.completedChunks ?? 0) + embedded.length
+            if (fileProgress)
+              fileProgress.completedChunks = (fileProgress.completedChunks ?? 0) + embedded.length
             update()
           })
           signal.throwIfAborted()

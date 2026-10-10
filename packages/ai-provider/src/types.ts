@@ -1,4 +1,9 @@
-import type { AgentMessage, AgentToolCall, AgentToolDef } from '@genoffice/agent-core'
+import type {
+  AgentMessage,
+  AgentToolCall,
+  AgentToolDef,
+  AgentProviderState,
+} from '@genoffice/agent-core'
 
 export type AiProviderId =
   | 'genspark'
@@ -34,6 +39,24 @@ export interface AiProviderConfig {
   baseUrl?: string | undefined
   /** optional Codex CLI override; empty means auto-detect the current authenticated install */
   cliPath?: string | undefined
+  policy?: AiModelPolicy | undefined
+}
+
+/** Per-connection policy; saved profiles carry their own limits and capabilities. */
+export interface AiModelPolicy {
+  mode?: 'local' | 'cloud' | undefined
+  contextTokens?: number | undefined
+  outputTokens?: number | undefined
+  outputField?: 'max_tokens' | 'max_completion_tokens' | undefined
+  vision?: boolean | undefined
+  tested?:
+    | {
+        identity: string
+        at: number
+        tools: boolean
+        vision?: boolean | undefined
+      }
+    | undefined
 }
 
 /** Live picker data returned by Codex app-server's model/list method. */
@@ -172,6 +195,7 @@ export interface AiChatResponse {
   ok: boolean
   content?: string
   error?: string
+  capabilities?: AiModelPolicy['tested'] | undefined
 }
 
 export interface AiStreamRequest {
@@ -189,7 +213,8 @@ export interface AiStreamChunk {
   requestId: string
   /** 'ping' = wire-level keepalive so the renderer can tell a live stream from a dead one;
    * 'reasoning' = model thinking delta (text carries it), stored for interleaved-thinking echo */
-  type: 'delta' | 'reasoning' | 'tool-call' | 'done' | 'error' | 'ping'
+  type: 'delta' | 'reasoning' | 'provider-state' | 'tool-call' | 'done' | 'error' | 'ping'
+  providerState?: AgentProviderState | undefined
   text?: string
   /** complete parsed tool call (emitted once its arguments finish streaming) */
   toolCall?: AgentToolCall

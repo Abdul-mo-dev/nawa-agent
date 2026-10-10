@@ -1,4 +1,5 @@
 import { useI18n } from '../locale'
+import { modelPolicyStrings } from '../i18n/strings-model-policy'
 
 /** English is the fallback for untranslated copy, as in the Explorer catalog. */
 export const sidebarArabic: Record<string, string> = {
@@ -9,7 +10,8 @@ export const sidebarArabic: Record<string, string> = {
   'Local embedding server': 'خادم التضمين المحلي',
   'Load models': 'تحميل قائمة النماذج',
   'Choose a model': 'اختر نموذجاً',
-  'Loaded model selected. Test connection to verify embeddings.': 'تم اختيار النموذج المحمل. اختبر الاتصال للتحقق من التضمين.',
+  'Loaded model selected. Test connection to verify embeddings.':
+    'تم اختيار النموذج المحمل. اختبر الاتصال للتحقق من التضمين.',
   'Choose a loaded embedding model.': 'اختر نموذج تضمين محملاً.',
   'Advanced embedding settings': 'إعدادات التضمين المتقدمة',
   'Search engine': 'محرك البحث',
@@ -17,9 +19,11 @@ export const sidebarArabic: Record<string, string> = {
   'Built-in embedding model': 'نموذج التضمين المدمج',
   'Use llama.cpp': 'استخدام llama.cpp',
   'Allow a remote embedding server': 'السماح بخادم تضمين بعيد',
-  'Indexed text and search queries will be sent to this server.': 'سيتم إرسال النص المفهرس واستعلامات البحث إلى هذا الخادم.',
+  'Indexed text and search queries will be sent to this server.':
+    'سيتم إرسال النص المفهرس واستعلامات البحث إلى هذا الخادم.',
   'Model revision': 'إصدار النموذج',
-  'Change this when replacing model weights under the same name.': 'غيّر هذا عند استبدال أوزان النموذج بالاسم نفسه.',
+  'Change this when replacing model weights under the same name.':
+    'غيّر هذا عند استبدال أوزان النموذج بالاسم نفسه.',
   'Conservative byte budget': 'حد تقديري محافظ للبايتات',
   'Vector dimensions (0 = detect)': 'أبعاد المتجه (0 = تلقائي)',
   'Maximum input tokens': 'الحد الأقصى لرموز الإدخال',
@@ -29,37 +33,46 @@ export const sidebarArabic: Record<string, string> = {
   'Concurrent requests': 'الطلبات المتزامنة',
   'Search results': 'نتائج البحث',
   'Context character limit': 'حد أحرف السياق',
-  'Changing the model or chunking requires re-indexing affected files.': 'يتطلب تغيير النموذج أو المقاطع إعادة فهرسة الملفات المتأثرة.',
+  'Changing the model or chunking requires re-indexing affected files.':
+    'يتطلب تغيير النموذج أو المقاطع إعادة فهرسة الملفات المتأثرة.',
   'Advanced analysis settings': 'إعدادات التحليل المتقدمة',
   'Table preparation': 'تجهيز الجداول',
   'Automatic for clear tables': 'تلقائي للجداول الواضحة',
   'Review before analysis': 'المراجعة قبل التحليل',
   'Prepare manually': 'التجهيز يدوياً',
-  'Save': 'حفظ',
+  Save: 'حفظ',
   'MyAgent server (optional)': 'خادم MyAgent (اختياري)',
   'Discard unsaved settings?': 'تجاهل الإعدادات غير المحفوظة؟',
   'Index selected files': 'فهرسة الملفات المحددة',
-  'Index': 'فهرسة',
+  Index: 'فهرسة',
   'Indexing selected files': 'جارٍ فهرسة الملفات المحددة',
   'Indexing details': 'تفاصيل الفهرسة',
-  'Select files in the main panel, then click Index.': 'حدد الملفات في اللوحة الرئيسية، ثم انقر على فهرسة.',
+  'Select files in the main panel, then click Index.':
+    'حدد الملفات في اللوحة الرئيسية، ثم انقر على فهرسة.',
   'Select files inside the opened directory.': 'حدد الملفات داخل المجلد المفتوح.',
-  'Embed selected files and prepare their tables for data analysis.': 'أنشئ تضمينات الملفات المحددة وجهز جداولها لتحليل البيانات.',
-  'Indexing selected files. Progress is shown in the file table.': 'جارٍ فهرسة الملفات المحددة. يظهر التقدم في جدول الملفات.',
-  'Choose an embedding model in Knowledge settings, then click Index again.': 'اختر نموذج تضمين في إعدادات المعرفة، ثم انقر على فهرسة مرة أخرى.',
-  'Some files could not be prepared. See file status for details.': 'تعذر تجهيز بعض الملفات. راجع حالة الملف للاطلاع على التفاصيل.',
-  'Some tables could not be prepared. Hover over their analysis status in the file table for details.': 'تعذر تجهيز بعض الجداول. مرر المؤشر على حالة تحليلها في جدول الملفات للاطلاع على التفاصيل.',
+  'Embed selected files and prepare their tables for data analysis.':
+    'أنشئ تضمينات الملفات المحددة وجهز جداولها لتحليل البيانات.',
+  'Indexing selected files. Progress is shown in the file table.':
+    'جارٍ فهرسة الملفات المحددة. يظهر التقدم في جدول الملفات.',
+  'Choose an embedding model in Knowledge settings, then click Index again.':
+    'اختر نموذج تضمين في إعدادات المعرفة، ثم انقر على فهرسة مرة أخرى.',
+  'Some files could not be prepared. See file status for details.':
+    'تعذر تجهيز بعض الملفات. راجع حالة الملف للاطلاع على التفاصيل.',
+  'Some tables could not be prepared. Hover over their analysis status in the file table for details.':
+    'تعذر تجهيز بعض الجداول. مرر المؤشر على حالة تحليلها في جدول الملفات للاطلاع على التفاصيل.',
   'Review table data': 'مراجعة بيانات الجداول',
-  'More': 'المزيد',
+  More: 'المزيد',
   'More chat options': 'المزيد من خيارات المحادثة',
   'Chat options': 'خيارات المحادثة',
   'Workspace settings': 'إعدادات مساحة العمل',
   'Back to chat': 'العودة إلى المحادثة',
-  'Select files in the main panel, then ask a question.': 'حدد الملفات في اللوحة الرئيسية، ثم اطرح سؤالك.',
+  'Select files in the main panel, then ask a question.':
+    'حدد الملفات في اللوحة الرئيسية، ثم اطرح سؤالك.',
   'Select files in the main panel.': 'حدد الملفات في اللوحة الرئيسية.',
   'Ask about your files…': 'اسأل عن ملفاتك…',
-  'Selection changed. This answer uses the files selected when you sent your question.': 'تغير التحديد. تستخدم هذه الإجابة الملفات المحددة عند إرسال سؤالك.',
-  'Analysis': 'التحليل',
+  'Selection changed. This answer uses the files selected when you sent your question.':
+    'تغير التحديد. تستخدم هذه الإجابة الملفات المحددة عند إرسال سؤالك.',
+  Analysis: 'التحليل',
   'Not indexed': 'لم تتم الفهرسة',
   'Waiting to index': 'في انتظار الفهرسة',
   'Checking file…': 'جارٍ فحص الملف…',
@@ -74,14 +87,17 @@ export const sidebarArabic: Record<string, string> = {
   'Needs a decision': 'يحتاج إلى قرار',
   'Data preparation failed': 'تعذر تجهيز البيانات',
   'No table data': 'لا توجد بيانات جدولية',
-  '{completed} of {total} passages embedded · {percent}%': 'تم تضمين {completed} من {total} مقاطع · {percent}٪',
+  '{completed} of {total} passages embedded · {percent}%':
+    'تم تضمين {completed} من {total} مقاطع · {percent}٪',
   '{count} passages': '{count} مقاطع',
   'Indexed: {date}': 'تاريخ الفهرسة: {date}',
   '{count} rows processed': 'تمت معالجة {count} صفوف',
   '{tables} tables · {rows} included rows': '{tables} جداول · {rows} صفوف مشمولة',
   'Selected-file indexing': 'فهرسة الملفات المحددة',
-  'Allow the configured MyAgent service to read and index these files.': 'السماح لخدمة MyAgent المحددة بقراءة هذه الملفات وفهرستها.',
-  'Allow sending file text to the configured embedding endpoint for indexing.': 'السماح بإرسال نص الملفات إلى خدمة التضمين المحددة للفهرسة.',
+  'Allow the configured MyAgent service to read and index these files.':
+    'السماح لخدمة MyAgent المحددة بقراءة هذه الملفات وفهرستها.',
+  'Allow sending file text to the configured embedding endpoint for indexing.':
+    'السماح بإرسال نص الملفات إلى خدمة التضمين المحددة للفهرسة.',
   'Prepare & export': 'تجهيز وتصدير',
   'Ask the agent to prepare and review selected tables, then export SQLite. Source files are kept unchanged.':
     'اطلب من الوكيل تجهيز الجداول المحددة ومراجعتها، ثم تصدير قاعدة SQLite. تبقى ملفات المصدر دون تغيير.',
@@ -794,7 +810,8 @@ export function sidebarText(
 ): string {
   const tabIndex = ['Chat', 'Knowledge', 'Models'].indexOf(text)
   const translated =
-    lang === 'ar' ? sidebarArabic[text] : tabIndex >= 0 ? tabs[lang]?.[tabIndex] : undefined
+    modelPolicyStrings[lang]?.[text] ??
+    (lang === 'ar' ? sidebarArabic[text] : tabIndex >= 0 ? tabs[lang]?.[tabIndex] : undefined)
   return (translated ?? text).replace(/\{(\w+)\}/g, (match, key: string) =>
     String(params[key] ?? match),
   )

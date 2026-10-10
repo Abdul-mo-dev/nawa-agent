@@ -1,5 +1,6 @@
 import type { MyAgentSource } from './myagent-tools-api'
 import type { SourceRef } from './analytics-api'
+import type { DirectoryCommit } from './directory-actions-api'
 
 /** Versioned evidence, never permission to expand an individual-file selection. */
 export interface DirectoryEvidence {
@@ -36,4 +37,6 @@ export interface HistoryRequest {
   outcome: 'running' | 'completed' | 'failed' | 'cancelled' | 'incomplete'
   evidence?: DirectoryEvidence[]
   catalog?: { path: string; content: string }
+  /** Host-produced outcome. Retained even when later work is cancelled or fails. */
+  action?: DirectoryCommit
 }

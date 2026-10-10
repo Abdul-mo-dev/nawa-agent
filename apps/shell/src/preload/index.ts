@@ -11,7 +11,12 @@ import {
   AI_SEARCH_PROVIDERS,
   getProviderAdapter,
 } from '@genoffice/ai-provider/browser'
-import type { AiSettings, AiStreamChunk, CodexModelCatalog } from '@genoffice/ai-provider/browser'
+import type {
+  AiSettings,
+  AiStreamChunk,
+  AiChatResponse,
+  CodexModelCatalog,
+} from '@genoffice/ai-provider/browser'
 import { installDropOpenBridge } from '@genoffice/electron-utils/drop-open'
 import { normalizeAiPanelPrefs } from '@genoffice/ui/ai-panel-prefs'
 import type {
@@ -96,14 +101,29 @@ const homeApi: HomeApi = {
   },
   async listWorkspaceDirectories(folder) {
     const result = (await ipcRenderer.invoke('home:workspace-directories', folder)) as unknown
-    return Array.isArray(result) ? result as import('../shared/workspace-api').WorkspaceScopeDirectory[] : []
+    return Array.isArray(result)
+      ? (result as import('../shared/workspace-api').WorkspaceScopeDirectory[])
+      : []
   },
   async searchWorkspaceFiles(folder, query, limit) {
-    const result = (await ipcRenderer.invoke('home:workspace-search-files', folder, query, limit)) as unknown
-    return Array.isArray(result) ? result as import('../shared/workspace-api').WorkspaceScopeFile[] : []
+    const result = (await ipcRenderer.invoke(
+      'home:workspace-search-files',
+      folder,
+      query,
+      limit,
+    )) as unknown
+    return Array.isArray(result)
+      ? (result as import('../shared/workspace-api').WorkspaceScopeFile[])
+      : []
   },
   async readFolderChatFile(folder, path, maxChars, offset) {
-    return (await ipcRenderer.invoke('home:workspace-read-file', folder, path, maxChars, offset)) as WorkspaceFileText
+    return (await ipcRenderer.invoke(
+      'home:workspace-read-file',
+      folder,
+      path,
+      maxChars,
+      offset,
+    )) as WorkspaceFileText
   },
   onWorkspaceRootsChanged(handler) {
     const listener = () => handler()
@@ -441,15 +461,19 @@ const homeApi: HomeApi = {
     return (await ipcRenderer.invoke('ai:codex-models', cliPath)) as CodexModelCatalog
   },
   async testAiSettings(settings) {
-    const result: unknown = await ipcRenderer.invoke('ai:chat', {
-      settings,
-      system: 'You are a connectivity test. Reply with the single word OK.',
-      user: 'ping',
-    })
-    const raw = (result ?? {}) as { ok?: unknown; error?: unknown }
+    const result: unknown = await ipcRenderer.invoke('ai:test-model', settings)
+    const raw = (result ?? {}) as {
+      ok?: unknown
+      error?: unknown
+      capabilities?: AiChatResponse['capabilities']
+    }
     return raw.ok === true
-      ? { ok: true }
-      : { ok: false, error: typeof raw.error === 'string' ? raw.error : 'Connection failed' }
+      ? { ok: true, capabilities: raw.capabilities }
+      : {
+          ok: false,
+          error: typeof raw.error === 'string' ? raw.error : 'Connection failed',
+          capabilities: raw.capabilities,
+        }
   },
   getAiMediaProviders() {
     return AI_MEDIA_PROVIDERS

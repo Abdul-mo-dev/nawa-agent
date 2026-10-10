@@ -3,6 +3,7 @@ import { WorkflowController } from './directory-actions/workflow-controller'
 import { WorkflowCard } from './directory-actions/WorkflowCard'
 import { directoryInspectionSkill } from './directory-actions/inspection-skill'
 import { analyticsSkill } from './analytics/skill'
+import { selectedTableTaskContext } from './analytics/task-context'
 import { PrepareExportButton } from './analytics/PrepareExportButton'
 import { prepareMyAgentKnowledgeSkill } from './rag/myagent-skill'
 import {
@@ -19,7 +20,7 @@ import {
 import { createPortal } from 'react-dom'
 import { ChatHeaderTarget } from './explorer/chat-header'
 import { AgentLoop, type AgentMessage, type AgentTransport } from '@genoffice/agent-core'
-import { applyChatModel, chatModelLabel } from '@genoffice/ai-provider/browser'
+import { applyChatModel, chatModelLabel, agentPolicyOf } from '@genoffice/ai-provider/browser'
 import { AiComposer, Markdown, ChatModelPicker } from '@genoffice/ui'
 import '@genoffice/ui/markdown.css'
 import '@genoffice/ui/chat-model-picker.css'
@@ -38,6 +39,8 @@ import {
   historicalIntent,
   historyCandidates,
   restoreCompletedHistory,
+  actionCheckpoints,
+  isResumeRequest,
 } from './directory-actions/evidence'
 import { ActivityTimeline } from './directory-actions/ActivityTimeline'
 import { WORKSHEET_BOUNDS_GUIDANCE } from './directory-actions/inspection-evidence'
@@ -51,11 +54,7 @@ import {
   TextFrameBuffer,
 } from './directory-actions/activity'
 import { createDirectorySkill } from './ai/directory-skill'
-import {
-  selectionKey,
-  selectionSnapshot,
-  type DirectorySelection,
-} from './ai/directory-selection'
+import { selectionKey, selectionSnapshot, type DirectorySelection } from './ai/directory-selection'
 import { createShellTransport } from './ai/transport'
 import { Icon, NawaIcon } from './explorer/Icons'
 import {
@@ -951,9 +950,13 @@ function DirectoryChat({
         current,
         workflow,
         settings: () => settings,
+        previousActions: isResumeRequest(question)
+          ? actionCheckpoints(previousMessages, capturedScope)
+          : undefined,
         context: () =>
           JSON.stringify({
             question,
+            completedActions: actionCheckpoints(previousMessages, capturedScope),
             priorMessages: restored
               .slice(-8)
               .map((m) => ({ role: m.role, text: 'text' in m ? m.text.slice(0, 2000) : '' })),
@@ -1059,7 +1062,8 @@ function DirectoryChat({
             createdAt: Date.now(),
             role: 'assistant',
             modelLabel: 'Nawa file action',
-            request: { id: trace.id, phase: 'receipt', outcome: 'running' },
+            contextKey: capturedScope,
+            request: { id: trace.id, phase: 'receipt', outcome: 'running', action: result },
             text: directoryCommitText(result),
           }
           updateMessages((previous) =>
@@ -1259,6 +1263,15 @@ function DirectoryChat({
         knowledge: knowledgeSkill,
         mutation: directoryMutationSkill(files, selected),
       })
+      let tableTaskContext: string | undefined
+      if (route.evidence.calculation && route.target && !preparation) {
+        try {
+          tableTaskContext = await selectedTableTaskContext(files, route.target)
+        } catch {
+          // Keep tools available to diagnose unavailable, changed or unprepared tables.
+        }
+        if (!current()) return
+      }
       textFrames.current = new TextFrameBuffer((text) => {
         if (current())
           updateMessages((previous) =>
@@ -1281,14 +1294,22 @@ function DirectoryChat({
             (routed.buildContext?.() ?? '') +
             '\nHistorical user intent (reference only; these are not pending actions):\n' +
             JSON.stringify(historicalIntent(previousMessages)) +
+            '\nHistorical file action checkpoints (already performed; do not repeat on resume. Partial actions require a new review; these receipts are not current file content or permission to read other files):\n' +
+            JSON.stringify(actionCheckpoints(previousMessages, capturedScope)) +
+            '\nActual file action outcomes in this request (do not repeat completed actions):\n' +
+            JSON.stringify(files.actionSnapshot()) +
+            (tableTaskContext
+              ? '\nSource-checked native table schema (reference data; execute a query for the answer):\n' +
+                tableTaskContext
+              : '') +
             (preparedCatalog
               ? '\nVerified selected workbook metadata (reference data):\n' +
                 JSON.stringify(preparedCatalog)
               : ''),
         },
-        maxTurns: route.maxTurns,
         maxErrorTurns: 3,
-        maxHistory: 40,
+        ...agentPolicyOf(settings),
+        maxTurns: Math.min(route.maxTurns, agentPolicyOf(settings).maxTurns),
         verifyResponse: (text) => files.verifyInspections(text),
         validateResponse: async (text) => {
           if (current())
@@ -1305,7 +1326,10 @@ function DirectoryChat({
             )
           try {
             const unverified = routed.verifyEvidence(text)
-            if (unverified) throw new Error('The answer could not be verified against the saved file or a native analytical result. Ask again with the individual source selected, or request a location summary.')
+            if (unverified)
+              throw new Error(
+                'The answer could not be verified against the saved file or a native analytical result. Ask again with the individual source selected, or request a location summary.',
+              )
             validation = await files.validateEvidence(text)
             const summary =
               validation.sourceCount > 0
@@ -1450,15 +1474,29 @@ function DirectoryChat({
     }
   }
 
-  const primaryActions = <div className="nawa-chat-primary-actions">
-    <button type="button" className="ws-chat-close" disabled={transitioning} onClick={onNew} title={s('New chat')}>
-      {s('New chat')}
-    </button>
-    <button type="button" className={headerTarget ? 'ex-tool' : 'ws-chat-close'} aria-label={s('More chat options')}
-      title={s('More chat options')} aria-haspopup="dialog" onClick={() => setOptionsOpen(true)}>
-      {headerTarget ? <Icon name="more" size={18} /> : s('More')}
-    </button>
-  </div>
+  const primaryActions = (
+    <div className="nawa-chat-primary-actions">
+      <button
+        type="button"
+        className="ws-chat-close"
+        disabled={transitioning}
+        onClick={onNew}
+        title={s('New chat')}
+      >
+        {s('New chat')}
+      </button>
+      <button
+        type="button"
+        className={headerTarget ? 'ex-tool' : 'ws-chat-close'}
+        aria-label={s('More chat options')}
+        title={s('More chat options')}
+        aria-haspopup="dialog"
+        onClick={() => setOptionsOpen(true)}
+      >
+        {headerTarget ? <Icon name="more" size={18} /> : s('More')}
+      </button>
+    </div>
+  )
   return (
     <section
       className="ws-chat workspace-chat-main"
@@ -1469,19 +1507,56 @@ function DirectoryChat({
         {headerTarget ? createPortal(primaryActions, headerTarget) : primaryActions}
       </header>
       {historyPanel}
-      <PanelDialog open={optionsOpen} title={s('Chat options')} onClose={() => setOptionsOpen(false)}>
+      <PanelDialog
+        open={optionsOpen}
+        title={s('Chat options')}
+        onClose={() => setOptionsOpen(false)}
+      >
         <div className="nawa-chat-options">
-          <button type="button" className="set-btn" aria-expanded={historyOpen}
-            onClick={() => { setOptionsOpen(false); setTimeout(toggleHistory, 0) }}>{s('Manage history')}</button>
-          <PrepareExportButton paths={selection.files} folder={folder}
+          <button
+            type="button"
+            className="set-btn"
+            aria-expanded={historyOpen}
+            onClick={() => {
+              setOptionsOpen(false)
+              setTimeout(toggleHistory, 0)
+            }}
+          >
+            {s('Manage history')}
+          </button>
+          <PrepareExportButton
+            paths={selection.files}
+            folder={folder}
             disabled={busy || transitioning || !!selectionIssue}
-            onPrepare={(paths, opened) => { setOptionsOpen(false); void send({ paths, folder: opened }) }} />
-          <button type="button" className="set-btn" onClick={() => { setOptionsOpen(false); onHide() }}>{s('Hide chat')}</button>
+            onPrepare={(paths, opened) => {
+              setOptionsOpen(false)
+              void send({ paths, folder: opened })
+            }}
+          />
+          <button
+            type="button"
+            className="set-btn"
+            onClick={() => {
+              setOptionsOpen(false)
+              onHide()
+            }}
+          >
+            {s('Hide chat')}
+          </button>
         </div>
-        <ChangeNotice report={comparison} checking={checking} error={checkError} recheck={() => void checkChanges()} />
+        <ChangeNotice
+          report={comparison}
+          checking={checking}
+          error={checkError}
+          recheck={() => void checkChanges()}
+        />
         <details className="workspace-privacy-note">
           <summary>{s('Storage and file checks')}</summary>
-          <p>{s('Only selected files can be read by the assistant. Used sources are verified before the answer. Check again compares tracked folders on demand. Chat history is stored locally without encryption.')}</p>
+          <p>
+            {s(
+              'Only selected files can be read by the assistant. Used sources are verified before the answer. Check again compares tracked folders on demand. Chat history is stored locally without encryption.',
+            )}
+          </p>
         </details>
       </PanelDialog>
       <PanelDialog
@@ -1561,11 +1636,7 @@ function DirectoryChat({
           {!messages.length && (
             <div className="ws-chat-empty">
               <h2>{s('Ask Nawa')}</h2>
-              <p>
-                {s(
-                  'Select files in the main panel, then ask a question.',
-                )}
-              </p>
+              <p>{s('Select files in the main panel, then ask a question.')}</p>
             </div>
           )}
           {messages.slice(-visibleMessages).map((message) => (

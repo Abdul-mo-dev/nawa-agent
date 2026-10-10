@@ -100,6 +100,7 @@ describe('resolveAiSettings', () => {
       model: 'legacy-model',
       baseUrl: 'https://legacy.example.com/v1',
     })
+    expect(resolved.provider).toBe('custom')
     // untouched providers keep their defaults
     expect(resolved.providers.anthropic).toEqual(defaults.providers.anthropic)
   })
@@ -107,6 +108,20 @@ describe('resolveAiSettings', () => {
   it('defaults the legacy base URL to the OpenAI endpoint when omitted', () => {
     const resolved = resolveAiSettings({ apiKey: 'legacy-key' }, defaultAiSettings())
     expect(resolved.providers.custom.baseUrl).toBe('https://api.openai.com/v1')
+  })
+
+  it('migrates a keyless legacy local endpoint without selecting cloud', () => {
+    const defaults = defaultAiSettings()
+    const resolved = resolveAiSettings(
+      { baseUrl: 'http://127.0.0.1:8082/v1', model: 'local' },
+      defaults,
+    )
+    expect(resolved).toMatchObject({
+      provider: 'custom',
+      providers: { custom: { apiKey: '', model: 'local', baseUrl: 'http://127.0.0.1:8082/v1' } },
+    })
+    expect(defaults.provider).toBe('genspark')
+    expect(defaults.providers.custom.baseUrl).not.toBe('http://127.0.0.1:8082/v1')
   })
 
   it('merges stored multi-provider settings over the defaults, provider by provider', () => {
@@ -277,23 +292,23 @@ describe('clampMaxOutputTokens', () => {
 })
 
 describe('activeProvider', () => {
-  it('honors a configured BYOK provider and falls back to genspark otherwise', () => {
+  it('preserves the selected provider while configuration is incomplete', () => {
     const settings = defaultAiSettings()
     expect(activeProvider(settings)).toBe('genspark')
 
     settings.provider = 'kimi'
-    expect(activeProvider(settings)).toBe('genspark') // no key yet
+    expect(activeProvider(settings)).toBe('kimi')
     settings.providers.kimi.apiKey = 'sk-user'
     expect(activeProvider(settings)).toBe('kimi')
   })
 
-  it('requires a base URL for providers that declare needsBaseUrl', () => {
+  it('preserves an incomplete custom configuration for request validation', () => {
     const settings = defaultAiSettings()
     settings.provider = 'custom'
     settings.providers.custom.apiKey = 'k'
-    expect(activeProvider(settings)).toBe('genspark')
+    expect(activeProvider(settings)).toBe('custom')
     settings.providers.custom.baseUrl = 'http://localhost:1234/v1'
-    expect(activeProvider(settings)).toBe('genspark') // custom's default model is empty
+    expect(activeProvider(settings)).toBe('custom')
     settings.providers.custom.model = 'my-model'
     expect(activeProvider(settings)).toBe('custom')
   })
@@ -322,14 +337,14 @@ describe('activeProvider', () => {
     expect(resolved.providers.codex.apiKey).toBe('')
   })
 
-  it('treats whitespace-only keys, URLs, and models as unconfigured', () => {
+  it('does not change providers for whitespace-only configuration', () => {
     const settings = defaultAiSettings()
     settings.provider = 'kimi'
     settings.providers.kimi.apiKey = '   '
-    expect(activeProvider(settings)).toBe('genspark')
+    expect(activeProvider(settings)).toBe('kimi')
     settings.providers.kimi.apiKey = 'sk-user'
     settings.providers.kimi.model = '  '
-    expect(activeProvider(settings)).toBe('genspark')
+    expect(activeProvider(settings)).toBe('kimi')
     settings.providers.kimi.model = 'kimi-k2'
     expect(activeProvider(settings)).toBe('kimi')
 
@@ -337,13 +352,13 @@ describe('activeProvider', () => {
     custom.provider = 'custom'
     custom.providers.custom.baseUrl = '   '
     custom.providers.custom.model = 'my-model'
-    expect(activeProvider(custom)).toBe('genspark')
+    expect(activeProvider(custom)).toBe('custom')
   })
 
-  it('falls back to genspark for unknown ids from a hand-edited settings file', () => {
+  it('preserves unknown ids so request validation can reject them', () => {
     const settings = defaultAiSettings()
     settings.provider = 'nonsense' as AiProviderId
-    expect(activeProvider(settings)).toBe('genspark')
+    expect(activeProvider(settings)).toBe('nonsense')
   })
 
   it('genspark never requires a key (injected from the gsk login at request time)', () => {

@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { mkdtemp, mkdir, rm, utimes, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { AgentToolDef } from '@genoffice/agent-core'
 import {
   activePermissionProfileId,
+  startNativeThread,
   buildCodexAppServerPrompt,
   codexAppServerLaunchArgs,
   codexAppServerOutputSchema,
@@ -54,6 +55,36 @@ const tools: AgentToolDef[] = [
 ]
 
 describe('Codex app-server bridge', () => {
+  it('does not fall back or start a turn when permission-profile enforcement is rejected', async () => {
+    const request = vi.fn().mockRejectedValue(new Error('Unknown permission profile'))
+    await expect(
+      startNativeThread({ request }, { apiKey: '', model: 'codex' }, '/isolated'),
+    ).rejects.toThrow('no turn was started')
+    expect(request).toHaveBeenCalledOnce()
+    expect(request.mock.calls[0][0]).toBe('thread/start')
+  })
+
+  it('discards a thread which ignored its requested permission profile', async () => {
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce({ thread: { id: 'unsafe' } })
+      .mockResolvedValue({})
+    await expect(
+      startNativeThread({ request }, { apiKey: '', model: 'codex' }, '/isolated'),
+    ).rejects.toThrow('restricted permission profile')
+    expect(request.mock.calls.map((call) => call[0])).toEqual(['thread/start', 'thread/delete'])
+    expect(request.mock.calls[1][1]).toEqual({ threadId: 'unsafe' })
+  })
+
+  it('rejects oversized structured tool responses before returning executable calls', () => {
+    const raw = JSON.stringify({
+      text: 'x'.repeat(7000),
+      toolCalls: [{ id: 'call', name: 'replace_text', inputJson: '{}' }],
+    })
+    expect(() => parseCodexAppServerTurn(raw, tools, 1024)).toThrow(
+      'no returned tool call was executed',
+    )
+  })
   it('automatically selects the newest complete desktop-managed Codex install', async () => {
     const root = await mkdtemp(join(tmpdir(), 'genoffice-codex-discovery-'))
     try {
@@ -115,12 +146,10 @@ describe('Codex app-server bridge', () => {
         },
       },
     })
-    expect(codexThreadStartParams(config, '/tmp/genoffice-codex-x', 'read-only')).toMatchObject({
-      sandbox: 'read-only',
-    })
-    expect(activePermissionProfileId({ activePermissionProfile: { id: 'Nawa' } })).toBe(
-      'Nawa',
+    expect(() => codexThreadStartParams(config, '/tmp/genoffice-codex-x', 'read-only')).toThrow(
+      'restricted permission profile',
     )
+    expect(activePermissionProfileId({ activePermissionProfile: { id: 'Nawa' } })).toBe('Nawa')
     expect(activePermissionProfileId({ activePermissionProfile: null })).toBeUndefined()
   })
 
