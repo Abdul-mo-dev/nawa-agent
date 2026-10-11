@@ -17,6 +17,25 @@ test('AI panel side persists across restart and updates an open Docs tab without
     ).toContainText('Right')
     await page.screenshot({ path: screenshotPath('ai-panel-side-settings') })
     await page.locator('.set-close').click()
+    const modelName = 'Local file-chat model profile with a deliberately long descriptive name'
+    await page.evaluate(async (name) => {
+      const settings = await window.aiOffice.getAiSettings()
+      await window.aiOffice.setAiSettings({
+        ...settings,
+        chatModels: [
+          {
+            id: 'file-composer-model',
+            name,
+            provider: 'custom',
+            config: {
+              model: 'local-model-with-a-long-file-chat-server-name',
+              apiKey: '',
+              baseUrl: 'http://127.0.0.1:1/v1',
+            },
+          },
+        ],
+      })
+    }, modelName)
     await page.evaluate((path) => window.aiOffice.openPath(path), fixture)
     const editor = await waitForPageWithUrl(launched.app, '://docs/')
     await expect(editor.locator('.ProseMirror').first()).toBeVisible()
@@ -25,6 +44,16 @@ test('AI panel side persists across restart and updates an open Docs tab without
     const content = editor.locator('.app-content')
     expect((await dock.boundingBox())!.x).toBeGreaterThan((await content.boundingBox())!.x)
     const draft = editor.locator('.ai-composer textarea')
+    const model = editor
+      .locator('.ai-input-box .ai-input-footer')
+      .getByRole('combobox', { name: 'Chat model', exact: true })
+    await model.selectOption('file-composer-model')
+    await expect(model).toHaveAttribute(
+      'title',
+      `${modelName} · local-model-with-a-long-file-chat-server-name (custom)`,
+    )
+    await expect(model).toHaveCSS('text-overflow', 'ellipsis')
+    expect((await model.boundingBox())!.y).toBeGreaterThan((await draft.boundingBox())!.y)
     await draft.fill('Keep this unsent draft when switching sides')
 
     await editor.getByRole('button', { name: 'Move AI panel to the left', exact: true }).click()

@@ -25,12 +25,12 @@
 .nawa-form-error { color:var(--ex-danger); }
 .nawa-workspace-control-panel { display:flex; flex-direction:column; min-height:0; min-width:0; overflow:hidden; container-type:inline-size; }
 .nawa-workspace-control-panel[hidden], .nawa-workspace-panel[hidden] { display:none !important; }
-.nawa-workspace-tabs-header { display:flex; align-items:center; gap:2px; flex:none; padding:6px; border-bottom:1px solid var(--ex-line); }
-.nawa-workspace-tabs-header > .ex-tool { width:30px; flex:none; }
-.nawa-workspace-chat-actions { margin-inline-start:auto; flex:none; }
+.nawa-workspace-tabs-header { display:flex; flex-wrap:wrap; align-items:center; gap:2px; flex:none; padding:6px; border-bottom:1px solid var(--ex-line); }
+.nawa-workspace-tabs-header > .ex-tool, .nawa-workspace-chat-options > .ex-tool { width:30px; flex:none; }
+.nawa-workspace-chat-actions, .nawa-workspace-chat-options { flex:none; }
 .nawa-workspace-chat-actions .nawa-chat-primary-actions { gap:2px; }
 .ex-inspector .nawa-workspace-chat-actions .ws-chat-close { min-height:32px; padding:5px 6px; white-space:nowrap; font-size:12px; }
-.nawa-workspace-index { position:relative; flex:none; }
+.nawa-workspace-index { position:relative; flex:none; margin-inline-start:auto; }
 .nawa-index-selected { display:flex; align-items:center; justify-content:center; gap:4px; min-height:32px; padding:5px 8px; border:1px solid var(--ex-line); border-radius:6px; background:var(--ex-accent-soft); color:var(--ex-accent); font-size:12px; white-space:nowrap; }
 .nawa-index-selected:hover:not(:disabled) { background:var(--ex-hover); }
 .nawa-index-spinner { animation:nawa-index-spin 1s linear infinite; }
@@ -55,8 +55,9 @@
 .nawa-toolbar-activity { color:var(--ex-accent); font-size:12px; }
 .nawa-panel-activity { flex:none; text-align:start; border:0; border-bottom:1px solid var(--ex-line); background:var(--ex-accent-soft); color:var(--ex-accent); padding:8px 12px; font:inherit; cursor:pointer; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .nawa-panel-activity.is-error { color:var(--ex-danger); background:var(--ex-danger-soft); }
-.nawa-panel-backdrop { position:fixed; inset:0; background:var(--ex-dim); z-index:6100; }
-.nawa-workspace-control-panel.is-drawer { position:fixed; inset-block:12px; inset-inline-end:12px; width:min(440px,calc(100vw - 24px)); max-width:calc(100vw - 24px); z-index:6101; border:1px solid var(--ex-line); border-radius:12px; box-shadow:var(--ex-shadow); }
+.nawa-panel-backdrop { position:fixed; inset:var(--shell-titlebar-height,40px) 0 0; background:var(--ex-dim); z-index:6100; }
+.nawa-workspace-control-panel.is-drawer { position:fixed; inset-block-start:calc(var(--shell-titlebar-height,40px) + 12px); inset-block-end:12px; left:12px; right:auto; width:min(440px,calc(100vw - 24px)); max-width:calc(100vw - 24px); z-index:6101; border:1px solid var(--ex-line); border-radius:12px; box-shadow:var(--ex-shadow); }
+html[data-ai-panel-side='right'] .nawa-workspace-control-panel.is-drawer { left:auto; right:12px; }
 .nawa-workspace-control-panel.is-expanded { width:min(720px,calc(100vw - 24px)); }
 @container (max-width:360px) { .nawa-workspace-tablist > button > svg { display:none; } }
 .nawa-panel-theme :is(.set-input,.set-dd) { width:100%; max-width:100%; min-width:0; }
@@ -135,7 +136,6 @@
 .ex-inspector .ws-chat-scroll .nawa-selection-items { max-height:none; overflow:visible; }
 .ex-inspector .ws-chat-scroll .nawa-history-change { max-height:none; overflow:visible; font-size:12px; }
 .ex-inspector .ws-chat.workspace-chat-main .ws-chat-head { display:flex; flex-wrap:wrap; padding:10px 12px; border-bottom:1px solid var(--ex-line); gap:6px; }
-.ex-inspector .ws-chat-head .nawa-conversation-picker { flex:1 1 100%; min-width:0; }
 .ex-inspector .nawa-history-dropdown { margin:0; font-size:13px; }
 .ex-inspector .ws-chat-head > .ws-chat-close { min-height:32px; font-size:12px; }
 .ex-inspector .ws-chat-footer { flex:none; border-top:1px solid var(--ex-line); background:var(--ex-nav); }

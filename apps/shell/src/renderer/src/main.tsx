@@ -6,9 +6,10 @@ import { LocaleProvider } from './locale'
 import '@genoffice/ui/tokens.css'
 import '@genoffice/ui/screentip.css'
 import '@genoffice/ui/dropdown.css'
+import '@genoffice/ui/ai-panel-prefs.css'
 import './home.css'
 import './tabbar.css'
-import { installScreenTips } from '@genoffice/ui'
+import { applyAiPanelPrefs, DEFAULT_AI_PANEL_PREFS, installScreenTips } from '@genoffice/ui'
 
 installScreenTips()
 
@@ -26,9 +27,12 @@ void Promise.all([
   // if the flag is unreadable, skip onboarding rather than block the home screen
   window.aiOffice.onboardingSeen().catch(() => true),
   window.aiOffice.getTheme().catch(() => 'system' as const),
-]).then(([lang, onboardingSeen, theme]) => {
+  window.aiOffice.getAiPanelPrefs().catch(() => DEFAULT_AI_PANEL_PREFS),
+]).then(([lang, onboardingSeen, theme, aiPanelPrefs]) => {
   document.documentElement.lang = htmlLang(lang)
   document.documentElement.dir = htmlDir(lang)
+  applyAiPanelPrefs(aiPanelPrefs)
+  window.aiOffice.onAiPanelPrefsChanged(applyAiPanelPrefs)
   // apply theme attribute before first paint to avoid flash
   if (theme !== 'system') {
     document.documentElement.setAttribute('data-theme', theme)

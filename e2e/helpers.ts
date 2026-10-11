@@ -177,11 +177,13 @@ export function screenshotPath(name: string): string {
   return join(ARTIFACTS_DIR, 'screenshots', `${name}.png`)
 }
 
-/** Create a blank file through the Explorer toolbar used by the current shell. */
+/** Create a blank file in the current Explorer folder. */
 export async function createNewFile(
   page: Page,
   kind: 'Document' | 'Spreadsheet' | 'Presentation' | 'PDF' | 'Markdown' | 'HTML',
 ): Promise<void> {
+  if (!(await page.locator('.ex-new-button').isVisible()))
+    await page.locator('.tab-item.tab-home').click()
   await page.locator('.ex-new-button').click()
   await page
     .getByRole('menu', { name: 'Explorer actions' })

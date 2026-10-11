@@ -634,8 +634,8 @@ export const cs = {
   appRecalcPartial:
     'Vzorce přepočítány podle vašich úprav — {count} si ponechalo hodnoty z mezipaměti (funkce, které záložní modul nezná).',
   appRecalcDone: 'Vzorce přepočítány podle vašich úprav ({count} buněk, záložní modul).',
-  appIndexing: 'Indexuje se {name}: {rows} řádků připraveno.',
-  appStreamingRows: 'Načítá se {name}: {rows} řádků k dispozici.',
+  appLoadingRows: 'Načítá se {name}: {rows} řádků.',
+  appWorkbookReady: 'Připraveno — {name}: {rows} řádků k dispozici.',
   appLoadRangeFailed: 'Nelze načíst viditelnou oblast.',
   appFullyLoaded: 'Sešit plně načten — vzorce se přepočítávají živě, řádky/sloupce lze upravovat.',
   appRangeMustBeVector: '{range} musí být jediný řádek nebo jediný sloupec buněk.',

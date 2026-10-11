@@ -2726,6 +2726,7 @@ export function registerSheetsIpc(): void {
       return null
     }
     const result = await openWorkbookSession(entry.client, prepared.openPath, entry.sessions, {
+      displayName: basename(path),
       suggestSaveAs: prepared.suggestSaveAs,
       csvImport: prepared.csvImport,
       csvSourcePath: prepared.csvSourcePath,
@@ -2822,6 +2823,7 @@ export function registerSheetsIpc(): void {
           break
         }
         const result = await openWorkbookSession(entry.client, prepared.openPath, entry.sessions, {
+          displayName: basename(path),
           suggestSaveAs: prepared.suggestSaveAs,
           csvImport: prepared.csvImport,
           csvSourcePath: prepared.csvSourcePath,
@@ -4408,6 +4410,7 @@ async function openWorkbookSession(
   path: string,
   sessions: Map<string, SessionInfo>,
   options?: {
+    displayName?: string | undefined
     suggestSaveAs?: string | undefined
     csvImport?: boolean | undefined
     csvSourcePath?: string | undefined
@@ -4419,6 +4422,7 @@ async function openWorkbookSession(
   },
 ): Promise<WorkbookFile> {
   const {
+    displayName,
     suggestSaveAs,
     csvImport,
     csvSourcePath,
@@ -4467,6 +4471,8 @@ async function openWorkbookSession(
     unsavedNewWorkbooks.delete(path)
     return workbookFileSchema.parse({
       ...opened,
+      // The sidecar names the private snapshot; UI messages use the user's file.
+      name: displayName ?? basename(csvSourcePath ?? restoreTarget ?? suggestSaveAs ?? path),
       // The renderer-facing path is what the user opened: for a restored
       // recovery copy that is the original file, not the copy under userData.
       path: restoreTarget ?? path,

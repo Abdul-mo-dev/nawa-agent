@@ -5,13 +5,14 @@ import { test, expect } from '@playwright/test'
 import { launchShell, closeAndSaveVideo, screenshotPath } from './helpers'
 
 test.describe('home screen', () => {
-  test('shows Explorer navigation, file commands and tab bar', async () => {
+  test('shows Explorer navigation, contextual file controls and tab bar', async () => {
     const launched = await launchShell({ onboardingSeen: true, videoDir: 'home-basics' })
     const { page } = launched
     try {
       await expect(page.getByTestId('nawa-explorer')).toBeVisible()
-      await expect(page.getByRole('toolbar', { name: 'File commands' })).toBeVisible()
-      await page.locator('.ex-new-button').click()
+      await expect(page.getByRole('toolbar', { name: 'File commands' })).toHaveCount(0)
+      await expect(page.locator('.ex-address-row .ex-layout-controls')).toBeVisible()
+      await page.locator('.ex-content-heading .ex-new-button').click()
       for (const kind of ['Document', 'Spreadsheet', 'Presentation', 'Markdown', 'HTML', 'PDF']) {
         await expect(page.getByRole('menuitem', { name: kind, exact: true })).toBeVisible()
       }

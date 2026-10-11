@@ -589,15 +589,6 @@ html.genoffice-popover-open .ribbon-tabs {
   white-space: nowrap;
 }
 
-.workbook-status {
-  max-width: min(360px, 30vw);
-  overflow: hidden;
-  color: var(--text-muted);
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* Hovering a tab tints the label, it doesn't paint a box */
 .ribbon-tabs > button:not(.qa-btn):hover {
   color: var(--accent-dark);

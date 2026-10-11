@@ -895,9 +895,6 @@ export function ExcelShell({
             </button>
           ))}
           <span className="ribbon-tabs-spacer" />
-          <span className="workbook-status" role="status" aria-live="polite">
-            {statusMessage}
-          </span>
         </nav>
 
         <Ribbon
@@ -1006,7 +1003,9 @@ export function ExcelShell({
           {/* Status bar spans the sheet column only — the AI dock keeps the full window height (unified with docs/slides). */}
           <footer className="status-bar" onContextMenu={openStatsMenu}>
             <div className="status-left">
-              <span className="status-msg">{statusMessage}</span>
+              <span className="status-msg" role="status" aria-live="polite" title={statusMessage}>
+                {statusMessage}
+              </span>
             </div>
             <div className="status-right">
               {/* One-of-N view switcher, so it is a radiogroup rather than a

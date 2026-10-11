@@ -7,9 +7,11 @@ import { applyAiPanelPrefs, useAiPanelPrefs } from './ai-panel-prefs-store'
 export function AiPanelSideButton({
   lang,
   onMove,
+  className,
 }: {
   lang: Lang
   onMove: (side: AiPanelSide) => Promise<AiPanelPrefs>
+  className?: string
 }) {
   const { side } = useAiPanelPrefs()
   const [pending, setPending] = useState(false)
@@ -28,7 +30,7 @@ export function AiPanelSideButton({
   return (
     <button
       type="button"
-      className="ai-header-btn ai-panel-side-button"
+      className={`ai-header-btn ai-panel-side-button${className ? ` ${className}` : ''}`}
       data-tip={label}
       aria-label={label}
       disabled={pending}

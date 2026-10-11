@@ -2,6 +2,9 @@
  * corners + concave "feet" merging into the content area below.
  * Metrics copied from Chrome (macOS, light): 40px strip, 34px tabs that
  * shrink from 240px but never stretch, "+" hugging the last tab. */
+:root {
+  --shell-titlebar-height: max(40px, env(titlebar-area-height, 0px));
+}
 .tab-bar {
   --tabstrip-bg: #ebebeb;
   --tabstrip-text: #454746;
@@ -11,7 +14,7 @@
   top: 0;
   left: 0;
   right: 0;
-  height: 40px;
+  height: var(--shell-titlebar-height);
   display: flex;
   align-items: stretch;
   background: var(--tabstrip-bg);
@@ -321,7 +324,7 @@ body.overlay-title-bar .tab-bar-drag-spacer {
 }
 
 .app-frame-content {
-  padding-top: 40px;
+  padding-top: var(--shell-titlebar-height);
 }
 
 /* ── Dark mode tab bar overrides ─────────────────────────── */

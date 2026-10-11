@@ -681,8 +681,8 @@ export const de = {
   appRecalcPartial:
     'Formeln anhand Ihrer Bearbeitungen neu berechnet — {count} behielten zwischengespeicherte Werte (Funktionen, die dem Ersatzmodul fehlen).',
   appRecalcDone: 'Formeln anhand Ihrer Bearbeitungen neu berechnet ({count} Zellen, Ersatzmodul).',
-  appIndexing: '{name} wird indiziert: {rows} Zeilen bereit.',
-  appStreamingRows: '{name} wird gestreamt: {rows} Zeilen verfügbar.',
+  appLoadingRows: '{name} wird geladen: {rows} Zeilen.',
+  appWorkbookReady: 'Bereit — {name}: {rows} Zeilen verfügbar.',
   appLoadRangeFailed: 'Der sichtbare Bereich kann nicht geladen werden.',
   appFullyLoaded:
     'Arbeitsmappe vollständig geladen — Formeln werden live neu berechnet, Zeilen/Spalten bearbeitbar.',

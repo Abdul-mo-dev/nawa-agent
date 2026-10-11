@@ -1,4 +1,5 @@
 import { useSidebarText } from './sidebar-i18n'
+import { useAiPanelPrefs } from '@genoffice/ui'
 import type { PanelActivity } from './panel-state'
 import { WorkspaceControlPanel } from './WorkspaceControlPanel'
 import { PanelDialog } from './PanelDialog'
@@ -67,7 +68,8 @@ const errorText = (error: unknown) => (error instanceof Error ? error.message : 
 
 export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
   const { lang, dateLocale, t: homeText } = useI18n()
-  const { s } = useSidebarText()
+  const { s, dir } = useSidebarText()
+  const { side: aiPanelSide } = useAiPanelPrefs()
   const [panelActivity, setPanelActivity] = useState<PanelActivity | undefined>()
   const t = explorerText(lang)
   const [prefs, setPrefs] = useState<Preferences>(() => {
@@ -396,7 +398,6 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
   const selectedItems = allItems.filter((item) => selected.has(item.path))
   const protectedItem = (item: Item) =>
     item.kind === 'folder' && roots.some((root) => isWithin(root.path, item.path))
-  const canMutate = selectedItems.length > 0 && !selectedItems.some(protectedItem)
   const currentContext: Item | undefined = selectedItems.length === 1 ? selectedItems[0] : undefined
   const cutPaths = new Set(clipboardMode === 'cut' ? cutItems.map((item) => item.path) : [])
   const choose = (
@@ -715,46 +716,49 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
     ...(['document', 'spreadsheet', 'presentation', 'pdf', 'markdown', 'html'] as const).map(
       (kind) => ({ label: t(kind), action: () => createFile(kind) }),
     ),
-    {
-      label: t('add'),
-      icon: 'plus',
-      divider: true,
-      action: () => {
-        void addRoot()
-      },
-    },
   ]
-  const viewActions = (): MenuAction[] => [
-    {
-      label: t('details'),
-      icon: 'list',
-      checked: prefs.view === 'details',
-      action: () => changePrefs({ view: 'details' }),
-    },
-    {
-      label: t('tiles'),
-      icon: 'grid',
-      checked: prefs.view === 'tiles',
-      action: () => changePrefs({ view: 'tiles' }),
-    },
+  const fileOptionsActions = (): MenuAction[] => [
     {
       label: t('compact'),
       checked: prefs.compact,
-      divider: true,
       action: () => changePrefs({ compact: !prefs.compact }),
     },
+    ...(['name', 'modified', 'type', 'size'] as const).map((key, index) => ({
+      label: `${t('sort')}: ${t(key)}`,
+      checked: prefs.sort === key,
+      divider: index === 0,
+      action: () => changePrefs({ sort: key }),
+    })),
     {
-      label: t('navigation'),
-      icon: 'pane',
-      checked: prefs.navigationVisible,
-      action: () => changePrefs({ navigationVisible: !prefs.navigationVisible }),
+      label: t('ascending'),
+      divider: true,
+      checked: !prefs.descending,
+      action: () => changePrefs({ descending: false }),
     },
     {
-      label: t('assistant'),
-      icon: 'sparkles',
-      checked: prefs.pane === 'ai',
-      disabled: editorActive,
-      action: () => changePrefs({ pane: prefs.pane === 'ai' ? 'none' : 'ai' }),
+      label: t('descending'),
+      checked: prefs.descending,
+      action: () => changePrefs({ descending: true }),
+    },
+    {
+      label: t('openFile'),
+      icon: 'open',
+      divider: true,
+      action: () => {
+        void act(() => window.aiOffice.browse())
+      },
+    },
+    {
+      label: s('Indexing details'),
+      icon: 'search',
+      disabled: !folder || !selectedItems.some((item) => item.kind === 'file'),
+      action: () => setFileTools('search'),
+    },
+    {
+      label: s('Review table data'),
+      icon: 'list',
+      disabled: !folder,
+      action: () => setFileTools('tables'),
     },
     {
       label: s('Knowledge'),
@@ -1073,6 +1077,34 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
             </>
           )}
         </div>
+        <div className="ex-layout-controls">
+          <ToolButton
+            icon="pane"
+            label={t('navigation')}
+            pressed={navigationVisible}
+            onClick={() => changePrefs({ navigationVisible: !prefs.navigationVisible })}
+          />
+          <button
+            type="button"
+            className="ex-tool ex-assistant-toggle"
+            aria-label={t('assistant')}
+            title={t('assistant')}
+            disabled={editorActive}
+            aria-pressed={inspectorVisible && prefs.pane === 'ai'}
+            onClick={() => changePrefs({ pane: prefs.pane === 'ai' ? 'none' : 'ai' })}
+          >
+            <Icon name="sparkles" />
+            {panelActivity && (
+              <span
+                className="nawa-toolbar-activity"
+                title={panelActivity.text}
+                aria-label={panelActivity.text}
+              >
+                ●
+              </span>
+            )}
+          </button>
+        </div>
         <label className="ex-search">
           <Icon name="search" size={17} />
           <input
@@ -1090,186 +1122,10 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
           <kbd>Ctrl F</kbd>
         </label>
       </header>
-      <div className="ex-command-bar" role="toolbar" aria-label="File commands">
-        <button
-          className="ex-tool with-label ex-new-button"
-          disabled={busy}
-          onClick={(e) => toolbarMenu(e, newActions())}
-        >
-          <Icon name="plus" />
-          <span>{t('new')}</span>
-          <Icon name="down" size={12} />
-        </button>
-        <span className="ex-command-divider" />
-        {editorActive ? (
-          <button
-            className="ex-tool with-label"
-            onClick={() => navigate(folder ? { kind: 'folder', path: folder } : { kind: 'recent' })}
-          >
-            <Icon name="left" />
-            <span>{t('backFiles')}</span>
-          </button>
-        ) : (
-          <>
-            <ToolButton
-              icon="cut"
-              label={t('cut')}
-              disabled={!canMutate || busy}
-              onClick={() => beginCut(selectedItems)}
-            />
-            <ToolButton
-              icon="copy"
-              label={`${t('copy')} (Ctrl+C)`}
-              disabled={!selectedItems.length || busy}
-              onClick={() => beginCopy(selectedItems)}
-            />
-            <ToolButton
-              icon="paste"
-              label={t('paste')}
-              disabled={!folder || !cutItems.length || busy}
-              onClick={() => {
-                void paste()
-              }}
-            />
-            <ToolButton
-              icon="rename"
-              label={t('rename')}
-              disabled={!canMutate || selectedItems.length !== 1 || busy}
-              onClick={() => requestRename()}
-            />
-            <ToolButton
-              icon="trash"
-              label={t('trash')}
-              disabled={!canMutate || busy}
-              onClick={() => requestDelete()}
-            />
-          </>
-        )}
-        <span className="ex-command-divider" />
-        <button
-          className="ex-tool with-label"
-          disabled={editorActive}
-          onClick={(e) =>
-            toolbarMenu(e, [
-              ...(['name', 'modified', 'type', 'size'] as const).map((key) => ({
-                label: t(key),
-                checked: prefs.sort === key,
-                action: () => changePrefs({ sort: key }),
-              })),
-              {
-                label: t('ascending'),
-                divider: true,
-                checked: !prefs.descending,
-                action: () => changePrefs({ descending: false }),
-              },
-              {
-                label: t('descending'),
-                checked: prefs.descending,
-                action: () => changePrefs({ descending: true }),
-              },
-            ])
-          }
-        >
-          <Icon name="sort" />
-          <span>{t('sort')}</span>
-          <Icon name="down" size={11} />
-        </button>
-        <button className="ex-tool with-label" onClick={(e) => toolbarMenu(e, viewActions())}>
-          <Icon name="list" />
-          <span>{t('view')}</span>
-          <Icon name="down" size={11} />
-        </button>
-        <button
-          className="ex-tool"
-          aria-label="More actions"
-          title="More actions"
-          onClick={(e) =>
-            toolbarMenu(e, [
-              {
-                label: t('add'),
-                icon: 'plus',
-                action: () => {
-                  void addRoot()
-                },
-              },
-              {
-                label: t('openFile'),
-                icon: 'open',
-                action: () => {
-                  void act(() => window.aiOffice.browse())
-                },
-              },
-              {
-                label: s('Index selected files'),
-                icon: 'search',
-                disabled: !folder || !selectedItems.some((item) => item.kind === 'file'),
-                action: () => setFileTools('search'),
-              },
-              {
-                label: s('Review table data'),
-                icon: 'list',
-                disabled: !folder,
-                action: () => setFileTools('tables'),
-              },
-              {
-                label: t('settings'),
-                icon: 'settings',
-                divider: true,
-                action: () => openSettings(),
-              },
-              { label: 'Original home', icon: 'home', action: onOpenLegacy },
-              {
-                label: homeText('searchFilesPlaceholder'),
-                icon: 'search',
-                action: () => onOpenLegacy({ mode: 'search', query: search }),
-              },
-              {
-                label: homeText('navAsk'),
-                icon: 'sparkles',
-                action: () => onOpenLegacy({ mode: 'ask' }),
-              },
-              {
-                label: homeText('navUserGuide'),
-                icon: 'info',
-                action: () => {
-                  void act(() => window.aiOffice.openHelp())
-                },
-              },
-            ])
-          }
-        >
-          <Icon name="more" />
-        </button>
-        <span className="ex-toolbar-spacer" />
-        <ToolButton
-          icon="pane"
-          label={t('navigation')}
-          pressed={navigationVisible}
-          onClick={() => changePrefs({ navigationVisible: !prefs.navigationVisible })}
-        />
-        <button
-          className="ex-tool with-label ex-assistant-toggle"
-          disabled={editorActive}
-          aria-pressed={inspectorVisible && prefs.pane === 'ai'}
-          onClick={() => changePrefs({ pane: prefs.pane === 'ai' ? 'none' : 'ai' })}
-        >
-          <Icon name="sparkles" />
-          <span>{t('assistant')}</span>
-          {panelActivity && (
-            <span
-              className="nawa-toolbar-activity"
-              title={panelActivity.text}
-              aria-label={panelActivity.text}
-            >
-              ●
-            </span>
-          )}
-        </button>
-      </div>
       <div className="ex-body">
         {navigationVisible && (
           <>
-            <aside className="ex-navigation" aria-label={t('navigation')}>
+            <aside className="ex-navigation" aria-label={t('navigation')} dir={dir}>
               <div className="ex-brand">
                 <span className="ex-brand-mark">
                   <NawaIcon size={32} />
@@ -1394,6 +1250,7 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
             </aside>
             <Splitter
               label={t('navigation')}
+              className="ex-navigation-splitter"
               value={effectiveNavWidth}
               min={180}
               max={380}
@@ -1404,6 +1261,7 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
         <main
           ref={center}
           className="ex-center"
+          dir={dir}
           aria-label={editorActive ? t('editor') : t('files')}
           onContextMenu={(event) => {
             if (editorActive || event.defaultPrevented) return
@@ -1443,8 +1301,10 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
             <>
               <div className="ex-content-heading">
                 <span className="ex-heading-icon">{headerIcon}</span>
-                <div>
-                  <h1 dir="auto">{title}</h1>
+                <div className="ex-location-title">
+                  <h1 title={title}>
+                    <bdi>{title}</bdi>
+                  </h1>
                   <p>
                     {loading
                       ? t('loading')
@@ -1452,19 +1312,29 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
                     {selectedItems.length > 0 && ` · ${selectedItems.length} ${t('selected')}`}
                   </p>
                 </div>
-                <span className="ex-toolbar-spacer" />
-                {folder && (
+                <div className="ex-file-controls">
                   <button
-                    className="ex-text-button"
-                    title={t('ask')}
-                    onClick={() => {
-                      changePrefs({ pane: 'ai' })
-                    }}
+                    type="button"
+                    className="ex-tool with-label ex-new-button"
+                    disabled={busy}
+                    aria-haspopup="menu"
+                    onClick={(event) => toolbarMenu(event, newActions())}
                   >
-                    <Icon name="sparkles" size={15} />
-                    <span>{t('folderScope')}</span>
+                    <Icon name="plus" />
+                    <span>{t('new')}</span>
+                    <Icon name="down" size={12} />
                   </button>
-                )}
+                  <button
+                    type="button"
+                    className="ex-tool ex-file-options"
+                    aria-label={homeText('moreActions')}
+                    title={homeText('moreActions')}
+                    aria-haspopup="menu"
+                    onClick={(event) => toolbarMenu(event, fileOptionsActions())}
+                  >
+                    <Icon name="more" />
+                  </button>
+                </div>
               </div>
               {notice && (
                 <div
@@ -1575,13 +1445,14 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
         {inspectorVisible && !drawer && (
           <Splitter
             label={t('assistant')}
+            className="ex-assistant-splitter"
             value={effectiveInspectorWidth}
             min={300}
             max={Math.min(
               560,
               Math.max(300, windowWidth - (navigationVisible ? prefs.navigationWidth : 0) - 380),
             )}
-            reverse
+            reverse={aiPanelSide === 'right'}
             onChange={(inspectorWidth) => changePrefs({ inspectorWidth })}
           />
         )}

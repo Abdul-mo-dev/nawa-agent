@@ -23,7 +23,7 @@ function subscribe(listener: () => void): () => void {
  */
 export function applyAiPanelPrefs(raw: unknown): void {
   const next = normalizeAiPanelPrefs(raw)
-  if (sameAiPanelPrefs(next, current)) return
+  const changed = !sameAiPanelPrefs(next, current)
   current = next
   const html = document.documentElement
   html.dataset.aiPanelSide = next.side
@@ -34,7 +34,7 @@ export function applyAiPanelPrefs(raw: unknown): void {
     html.dataset.aiFontSize = next.fontSize
     html.style.setProperty('--ai-font-zoom', String(aiPanelZoom(next)))
   }
-  for (const listener of listeners) listener()
+  if (changed) for (const listener of listeners) listener()
 }
 
 /** Panels meet the window edge on either side; each app retains its own width limits. */

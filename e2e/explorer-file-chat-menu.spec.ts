@@ -67,6 +67,119 @@ test('file context actions prepare exact tables, index only selected files and r
     await page.getByRole('treeitem', { name: basename(documents), exact: true }).click()
     const row = page.locator('.ex-file-row').filter({ hasText: 'sales.csv' })
     await expect(row).toBeVisible()
+    await expect(page.locator('.ex-command-bar')).toHaveCount(0)
+    await expect(page.locator('.ex-content-heading .ex-new-button')).toBeVisible()
+    const fileOptions = page
+      .locator('.ex-content-heading')
+      .getByRole('button', { name: 'More actions', exact: true })
+    await fileOptions.click()
+    await page.getByRole('menuitemcheckbox', { name: 'Sort: Size', exact: true }).click()
+    await expect(page.locator('.ex-file-row').first()).toContainText('unselected.csv')
+    await fileOptions.click()
+    await page.getByRole('menuitemcheckbox', { name: 'Descending', exact: true }).click()
+    await expect(page.locator('.ex-file-row').first()).toContainText('sales.csv')
+    await page
+      .locator('.ex-status')
+      .getByRole('button', { name: 'Large icons', exact: true })
+      .click()
+    await expect(page.locator('.ex-tile')).toHaveCount(2)
+    await fileOptions.click()
+    await page.getByRole('menuitemcheckbox', { name: 'Sort: Name', exact: true }).click()
+    await fileOptions.click()
+    await page.getByRole('menuitemcheckbox', { name: 'Ascending', exact: true }).click()
+    await page.locator('.ex-status').getByRole('button', { name: 'Details', exact: true }).click()
+    await expect(page.locator('.ex-file-row').first()).toContainText('sales.csv')
+    await fileOptions.click()
+    await page.getByRole('menuitemcheckbox', { name: 'Compact spacing', exact: true }).click()
+    await expect(page.getByTestId('nawa-explorer')).toHaveClass(/ex-compact/)
+    await fileOptions.click()
+    await page.getByRole('menuitemcheckbox', { name: 'Compact spacing', exact: true }).click()
+    const panel = page.locator('.nawa-workspace-control-panel')
+    const composer = panel.locator('.ai-input-box')
+    const history = composer.getByRole('combobox', { name: 'Directory conversation history' })
+    await expect(history).toBeEnabled()
+    const model = composer.getByRole('combobox', { name: 'Chat model', exact: true })
+    await expect(model).toBeVisible()
+    const longModelName = 'Local analysis profile with a deliberately long name for the composer'
+    await page.evaluate(async (name) => {
+      const settings = await window.aiOffice.getAiSettings()
+      await window.aiOffice.setAiSettings({
+        ...settings,
+        chatModels: [
+          {
+            id: 'composer-model',
+            name,
+            provider: 'custom',
+            config: {
+              model: 'local-analysis-model-with-a-long-server-name',
+              apiKey: '',
+              baseUrl: 'http://127.0.0.1:1/v1',
+            },
+          },
+        ],
+      })
+      window.dispatchEvent(new Event('nawa:models-changed'))
+    }, longModelName)
+    await model.selectOption('composer-model')
+    await expect(model).toHaveAttribute(
+      'title',
+      `${longModelName} · local-analysis-model-with-a-long-server-name (custom)`,
+    )
+    await expect(history).toHaveAttribute(
+      'title',
+      await history.evaluate((select) => (select as HTMLSelectElement).selectedOptions[0].text),
+    )
+    await expect(model).toHaveCSS('text-overflow', 'ellipsis')
+    await expect(history).toHaveCSS('text-overflow', 'ellipsis')
+    await expect(panel.locator('.ws-chat-head')).toHaveCount(0)
+    const header = panel.locator('.nawa-workspace-tabs-header')
+    const newChat = header.getByRole('button', { name: 'New chat', exact: true })
+    const index = header.getByRole('button', { name: 'Index selected files', exact: true })
+    expect((await newChat.boundingBox())!.x).toBeLessThan((await index.boundingBox())!.x)
+    const draft = composer.getByRole('textbox', { name: 'Message Nawa' })
+    expect((await history.boundingBox())!.y).toBeGreaterThan((await draft.boundingBox())!.y)
+    expect((await model.boundingBox())!.y).toBeGreaterThan((await draft.boundingBox())!.y)
+    await draft.fill('Draft retained while expanding and switching chats')
+    await panel.locator('.nawa-workspace-close').click()
+    await expect(panel).toBeHidden()
+    const assistantToggle = page
+      .locator('.ex-address-row')
+      .getByRole('button', { name: 'Nawa assistant', exact: true })
+    await expect(assistantToggle).toHaveAttribute('aria-pressed', 'false')
+    await assistantToggle.click()
+    await expect(draft).toHaveValue('Draft retained while expanding and switching chats')
+    const navigationToggle = page
+      .locator('.ex-address-row')
+      .getByRole('button', { name: 'Navigation pane', exact: true })
+    await navigationToggle.click()
+    await expect(page.locator('.ex-navigation')).toHaveCount(0)
+    await navigationToggle.click()
+    await expect(page.locator('.ex-navigation')).toBeVisible()
+    await header.getByRole('button', { name: 'Expand panel', exact: true }).click()
+    await expect(panel).toHaveClass(/is-expanded/)
+    const tabBar = (await page.locator('.tab-bar').boundingBox())!
+    expect((await panel.boundingBox())!.y).toBeGreaterThan(tabBar.y + tabBar.height)
+    expect((await page.locator('.nawa-panel-backdrop').boundingBox())!.y).toBeGreaterThanOrEqual(
+      tabBar.y + tabBar.height,
+    )
+    await expect(history).toBeVisible()
+    await expect(draft).toHaveValue('Draft retained while expanding and switching chats')
+    await page.screenshot({
+      path: screenshotPath('directory-chat-expanded-composer'),
+      fullPage: true,
+    })
+    await header.getByRole('button', { name: 'Dock panel', exact: true }).click()
+    await expect(panel).not.toHaveClass(/is-expanded/)
+    const conversation = await history.inputValue()
+    await newChat.click()
+    await expect(history).not.toHaveValue(conversation)
+    await history.selectOption(conversation)
+    await expect(draft).toHaveValue('Draft retained while expanding and switching chats')
+    await draft.fill('')
+    await page.screenshot({
+      path: screenshotPath('directory-chat-docked-composer'),
+      fullPage: true,
+    })
     await page.evaluate(async (path) => window.nawaAnalytics.statuses([path], true), sales)
     await row.click({ button: 'right' })
     const menu = page.getByRole('menu', { name: 'Explorer actions' })

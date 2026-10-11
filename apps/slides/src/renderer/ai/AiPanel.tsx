@@ -2372,12 +2372,6 @@ export function AiPanel({
             />
           )}
           {attachNotice && <div className="ai-attach-notice">{attachNotice}</div>}
-          <ChatModelPicker
-            loadSettings={loadChatModelSettings}
-            onChange={setRendererChatModel}
-            initialId={getRendererChatModel()}
-            disabled={busy}
-          />
           <div className="ai-input-box">
             <AiQueueStrip
               items={msgQueue.queued}
@@ -2483,6 +2477,12 @@ export function AiPanel({
               rows={1}
             />
             <div className="ai-input-footer">
+              <ChatModelPicker
+                loadSettings={loadChatModelSettings}
+                onChange={setRendererChatModel}
+                initialId={getRendererChatModel()}
+                disabled={busy}
+              />
               <button
                 className="ai-attach-btn"
                 onClick={pickAttachments}

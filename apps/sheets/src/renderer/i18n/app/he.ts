@@ -581,8 +581,8 @@ export const he = {
   appRecalcPartial:
     'הנוסחאות חושבו מחדש לפי העריכות שלך — {count} שמרו על ערכים מהמטמון (פונקציות שחסרות במנוע הגיבוי).',
   appRecalcDone: 'הנוסחאות חושבו מחדש לפי העריכות שלך ({count} תאים, מנוע גיבוי).',
-  appIndexing: 'יוצר אינדקס עבור {name}: {rows} שורות מוכנות.',
-  appStreamingRows: 'מזרים את {name}: {rows} שורות זמינות.',
+  appLoadingRows: 'טוען את {name}: {rows} שורות.',
+  appWorkbookReady: 'מוכן — {name}: {rows} שורות זמינות.',
   appLoadRangeFailed: 'לא ניתן לטעון את הטווח הגלוי.',
   appFullyLoaded:
     'חוברת העבודה נטענה במלואה — נוסחאות מחושבות מחדש באופן חי, שורות/עמודות ניתנות לעריכה.',

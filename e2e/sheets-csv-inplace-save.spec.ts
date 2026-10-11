@@ -46,7 +46,7 @@ test.describe('sheets: a CSV keeps its identity through Save', () => {
       ).toBeVisible()
       const shell = await waitForPageWithUrl(launched.app, 'shell/out')
       await expect(shell.locator('.tab-title').filter({ hasText: 'empty.csv' })).toBeVisible()
-      await expect(sheets.locator('.workbook-status')).not.toContainText('Error invoking')
+      await expect(sheets.locator('.status-msg')).not.toContainText('Error invoking')
       await expect(sheets.locator('.status-bar')).not.toContainText('Error invoking')
     } finally {
       await closeAndSaveVideo(launched, 'sheets-empty-csv')

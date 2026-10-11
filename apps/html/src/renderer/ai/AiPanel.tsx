@@ -1494,12 +1494,6 @@ export function AiPanel({
           </div>
         )}
         {attachNotice && <div className="ai-attach-notice">{attachNotice}</div>}
-        <ChatModelPicker
-          loadSettings={loadChatModelSettings}
-          onChange={setRendererChatModel}
-          initialId={getRendererChatModel()}
-          disabled={busy}
-        />
         <AiComposer
           queueStrip={
             <AiQueueStrip
@@ -1543,6 +1537,12 @@ export function AiPanel({
               >
                 <img src={attachIcon} alt="" aria-hidden />
               </button>
+              <ChatModelPicker
+                loadSettings={loadChatModelSettings}
+                onChange={setRendererChatModel}
+                initialId={getRendererChatModel()}
+                disabled={busy}
+              />
             </>
           }
         />

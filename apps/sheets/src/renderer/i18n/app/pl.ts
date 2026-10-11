@@ -655,8 +655,8 @@ export const pl = {
     'Formuły przeliczono na podstawie Twoich zmian — {count} zachowało wartości z pamięci podręcznej (funkcje nieobsługiwane przez silnik zastępczy).',
   appRecalcDone:
     'Formuły przeliczono na podstawie Twoich zmian ({count} komórek, silnik zastępczy).',
-  appIndexing: 'Indeksowanie {name}: {rows} wierszy gotowych.',
-  appStreamingRows: 'Ładowanie strumieniowe {name}: dostępnych {rows} wierszy.',
+  appLoadingRows: 'Ładowanie {name}: {rows} wierszy.',
+  appWorkbookReady: 'Gotowe — {name}: dostępnych {rows} wierszy.',
   appLoadRangeFailed: 'Nie można załadować widocznego zakresu.',
   appFullyLoaded:
     'Skoroszyt w pełni załadowany — formuły przeliczają się na żywo, wiersze/kolumny można edytować.',

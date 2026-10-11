@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode, type Ref } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type Ref } from 'react'
+import { AiPanelSideButton } from '@genoffice/ui'
+import { useI18n } from '../locale'
 import {
   PanelActivityContext,
   PanelVisibility,
@@ -28,9 +30,16 @@ interface Props {
 
 export function WorkspaceControlPanel(props: Props) {
   const { s, dir } = useSidebarText()
+  const { lang } = useI18n()
   const visible = props.visible !== false
   const [expanded, setExpanded] = useState(false)
-  const [headerTarget, setHeaderTarget] = useState<HTMLDivElement | null>(null)
+  const [newChatTarget, setNewChatTarget] = useState<HTMLDivElement | null>(null)
+  const [optionsTarget, setOptionsTarget] = useState<HTMLDivElement | null>(null)
+  const headerTarget = useMemo(
+    () =>
+      newChatTarget && optionsTarget ? { newChat: newChatTarget, options: optionsTarget } : null,
+    [newChatTarget, optionsTarget],
+  )
   const drawer = !!props.drawer || expanded
   const [activities, setActivities] = useState<Record<string, PanelActivity>>({})
   const publish = useCallback((_tab: unknown, source: string, activity: PanelActivity | null) => {
@@ -125,6 +134,7 @@ export function WorkspaceControlPanel(props: Props) {
           <div className="nawa-workspace-title">
             <strong>{s('Chat')}</strong>
           </div>
+          <div ref={setNewChatTarget} className="nawa-workspace-chat-actions" />
           <div className="nawa-workspace-index">
             <PanelVisibility.Provider value={visible}>
               <IndexSelectedButton
@@ -136,7 +146,12 @@ export function WorkspaceControlPanel(props: Props) {
               />
             </PanelVisibility.Provider>
           </div>
-          <div ref={setHeaderTarget} className="nawa-workspace-chat-actions" />
+          <div ref={setOptionsTarget} className="nawa-workspace-chat-options" />
+          <AiPanelSideButton
+            lang={lang}
+            className="ex-tool"
+            onMove={(side) => window.aiOffice.setAiPanelPrefs({ side })}
+          />
           <button
             type="button"
             className="ex-tool nawa-workspace-settings"

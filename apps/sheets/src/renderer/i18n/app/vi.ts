@@ -625,8 +625,8 @@ export const vi = {
     'Các công thức được tính toán lại từ các chỉnh sửa của bạn — {count} công thức giữ lại giá trị đệm (các hàm mà công cụ dự phòng còn thiếu).',
   appRecalcDone:
     'Các công thức đã được tính toán lại từ các chỉnh sửa của bạn ({count} ô, công cụ dự phòng).',
-  appIndexing: 'Đang lập chỉ mục {name}: {rows} hàng đã sẵn sàng.',
-  appStreamingRows: 'Đang tải theo luồng {name}: {rows} hàng khả dụng.',
+  appLoadingRows: 'Đang tải {name}: {rows} hàng.',
+  appWorkbookReady: 'Sẵn sàng — {name}: {rows} hàng khả dụng.',
   appLoadRangeFailed: 'Không thể tải vùng hiển thị.',
   appFullyLoaded:
     'Đã tải đầy đủ sổ làm việc — công thức tính toán trực tiếp, có thể chỉnh sửa hàng/cột.',

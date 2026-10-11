@@ -69,7 +69,9 @@ test.describe('sheets: opening a .tsv', () => {
 
       const shell = await waitForPageWithUrl(launched.app, 'shell/out')
       await expect(shell.locator('.tab-title').filter({ hasText: 'uniprot.tsv' })).toBeVisible()
-      await expect(sheets.locator('.workbook-status')).not.toContainText('Error invoking')
+      await expect(sheets.locator('.ribbon-tabs [role="status"]')).toHaveCount(0)
+      await expect(sheets.locator('.status-msg')).toHaveCount(1)
+      await expect(sheets.locator('.status-msg')).not.toContainText('Error invoking')
       await expect(sheets.locator('.status-bar')).not.toContainText('Error invoking')
 
       await sheets.screenshot({ path: screenshotPath('sheets-open-tsv') })

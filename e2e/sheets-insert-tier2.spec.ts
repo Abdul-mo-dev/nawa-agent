@@ -197,7 +197,7 @@ test.describe('sheets: Insert → Timeline', () => {
       await sheets.screenshot({ path: screenshotPath('timeline-panel') })
 
       await panel.locator('.timeline-month').first().click()
-      await expect(sheets.locator('.workbook-status')).toContainText('applied', {
+      await expect(sheets.locator('.status-msg')).toContainText('applied', {
         timeout: 15_000,
       })
       await expect(panel.locator('.timeline-month.selected')).toHaveCount(1)
@@ -205,7 +205,7 @@ test.describe('sheets: Insert → Timeline', () => {
 
       // Clearing restores all members.
       await panel.locator('.slicer-clear').click()
-      await expect(sheets.locator('.workbook-status')).toContainText('cleared', {
+      await expect(sheets.locator('.status-msg')).toContainText('cleared', {
         timeout: 15_000,
       })
     } finally {

@@ -39,6 +39,7 @@ export function Splitter({
   min,
   max,
   reverse = false,
+  className,
   onChange,
 }: {
   label: string
@@ -46,6 +47,7 @@ export function Splitter({
   min: number
   max: number
   reverse?: boolean
+  className?: string
   onChange: (value: number) => void
 }) {
   const drag = useRef<{ x: number; value: number } | null>(null)
@@ -58,7 +60,7 @@ export function Splitter({
       aria-valuemax={max}
       aria-valuenow={Math.round(value)}
       tabIndex={0}
-      className="ex-splitter"
+      className={`ex-splitter${className ? ` ${className}` : ''}`}
       onPointerDown={(e) => {
         drag.current = { x: e.clientX, value }
         e.currentTarget.setPointerCapture(e.pointerId)

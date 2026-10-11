@@ -603,8 +603,8 @@ export const th = {
   appRecalcPartial:
     'คำนวณสูตรใหม่ตามการแก้ไขของคุณแล้ว — {count} รายการคงค่าแคชไว้ (ฟังก์ชันที่เอนจินสำรองไม่มี)',
   appRecalcDone: 'คำนวณสูตรใหม่ตามการแก้ไขของคุณแล้ว ({count} เซลล์ ใช้เอนจินสำรอง)',
-  appIndexing: 'กำลังทำดัชนี {name}: พร้อมแล้ว {rows} แถว',
-  appStreamingRows: 'กำลังโหลด {name} แบบสตรีม: ใช้ได้ {rows} แถว',
+  appLoadingRows: 'กำลังโหลด {name}: {rows} แถว',
+  appWorkbookReady: 'พร้อม — {name}: ใช้ได้ {rows} แถว',
   appLoadRangeFailed: 'โหลดช่วงที่มองเห็นไม่ได้',
   appFullyLoaded: 'เวิร์กบุ๊กโหลดเต็มแล้ว — สูตรคำนวณใหม่แบบสด แก้ไขแถว/คอลัมน์ได้',
   appRangeMustBeVector: '{range} ต้องเป็นเซลล์แถวเดียวหรือคอลัมน์เดียว',

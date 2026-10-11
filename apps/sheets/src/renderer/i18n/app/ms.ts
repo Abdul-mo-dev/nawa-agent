@@ -632,8 +632,8 @@ export const ms = {
   appRecalcPartial:
     'Formula dikira semula daripada suntingan anda — {count} mengekalkan nilai cache (fungsi yang tiada pada enjin sandaran).',
   appRecalcDone: 'Formula dikira semula daripada suntingan anda ({count} sel, enjin sandaran).',
-  appIndexing: 'Mengindeks {name}: {rows} baris sedia.',
-  appStreamingRows: 'Menstrim {name}: {rows} baris tersedia.',
+  appLoadingRows: 'Memuatkan {name}: {rows} baris.',
+  appWorkbookReady: 'Sedia — {name}: {rows} baris tersedia.',
   appLoadRangeFailed: 'Tidak dapat memuatkan julat yang kelihatan.',
   appFullyLoaded:
     'Buku kerja dimuatkan sepenuhnya — formula dikira semula secara langsung, baris/lajur boleh diedit.',

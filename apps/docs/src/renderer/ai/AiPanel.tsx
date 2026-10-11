@@ -1560,12 +1560,6 @@ export function AiPanel({
           onSend={sendQueue}
           onFocus={(qid) => onQueueFocus?.(qid)}
         />
-        <ChatModelPicker
-          loadSettings={loadChatModelSettings}
-          onChange={setRendererChatModel}
-          initialId={getRendererChatModel()}
-          disabled={busy}
-        />
         <AiComposer
           queueStrip={
             <AiQueueStrip
@@ -1719,6 +1713,12 @@ export function AiPanel({
                 <span className="ai-track-dot" aria-hidden />
                 {t('aiTrackChanges')}
               </button>
+              <ChatModelPicker
+                loadSettings={loadChatModelSettings}
+                onChange={setRendererChatModel}
+                initialId={getRendererChatModel()}
+                disabled={busy}
+              />
             </>
           }
         />

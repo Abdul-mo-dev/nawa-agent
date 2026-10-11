@@ -730,12 +730,6 @@ export function AiChatPanel({
 
       <div className="ai-composer">
         {attachNotice && <div className="ai-attach-notice">{attachNotice}</div>}
-        <ChatModelPicker
-          loadSettings={loadChatModelSettings}
-          onChange={setRendererChatModel}
-          initialId={getRendererChatModel()}
-          disabled={aiBusy}
-        />
         <AiComposer
           queueStrip={
             <AiQueueStrip
@@ -877,6 +871,12 @@ export function AiChatPanel({
               >
                 <img src={attachIcon} alt="" aria-hidden />
               </button>
+              <ChatModelPicker
+                loadSettings={loadChatModelSettings}
+                onChange={setRendererChatModel}
+                initialId={getRendererChatModel()}
+                disabled={aiBusy}
+              />
             </>
           }
           textareaRef={inputRef}

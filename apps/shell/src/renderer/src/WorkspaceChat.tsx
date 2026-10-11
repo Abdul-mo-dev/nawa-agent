@@ -1479,38 +1479,47 @@ function DirectoryChat({
     }
   }
 
-  const primaryActions = (
-    <div className="nawa-chat-primary-actions">
-      <button
-        type="button"
-        className="ws-chat-close"
-        disabled={transitioning}
-        onClick={onNew}
-        title={s('New chat')}
-      >
-        {s('New chat')}
-      </button>
-      <button
-        type="button"
-        className={headerTarget ? 'ex-tool' : 'ws-chat-close'}
-        aria-label={s('More chat options')}
-        title={s('More chat options')}
-        aria-haspopup="dialog"
-        onClick={() => setOptionsOpen(true)}
-      >
-        {headerTarget ? <Icon name="more" size={18} /> : s('More')}
-      </button>
-    </div>
+  const newChatAction = (
+    <button
+      type="button"
+      className="ws-chat-close"
+      disabled={transitioning}
+      onClick={onNew}
+      title={s('New chat')}
+    >
+      {s('New chat')}
+    </button>
+  )
+  const optionsAction = (
+    <button
+      type="button"
+      className={headerTarget ? 'ex-tool' : 'ws-chat-close'}
+      aria-label={s('More chat options')}
+      title={s('More chat options')}
+      aria-haspopup="dialog"
+      onClick={() => setOptionsOpen(true)}
+    >
+      {headerTarget ? <Icon name="more" size={18} /> : s('More')}
+    </button>
   )
   return (
     <section
       className="ws-chat workspace-chat-main"
       aria-label={s('Chat with {folder}', { folder: folderName })}
     >
-      <header className="ws-chat-head">
-        <div className="nawa-conversation-picker">{historyDropdown}</div>
-        {headerTarget ? createPortal(primaryActions, headerTarget) : primaryActions}
-      </header>
+      {headerTarget ? (
+        <>
+          {createPortal(newChatAction, headerTarget.newChat)}
+          {createPortal(optionsAction, headerTarget.options)}
+        </>
+      ) : (
+        <header className="ws-chat-head">
+          <div className="nawa-chat-primary-actions">
+            {newChatAction}
+            {optionsAction}
+          </div>
+        </header>
+      )}
       {historyPanel}
       <PanelDialog
         open={optionsOpen}
@@ -1708,19 +1717,26 @@ function DirectoryChat({
             {notice}
           </div>
         )}
-        <ChatModelPicker
-          translate={s}
-          emptyHint={s('Add saved models in Models.')}
-          loadSettings={loadSettings}
-          initialId={modelId}
-          onChange={(id) => {
-            modelRef.current = id
-            buffer.edit((record) => (record.modelId === id ? record : { ...record, modelId: id }))
-          }}
-          disabled={busy || transitioning}
-        />
         <fieldset className="ws-chat-composer" disabled={transitioning}>
           <AiComposer
+            footerStart={
+              <div className="nawa-composer-controls">
+                <div className="nawa-conversation-picker">{historyDropdown}</div>
+                <ChatModelPicker
+                  translate={s}
+                  emptyHint={s('Add saved models in Models.')}
+                  loadSettings={loadSettings}
+                  initialId={modelId}
+                  onChange={(id) => {
+                    modelRef.current = id
+                    buffer.edit((record) =>
+                      record.modelId === id ? record : { ...record, modelId: id },
+                    )
+                  }}
+                  disabled={busy || transitioning}
+                />
+              </div>
+            }
             value={input}
             busy={busy}
             textareaRef={inputRef}

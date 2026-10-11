@@ -345,6 +345,8 @@ export interface HomeApi extends WorkspaceApi {
   getAiPanelPrefs(): Promise<AiPanelPrefs>
   /** merge + persist; broadcasts 'app:ai-panel-prefs-changed' to all web contents */
   setAiPanelPrefs(patch: Partial<AiPanelPrefs>): Promise<AiPanelPrefs>
+  /** subscribe to changes from settings and any open editor */
+  onAiPanelPrefsChanged(handler: (prefs: AiPanelPrefs) => void): () => void
   /** effective default save folder for new/untitled files (configured in userData/app-settings.json, falls back to <Documents>/Nawa) */
   getDefaultSaveDir(): Promise<string>
   /** directory picker to change the default save folder; resolves to the new folder, or null when canceled or the pick was unusable */

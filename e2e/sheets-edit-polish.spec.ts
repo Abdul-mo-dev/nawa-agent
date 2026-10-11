@@ -137,7 +137,7 @@ test.describe('sheets: Data → From Text/CSV', () => {
       await sheets.getByRole('button', { name: 'From Text/CSV' }).click()
       await (await chooser).setFiles(csvPath)
 
-      await expect(sheets.locator('.workbook-status')).toContainText('A1', { timeout: 15_000 })
+      await expect(sheets.locator('.status-msg')).toContainText('A1', { timeout: 15_000 })
       await launched.app.evaluate(({ webContents }) => {
         const wc = webContents.getAllWebContents().find((w) => w.getURL().includes('://sheets/'))
         wc?.send('menu:action', 'save')
@@ -170,11 +170,11 @@ test.describe('sheets: comment navigation', () => {
 
       await sheets.getByRole('button', { name: 'Review', exact: true }).click()
       await sheets.getByRole('button', { name: 'Previous' }).click()
-      await expect(sheets.locator('.workbook-status')).toContainText('No comments', {
+      await expect(sheets.locator('.status-msg')).toContainText('No comments', {
         timeout: 10_000,
       })
       await sheets.getByRole('button', { name: 'Next' }).click()
-      await expect(sheets.locator('.workbook-status')).toContainText('No comments', {
+      await expect(sheets.locator('.status-msg')).toContainText('No comments', {
         timeout: 10_000,
       })
     } finally {

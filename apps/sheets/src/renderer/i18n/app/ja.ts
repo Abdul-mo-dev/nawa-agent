@@ -667,8 +667,8 @@ export const ja = {
   appRecalcPartial:
     '編集に合わせて数式を再計算しました — {count} 個はキャッシュ値を保持しています（フォールバックエンジン未対応の関数）。',
   appRecalcDone: '編集に合わせて数式を再計算しました（{count} 個のセル、エンジンフォールバック）。',
-  appIndexing: '{name} のインデックスを作成中：{rows} 行が準備できました。',
-  appStreamingRows: '{name} をストリーミング読み込み中：{rows} 行が利用可能です。',
+  appLoadingRows: '{name} を読み込み中：{rows} 行。',
+  appWorkbookReady: '準備完了 — {name}：{rows} 行が利用可能です。',
   appLoadRangeFailed: '表示範囲を読み込めません。',
   appFullyLoaded: 'ブックを完全に読み込みました — 数式はライブで再計算され、行列を編集できます。',
   appRangeMustBeVector: '{range} は 1 行または 1 列のセルである必要があります。',

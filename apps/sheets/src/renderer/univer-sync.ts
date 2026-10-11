@@ -1625,7 +1625,7 @@ export async function readCopySourceDirect(
     }
     if (rows > chunkRows) {
       setMessage(
-        t('appStreamingRows', {
+        t('appLoadingRows', {
           name: state.file.name,
           rows: `${(startRow - bounds.startRow).toLocaleString()} / ${rows.toLocaleString()}`,
         }),
@@ -3322,7 +3322,7 @@ async function loadRange(
         (result.indexedThroughRow === null || result.indexedThroughRow < mapped.fileEndRow)
       ) {
         setMessage(
-          t('appIndexing', { name: sheet?.name ?? sheetId, rows: indexedRows.toLocaleString() }),
+          t('appLoadingRows', { name: state.file.name, rows: indexedRows.toLocaleString() }),
         )
       }
       const nextStalls =
@@ -3358,7 +3358,7 @@ async function loadRange(
       }
     } else if (isActiveSheet(runtime, sheetId)) {
       setMessage(
-        t('appStreamingRows', {
+        t('appWorkbookReady', {
           name: state.file.name,
           rows: sheet?.rowCount.toLocaleString() ?? '?',
         }),
@@ -3479,7 +3479,7 @@ export async function applyRangeInLoadedChunks(
       }
       if (totalRows > chunkRows && isActiveSheet(runtime, sheetId)) {
         setMessage(
-          t('appStreamingRows', {
+          t('appLoadingRows', {
             name: state.file.name,
             rows: `${(startRow - bounds.startRow).toLocaleString()} / ${totalRows.toLocaleString()}`,
           }),

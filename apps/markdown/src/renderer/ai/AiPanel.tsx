@@ -973,13 +973,15 @@ export function AiPanel({
             onFocus={(qid) => onQueueFocus?.(qid)}
           />
         )}
-        <ChatModelPicker
-          loadSettings={loadChatModelSettings}
-          onChange={setRendererChatModel}
-          initialId={getRendererChatModel()}
-          disabled={busy}
-        />
         <AiComposer
+          footerStart={
+            <ChatModelPicker
+              loadSettings={loadChatModelSettings}
+              onChange={setRendererChatModel}
+              initialId={getRendererChatModel()}
+              disabled={busy}
+            />
+          }
           queueStrip={
             <AiQueueStrip
               items={msgQueue.queued}

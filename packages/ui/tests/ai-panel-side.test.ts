@@ -13,6 +13,13 @@ afterEach(() => {
 })
 
 describe('AI panel side in the renderer', () => {
+  it('applies the default side on first paint even when preferences have not changed', () => {
+    applyAiPanelPrefs({})
+    delete document.documentElement.dataset.aiPanelSide
+    applyAiPanelPrefs({})
+    expect(document.documentElement.dataset.aiPanelSide).toBe('left')
+  })
+
   it('moves the layout on a side-only update and restores the default', () => {
     applyAiPanelPrefs({ side: 'right' })
     expect(document.documentElement.dataset.aiPanelSide).toBe('right')

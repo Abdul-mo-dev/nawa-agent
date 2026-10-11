@@ -601,8 +601,8 @@ export const ar = {
   appRecalcPartial:
     'أُعيد حساب الصيغ وفق تعديلاتك — احتفظ {count} منها بالقيم المخزنة مؤقتًا (دوال لا يدعمها المحرك الاحتياطي).',
   appRecalcDone: 'أُعيد حساب الصيغ وفق تعديلاتك ({count} خلية، المحرك الاحتياطي).',
-  appIndexing: 'جارٍ فهرسة {name}: {rows} صفًا جاهزًا.',
-  appStreamingRows: 'جارٍ تحميل {name} بالبث: {rows} صفًا متاحًا.',
+  appLoadingRows: 'جارٍ تحميل {name}: {rows} صفًا.',
+  appWorkbookReady: 'جاهز — {name}: {rows} صفًا متاحًا.',
   appLoadRangeFailed: 'يتعذر تحميل النطاق المرئي.',
   appFullyLoaded:
     'حُمّل المصنف بالكامل — تُعاد الصيغ للحساب مباشرة والصفوف والأعمدة قابلة للتحرير.',

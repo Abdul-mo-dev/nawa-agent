@@ -669,8 +669,8 @@ export const pt = {
     'Fórmulas recalculadas com base nas suas edições — {count} mantiveram valores em cache (funções ausentes no mecanismo de fallback).',
   appRecalcDone:
     'Fórmulas recalculadas com base nas suas edições ({count} células, mecanismo de fallback).',
-  appIndexing: 'Indexando {name}: {rows} linhas prontas.',
-  appStreamingRows: 'Carregando {name} por streaming: {rows} linhas disponíveis.',
+  appLoadingRows: 'Carregando {name}: {rows} linhas.',
+  appWorkbookReady: 'Pronto — {name}: {rows} linhas disponíveis.',
   appLoadRangeFailed: 'Não foi possível carregar o intervalo visível.',
   appFullyLoaded:
     'Pasta de trabalho totalmente carregada — fórmulas recalculam ao vivo, linhas/colunas editáveis.',
