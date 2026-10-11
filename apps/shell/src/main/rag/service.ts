@@ -26,9 +26,17 @@ import {
 import { validateSettings, credentialScope, profileId } from './config'
 import { MyAgentRag } from './myagent'
 import { EmbeddingClient } from './embedding'
+import { confirmedMissing } from '../prepared-files/source'
 interface Options {
   roots(): Promise<string[]>
   isHomeSender(sender: WebContents): boolean
+  onIndexed?(
+    folder: string,
+    sources: { path: string; hash: string }[],
+    profile: string,
+  ): Promise<void>
+  onCleared?(folder: string): Promise<void>
+  onCancelled?(): void
 }
 interface Saved {
   settings: RagSettings
@@ -220,8 +228,12 @@ export class RagService {
       job.roots = roots
       if (job.folder) await authorizePath(roots, job.folder)
       if (job.paths)
-        for (const path of job.paths)
-          await authorizePath(roots, job.action === 'statuses' ? dirname(path) : path)
+        for (const path of job.paths) {
+          if (job.action === 'prune') {
+            if (!(await confirmedMissing(roots, path)))
+              throw new Error('Source deletion is not confirmed.')
+          } else await authorizePath(roots, job.action === 'statuses' ? dirname(path) : path)
+        }
       const worker = this.getWorker(slot)
       const value = await new Promise<unknown>((resolve, reject) => {
         let ended = false,
@@ -339,7 +351,8 @@ export class RagService {
   }
   async models(raw: unknown, replacement?: string): Promise<string[]> {
     const settings = validateSettings({ ...(raw as RagSettings), enabled: false })
-    if (settings.backend !== 'local') throw new Error('Model discovery requires a llama.cpp endpoint.')
+    if (settings.backend !== 'local')
+      throw new Error('Model discovery requires a llama.cpp endpoint.')
     return new EmbeddingClient(settings, await this.key(settings, replacement)).models()
   }
   async test(raw: unknown, replacement?: string): Promise<{ dimensions: number; message: string }> {
@@ -360,6 +373,7 @@ export class RagService {
     folder: string,
     paths: string[],
     consent: boolean,
+    expectedProfile?: string,
   ): Promise<RagProgress> {
     validAbsolute(folder)
     if (!Array.isArray(paths) || !paths.length || paths.length > 256)
@@ -369,7 +383,7 @@ export class RagService {
       if (!within(folder, path))
         throw new Error('Selected files must be inside the opened directory.')
     }
-    return this.index(owner, folder, false, consent, [...paths])
+    return this.index(owner, folder, false, consent, [...paths], expectedProfile)
   }
   async index(
     owner: number,
@@ -377,6 +391,7 @@ export class RagService {
     recursive: boolean,
     consent: boolean,
     paths?: string[],
+    expectedProfile?: string,
   ): Promise<RagProgress> {
     if (!consent)
       throw new Error(
@@ -385,6 +400,8 @@ export class RagService {
     if (this.indexing || this.settingsBusy)
       throw new Error('An indexing or settings operation is already running.')
     const saved = await this.load()
+    if (expectedProfile !== undefined && profileId(saved.settings) !== expectedProfile)
+      throw new Error('Embedding settings changed. Click Index to refresh with the new settings.')
     if (!saved.settings.enabled || (saved.settings.backend === 'local' && !saved.settings.model))
       throw new Error('Configure and enable the RAG backend in Search settings first.')
     await authorizePath(await this.options.roots(), folder)
@@ -445,8 +462,17 @@ export class RagService {
     this.indexing = { owner, id, abort, done }
     void done
       .then(
-        (result) => {
+        async (result) => {
           this.state = result as RagProgress
+          if (owner !== 0 && paths && this.options.onIndexed && !abort.signal.aborted) {
+            // Remember only successful snapshots, not failed/unavailable selected files.
+            const sources = (await this.statuses(paths).catch(() => []))
+              .filter((file) => file.status === 'embedded' && file.sourceHash)
+              .map((file) => ({ path: file.path, hash: file.sourceHash! }))
+            await this.options
+              .onIndexed(folder, sources, profileId(saved.settings))
+              .catch(() => undefined)
+          }
         },
         async (e) => {
           this.state = {
@@ -475,8 +501,9 @@ export class RagService {
     return { ...this.state }
   }
   async cancel(owner: number): Promise<void> {
-    if (this.indexing && this.indexing.owner !== owner)
+    if (this.indexing && this.indexing.owner !== owner && this.indexing.owner !== 0)
       throw new Error('The index job belongs to another window.')
+    this.options.onCancelled?.()
     this.indexing?.abort.abort()
     await this.indexing?.done.catch(() => undefined)
   }
@@ -503,6 +530,7 @@ export class RagService {
     const settings = (await this.load()).settings
     if (settings.backend === 'myagent') {
       await this.myAgent().clear(settings, folder)
+      await this.options.onCleared?.(folder)
       this.changed()
       return
     }
@@ -513,6 +541,49 @@ export class RagService {
       apiKey: '',
       folder,
     })
+    await this.options.onCleared?.(folder)
+    this.changed()
+  }
+  /** Background work reuses consent only for the same embedding connection/profile. */
+  async refreshPrepared(
+    folder: string,
+    path: string,
+    profile: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    signal.throwIfAborted()
+    const saved = await this.load()
+    if (profileId(saved.settings) !== profile)
+      throw new Error('Embedding settings changed. Click Index to refresh with the new settings.')
+    await this.indexSelected(0, folder, [path], true, profile)
+    const indexing = this.indexing
+    if (!indexing) throw new Error('Background indexing did not start.')
+    const abort = () => indexing.abort.abort()
+    signal.addEventListener('abort', abort, { once: true })
+    try {
+      if (signal.aborted) abort()
+      const result = (await indexing.done) as RagProgress
+      signal.throwIfAborted()
+      if (result.failed || result.incomplete)
+        throw new Error('Background indexing failed; its verified snapshot was not refreshed.')
+    } finally {
+      signal.removeEventListener('abort', abort)
+    }
+  }
+  async removePrepared(path: string, signal: AbortSignal): Promise<void> {
+    if (this.indexing) throw new Error('Wait for active indexing before pruning search data.')
+    const { settings } = await this.load()
+    if (settings.backend === 'myagent') {
+      signal.throwIfAborted()
+      if (!(await confirmedMissing(await this.options.roots(), path)))
+        throw new Error('Source deletion is not confirmed.')
+      await this.myAgent().forgetFile(settings, path)
+    } else
+      await this.request(
+        this.reader,
+        { action: 'prune', roots: [], settings, apiKey: '', paths: [path] },
+        signal,
+      )
     this.changed()
   }
   async searchSelected(

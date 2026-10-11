@@ -139,6 +139,10 @@ On a later question, Nawa can reuse this answer's evidence after checking it aga
 
 Index is a separate preparation action. It does not submit a question or call the chat model.
 
+Successfully prepared selected files are enrolled in background refresh. Nawa persists only those exact paths and the embedding profile used for their search index. Directory notifications trigger checks, with a 30-second polling fallback. Saves must settle for at least 1.5 seconds before refresh; unchanged content is reused. Tables and search refresh independently, without chat-model calls. Compatible table refresh retains reviewed row meaning, units, keys, types and exclusions for full validation. Increasing decimal precision does not discard exact values. Changed column bindings, previously unresolved policies, formula caches and ambiguous populations require a decision; automatic approval still follows the saved mode. Files added beside an indexed file are not automatically enrolled, and changing the embedding connection/profile requires an explicit Index action before background search may use it.
+
+Changed or unavailable sources cannot supply current evidence. Source hashes and table generations are checked again when analysis is run and before its answer is accepted. Cache cleanup requires two missing-file observations at least five seconds apart and a successful listing of an authorized ancestor; a disconnected root or access error retains the cache. A file recreated at an enrolled path can be refreshed again. Nawa never deletes shared MyAgent server documents during this local cleanup. Clear removes that engine's background enrollment, and Stop pauses background work for that engine until an explicit selected-file Index/refresh action. Existing chat messages and exported SQLite snapshots remain historical.
+
 For the selection captured when Index is clicked, Nawa starts two independent operations:
 
 | Operation     | What it prepares                                                                      | Where its status appears             |

@@ -61,6 +61,7 @@ vi.mock('../src/main/rag/myagent', () => ({
   },
 }))
 import { RagService } from '../src/main/rag/service'
+import { profileId } from '../src/main/rag/config'
 const workspace = join(tmpdir(), 'nawa-rag-service-fixture', 'Documents')
 const selectedFile = join(workspace, 'file.txt')
 const outsideFile = join(tmpdir(), 'nawa-rag-service-fixture', 'Elsewhere', 'file.txt')
@@ -70,6 +71,68 @@ const saved = (backend: 'local' | 'myagent' = 'myagent') => ({
   encryptedKey: Buffer.from('private-service-key').toString('base64'),
 })
 const service = () => new RagService({ roots: async () => [workspace], isHomeSender: () => true })
+it('enrolls successful explicit snapshots and does not widen or re-enroll background refresh', async () => {
+  const onIndexed = vi.fn(async () => {})
+  const s = new RagService({ roots: async () => [workspace], isHomeSender: () => true, onIndexed })
+  mocks.statuses.mockResolvedValue([
+    { path: selectedFile, status: 'embedded', sourceHash: 'a'.repeat(64) },
+  ])
+  await s.indexSelected(1, workspace, [selectedFile], true)
+  await vi.waitFor(() =>
+    expect(onIndexed).toHaveBeenCalledExactlyOnceWith(
+      workspace,
+      [{ path: selectedFile, hash: 'a'.repeat(64) }],
+      profileId(settings),
+    ),
+  )
+  await vi.waitFor(() => expect(s.progress().running).toBe(false))
+  await s.refreshPrepared(
+    workspace,
+    selectedFile,
+    profileId(settings),
+    new AbortController().signal,
+  )
+  expect(onIndexed).toHaveBeenCalledOnce()
+  await expect(
+    s.refreshPrepared(workspace, selectedFile, 'another-profile', new AbortController().signal),
+  ).rejects.toThrow('settings changed')
+  expect(mocks.indexSelected).toHaveBeenCalledTimes(2)
+  s.stop()
+})
+it('allows the workspace Stop control to cancel background work and reports incomplete refresh', async () => {
+  const onCancelled = vi.fn()
+  const s = new RagService({
+    roots: async () => [workspace],
+    isHomeSender: () => true,
+    onCancelled,
+  })
+  mocks.indexSelected.mockResolvedValueOnce({ running: false, failed: 1 })
+  await expect(
+    s.refreshPrepared(workspace, selectedFile, profileId(settings), new AbortController().signal),
+  ).rejects.toThrow('failed')
+  await s.cancel(1)
+  expect(onCancelled).toHaveBeenCalledOnce()
+  s.stop()
+})
+it('does not enroll or resume a selected indexing job after the user stops it', async () => {
+  const onIndexed = vi.fn(async () => {})
+  const s = new RagService({ roots: async () => [workspace], isHomeSender: () => true, onIndexed })
+  mocks.statuses.mockResolvedValue([
+    { path: selectedFile, status: 'embedded', sourceHash: 'a'.repeat(64) },
+  ])
+  mocks.indexSelected.mockImplementationOnce(
+    async (_settings, _key, _folder, _paths, signal: AbortSignal) =>
+      new Promise((resolve) =>
+        signal.addEventListener('abort', () => resolve({ running: false, incomplete: true }), {
+          once: true,
+        }),
+      ),
+  )
+  await s.indexSelected(7, workspace, [selectedFile], true)
+  await s.cancel(7)
+  expect(onIndexed).not.toHaveBeenCalled()
+  s.stop()
+})
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.readFile.mockResolvedValue(JSON.stringify(saved()))

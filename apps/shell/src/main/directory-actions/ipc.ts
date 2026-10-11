@@ -2,6 +2,7 @@ import { discoverLinkedImages, stageLinkedImages, finalizeWorkflowAssets } from 
 import { DirectorySearchService } from '../directory-file-index/service'
 import { registerRagIpc } from '../rag/service'
 import { registerAnalyticsIpc } from '../analytics/service'
+import { PreparedFileRefresh } from '../prepared-files/refresh'
 import { registerMyAgentSettingsIpc } from '../myagent/service'
 import type { AnalyticsReadAction } from '../../shared/analytics-api'
 import { FILE_SEARCH_CHANNEL } from '../../shared/file-search-api'
@@ -31,12 +32,38 @@ export function registerDirectoryActionsIpc(options: {
     stateDirectory: app.getPath('userData'),
     roots: options.roots,
   })
-  const rag = registerRagIpc(options)
+  const rag = registerRagIpc({
+    ...options,
+    onIndexed: (folder, sources, profile) => refresh.remember('search', folder, sources, profile),
+    onCleared: (folder) => refresh.forget('search', folder),
+    onCancelled: () => refresh.pause('search'),
+  })
   registerMyAgentSettingsIpc({
     isHomeSender: options.isHomeSender,
     connection: () => rag.myAgentConnection(),
   })
-  const analytics = registerAnalyticsIpc(options)
+  const analytics = registerAnalyticsIpc({
+    ...options,
+    onPrepared: (folder, sources) => refresh.remember('analysis', folder, sources),
+    onCleared: (folder) => refresh.forget('analysis', folder),
+    onCancelled: () => refresh.pause('analysis'),
+  })
+  const refresh = new PreparedFileRefresh({
+    stateDirectory: app.getPath('userData'),
+    roots: options.roots,
+    refresh: async (kind, folder, path, profile, signal) => {
+      if (kind === 'analysis') {
+        const result = await analytics.prepareSelected(0, folder, [path], signal)
+        if (result.failedFiles) throw new Error('Background table preparation failed.')
+      } else await rag.refreshPrepared(folder, path, profile, signal)
+    },
+    remove: (kind, path, signal) =>
+      kind === 'analysis'
+        ? analytics.removePrepared(path, signal)
+        : rag.removePrepared(path, signal),
+    changed: (directory) => options.changed(directory ? [directory] : []),
+  })
+  refresh.start()
   let manager: DirectoryActionManager | undefined
   const owners = new Set<number>()
   const getManager = () =>
@@ -235,6 +262,7 @@ export function registerDirectoryActionsIpc(options: {
   }, 60000)
   expiry.unref()
   app.once('before-quit', () => {
+    refresh.stop()
     search.stop()
     clearInterval(expiry)
     for (const owner of owners) void manager?.cancelOwner(owner).catch(console.error)

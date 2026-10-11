@@ -64,6 +64,9 @@ export function RagBadge({
     state = 'failed'
     label = job?.status === 'canceled' ? 'Indexing stopped' : 'Indexing failed'
     if (job?.error || value?.error) details.push(job?.error || value!.error!)
+  } else if (value?.status === 'unavailable') {
+    state = 'unavailable'
+    label = 'Source file unavailable'
   } else if (value?.status === 'stale') {
     state = 'attention'
     label = 'File changed — index needs updating'

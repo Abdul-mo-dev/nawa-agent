@@ -3,7 +3,12 @@ import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WebContents } from 'electron'
 
-const mocks = vi.hoisted(() => ({ readFile: vi.fn(), readFileSync: vi.fn(), authorizePath: vi.fn(), autoReady: true }))
+const mocks = vi.hoisted(() => ({
+  readFile: vi.fn(),
+  readFileSync: vi.fn(),
+  authorizePath: vi.fn(),
+  autoReady: true,
+}))
 vi.mock('electron', () => ({ app: { getPath: () => 'analytics-test' }, ipcMain: {} }))
 vi.mock('node:fs', () => ({ readFileSync: mocks.readFileSync }))
 vi.mock('node:fs/promises', () => ({
@@ -13,7 +18,10 @@ vi.mock('node:fs/promises', () => ({
   rename: vi.fn(),
   rm: vi.fn().mockResolvedValue(undefined),
 }))
-vi.mock('../src/main/directory-actions/file-safety', async (importOriginal) => ({ ...await importOriginal<object>(), authorizePath: mocks.authorizePath }))
+vi.mock('../src/main/directory-actions/file-safety', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  authorizePath: mocks.authorizePath,
+}))
 vi.mock('../src/main/analytics/worker?modulePath', () => ({ default: 'analytics-worker.js' }))
 vi.mock('node:worker_threads', () => ({
   Worker: class TestWorker extends EventEmitter {
@@ -23,7 +31,17 @@ vi.mock('node:worker_threads', () => ({
     source: string
     eval: boolean
     settings: typeof DEFAULT_ANALYTICS_SETTINGS
-    constructor(source: string, options: { eval: boolean; workerData: { job: { action: string }; settings: typeof DEFAULT_ANALYTICS_SETTINGS; storeOptions: { readOnly: boolean; initialize: boolean } } }) {
+    constructor(
+      source: string,
+      options: {
+        eval: boolean
+        workerData: {
+          job: { action: string }
+          settings: typeof DEFAULT_ANALYTICS_SETTINGS
+          storeOptions: { readOnly: boolean; initialize: boolean }
+        }
+      },
+    ) {
       super()
       this.source = source
       this.eval = options.eval
@@ -47,7 +65,15 @@ import { DEFAULT_ANALYTICS_SETTINGS } from '../src/shared/analytics-api'
 const workers = () =>
   (
     Worker as unknown as {
-      instances: Array<EventEmitter & { source: string; eval: boolean; settings: typeof DEFAULT_ANALYTICS_SETTINGS; job: { action: string; paths?: string[]; indexAuthorized?: boolean; payload?: unknown }; storeOptions: { readOnly: boolean; initialize: boolean } }>
+      instances: Array<
+        EventEmitter & {
+          source: string
+          eval: boolean
+          settings: typeof DEFAULT_ANALYTICS_SETTINGS
+          job: { action: string; paths?: string[]; indexAuthorized?: boolean; payload?: unknown }
+          storeOptions: { readOnly: boolean; initialize: boolean }
+        }
+      >
     }
   ).instances
 const settle = async () => {
@@ -69,27 +95,80 @@ afterEach(() => {
 })
 
 describe('analytics worker admission', () => {
-  it.each([false, true])('prepares selected tables on Index while preserving approval mode %s and saved settings', async (automatic) => {
-    const settings = { ...DEFAULT_ANALYTICS_SETTINGS, allowAgentPreparation: automatic, allowAgentApproval: automatic }
-    await service.saveSettings(settings)
-    const folder = resolve('selected-index'), file = resolve(folder, 'sales.xlsx'), document = resolve(folder, 'notes.docx')
-    const request = service.prepareSelected(7, folder, [file, document, file])
-    await settle()
-    expect(workers()[0].job).toMatchObject({ action: 'prepare', paths: [file], indexAuthorized: true })
-    expect(workers()[0].settings).toEqual({ ...settings, allowAgentPreparation: true })
-    expect(service.progress()).toMatchObject({ running: true, folder, paths: [file] })
-    const preparation = { readyTables: automatic ? 1 : 0, draftTables: automatic ? 0 : 1 }
-    workers()[0].emit('message', { result: { value: { preparation }, sources: [] } })
-    await expect(request).resolves.toEqual(preparation)
-    expect((await service.settings()).settings).toEqual(settings)
+  it('enrolls only explicit successful prepared snapshots and preserves background approval settings', async () => {
+    const onPrepared = vi.fn(async () => {})
+    const tracked = new AnalyticsService({
+      roots: async () => [],
+      isHomeSender: () => true,
+      onPrepared,
+    })
+    const folder = resolve('background-preparation'),
+      path = resolve(folder, 'sales.csv')
+    try {
+      const first = tracked.prepareSelected(7, folder, [path])
+      await settle()
+      workers()[0].emit('message', {
+        result: {
+          value: { preparation: { readyTables: 0 } },
+          sources: [{ path, hash: 'a'.repeat(64) }],
+        },
+      })
+      await first
+      expect(onPrepared).toHaveBeenCalledExactlyOnceWith(folder, [{ path, hash: 'a'.repeat(64) }])
+      const second = tracked.prepareSelected(0, folder, [path], new AbortController().signal)
+      await settle()
+      expect(workers()[1].settings.allowAgentApproval).toBe(false)
+      workers()[1].emit('message', {
+        result: {
+          value: { preparation: { readyTables: 0 } },
+          sources: [{ path, hash: 'b'.repeat(64) }],
+        },
+      })
+      await second
+      expect(onPrepared).toHaveBeenCalledOnce()
+    } finally {
+      tracked.stop()
+    }
   })
+  it.each([false, true])(
+    'prepares selected tables on Index while preserving approval mode %s and saved settings',
+    async (automatic) => {
+      const settings = {
+        ...DEFAULT_ANALYTICS_SETTINGS,
+        allowAgentPreparation: automatic,
+        allowAgentApproval: automatic,
+      }
+      await service.saveSettings(settings)
+      const folder = resolve('selected-index'),
+        file = resolve(folder, 'sales.xlsx'),
+        document = resolve(folder, 'notes.docx')
+      const request = service.prepareSelected(7, folder, [file, document, file])
+      await settle()
+      expect(workers()[0].job).toMatchObject({
+        action: 'prepare',
+        paths: [file],
+        indexAuthorized: true,
+      })
+      expect(workers()[0].settings).toEqual({ ...settings, allowAgentPreparation: true })
+      expect(service.progress()).toMatchObject({ running: true, folder, paths: [file] })
+      const preparation = { readyTables: automatic ? 1 : 0, draftTables: automatic ? 0 : 1 }
+      workers()[0].emit('message', { result: { value: { preparation }, sources: [] } })
+      await expect(request).resolves.toEqual(preparation)
+      expect((await service.settings()).settings).toEqual(settings)
+    },
+  )
   it('validates the entire selection before preparing any table and never walks the folder', async () => {
-    const folder = resolve('selected-index'), file = resolve(folder, 'sales.xlsx')
-    await expect(service.prepareSelected(1, folder, [file, resolve('outside', 'notes.docx')])).rejects.toThrow('inside the opened directory')
+    const folder = resolve('selected-index'),
+      file = resolve(folder, 'sales.xlsx')
+    await expect(
+      service.prepareSelected(1, folder, [file, resolve('outside', 'notes.docx')]),
+    ).rejects.toThrow('inside the opened directory')
     await expect(service.prepareSelected(1, folder, [])).rejects.toThrow('at least one')
     await expect(service.prepareSelected(1, folder, Array(257).fill(file))).rejects.toThrow()
     expect(workers()).toHaveLength(0)
-    await expect(service.prepareSelected(1, folder, [resolve(folder, 'notes.docx')])).resolves.toMatchObject({ selectedFileCount: 0, readyTables: 0, failedFiles: 0 })
+    await expect(
+      service.prepareSelected(1, folder, [resolve(folder, 'notes.docx')]),
+    ).resolves.toMatchObject({ selectedFileCount: 0, readyTables: 0, failedFiles: 0 })
     expect(workers()).toHaveLength(0)
   })
   it('requires saved consent for preparation and never admits model approval or clearing', async () => {
@@ -104,16 +183,23 @@ describe('analytics worker admission', () => {
     workers()[0].emit('message', { result: { value: { approvalRequired: true }, sources: [] } })
     await expect(request).resolves.toMatchObject({ value: { approvalRequired: true } })
     for (const action of ['review', 'import', 'clear', 'prepare-export']) {
-      await expect(service.selected(1, [], action as never, {}, signal)).rejects.toThrow('user-controlled')
+      await expect(service.selected(1, [], action as never, {}, signal)).rejects.toThrow(
+        'user-controlled',
+      )
     }
   })
   it('admits the explicit UI batch as a cancellable writer without changing saved agent settings', async () => {
-    const request = service.selected(7, [], 'export-sqlite', {}, new AbortController().signal, { folder: 'workspace', reviewedDatasets: [] })
+    const request = service.selected(7, [], 'export-sqlite', {}, new AbortController().signal, {
+      folder: 'workspace',
+      reviewedDatasets: [],
+    })
     await settle()
     expect(workers()[0].job.action).toBe('export-sqlite')
     expect(workers()[0].storeOptions.readOnly).toBe(false)
     expect(service.progress().running).toBe(true)
-    await expect(service.request(7, { action: 'import' })).rejects.toThrow('Another data import/review')
+    await expect(service.request(7, { action: 'import' })).rejects.toThrow(
+      'Another data import/review',
+    )
     const rejection = expect(request).rejects.toThrow('cancelled')
     service.cancel(7)
     workers()[0].emit('message', { result: { exports: [], sources: [] } })
@@ -122,7 +208,9 @@ describe('analytics worker admission', () => {
     expect((await service.settings()).settings).toEqual(DEFAULT_ANALYTICS_SETTINGS)
   })
   it('retains the startup worker code when rebuilds remove its generated file', async () => {
-    mocks.readFileSync.mockImplementation(() => { throw Object.assign(new Error('bundle removed'), { code: 'ENOENT' }) })
+    mocks.readFileSync.mockImplementation(() => {
+      throw Object.assign(new Error('bundle removed'), { code: 'ENOENT' })
+    })
     const request = service.request(1, { action: 'statuses' })
     await settle()
     expect(workers()[0]).toMatchObject({ source: 'trusted analytics worker source', eval: true })
@@ -132,7 +220,9 @@ describe('analytics worker admission', () => {
   })
 
   it('retries a missing startup bundle after the build finishes', async () => {
-    mocks.readFileSync.mockImplementationOnce(() => { throw Object.assign(new Error('building'), { code: 'ENOENT' }) })
+    mocks.readFileSync.mockImplementationOnce(() => {
+      throw Object.assign(new Error('building'), { code: 'ENOENT' })
+    })
     const recovering = new AnalyticsService({ roots: async () => [], isHomeSender: () => true })
     try {
       const request = recovering.request(1, { action: 'statuses' })
@@ -140,7 +230,9 @@ describe('analytics worker admission', () => {
       expect(workers()[0]).toMatchObject({ source: 'trusted analytics worker source', eval: true })
       workers()[0].emit('message', { result: [] })
       await expect(request).resolves.toEqual([])
-    } finally { recovering.stop() }
+    } finally {
+      recovering.stop()
+    }
   })
 
   it('queues overlapping reads in order and keeps at most two workers running', async () => {
@@ -273,15 +365,15 @@ describe('analytics worker admission', () => {
   })
 
   it('serializes queries, statistical analyses and drill-down result writes', async () => {
-    const requests = ['query', 'analyze', 'drill'].map(action => service.request(1, { action }))
+    const requests = ['query', 'analyze', 'drill'].map((action) => service.request(1, { action }))
     const metadata = service.request(1, { action: 'statuses' })
     await settle()
-    expect(workers().map(w => w.job.action)).toEqual(['query', 'statuses'])
+    expect(workers().map((w) => w.job.action)).toEqual(['query', 'statuses'])
     expect(workers()[1].storeOptions.readOnly).toBe(true)
     workers()[0].emit('message', { result: 'query' })
     await requests[0]
     await settle()
-    expect(workers().map(w => w.job.action)).toEqual(['query', 'statuses', 'analyze'])
+    expect(workers().map((w) => w.job.action)).toEqual(['query', 'statuses', 'analyze'])
     expect(workers()[2].storeOptions).toEqual({ readOnly: false, initialize: false })
     workers()[2].emit('message', { result: 'analyze' })
     await requests[1]
@@ -296,7 +388,7 @@ describe('analytics worker admission', () => {
     const query = service.request(1, { action: 'query' })
     const statuses = service.request(1, { action: 'statuses' })
     await settle()
-    expect(workers().map(w => w.job.action)).toEqual(['import', 'statuses'])
+    expect(workers().map((w) => w.job.action)).toEqual(['import', 'statuses'])
     expect(workers()[1].storeOptions.readOnly).toBe(true)
     workers()[1].emit('message', { result: [] })
     await statuses

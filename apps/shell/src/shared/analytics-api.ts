@@ -91,7 +91,14 @@ export const DEFAULT_ANALYTICS_SETTINGS: AnalyticsSettings = {
 export interface AnalyticsFileStatus {
   path: string
   state:
-    'not-imported' | 'importing' | 'needs-review' | 'ready' | 'changed' | 'failed' | 'unsupported'
+    | 'not-imported'
+    | 'importing'
+    | 'needs-review'
+    | 'ready'
+    | 'changed'
+    | 'failed'
+    | 'unavailable'
+    | 'unsupported'
   message: string
   tables: number
   rows: number

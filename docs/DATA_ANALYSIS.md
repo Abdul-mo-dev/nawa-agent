@@ -43,12 +43,12 @@ Chat reuses the exported SQLite snapshot for SQL queries when the requested curr
 
 The standalone database contains the same applied typed table populations and SQL identifiers:
 
-| Object | Contents |
-| --- | --- |
-| Data tables | Every included row, original source-row reference in `__row`, typed columns `c0`, `c1`, etc. |
-| `nawa_tables` | Table names, source paths/hashes/generations, row counts, applied policies and approval origin |
-| `nawa_columns` | Column IDs, display names, types, scales, units and roles |
-| `nawa_manifest` | Complete export provenance and pending/unsupported/failed table information |
+| Object          | Contents                                                                                       |
+| --------------- | ---------------------------------------------------------------------------------------------- |
+| Data tables     | Every included row, original source-row reference in `__row`, typed columns `c0`, `c1`, etc.   |
+| `nawa_tables`   | Table names, source paths/hashes/generations, row counts, applied policies and approval origin |
+| `nawa_columns`  | Column IDs, display names, types, scales, units and roles                                      |
+| `nawa_manifest` | Complete export provenance and pending/unsupported/failed table information                    |
 
 Integers and decimals retain exact signed 64-bit coefficients. Decimal value = stored coefficient / 10^scale; consult `nawa_columns` or the described SQL schema. Text, multiline values, nulls and source order are preserved. REAL and SQLite AVG use approximate floating point; SQLite SUM can overflow. Use the exact structured tools for decimal accounting and exact means instead of assuming arbitrary SQL preserves precision.
 
@@ -115,18 +115,18 @@ Use follow-up prompts such as “Show uncertain rows with verbatim evidence” o
 
 Before accepting an answer, check the engine used, selected-file coverage, row population, filters, units, formula warnings and source references. Count records with analytical tools; retrieved search hits or preview rows cannot establish a whole-file total.
 
-| Situation | Action |
-| --- | --- |
-| Native table shows **Needs review** | Click **Prepare & export** to have the agent review and apply clear policies. Only unresolved population/formula decisions need targeted review. |
-| Native table shows **Ready · Approved by agent** | Query it immediately. Inspect its recorded policy and limits; manual review is optional unless you require explicit human review. |
-| `Invalid row grain` or a missing-grain message | Fill **What does one row represent? (required)** with the intended business record. |
-| Approval asks for confirmation again | A policy edit cleared it. Select the confirmation checkbox after the final edit. |
-| Approval stays disabled while idle | Restart Nawa with the current build. The current review UI disables approval only during validation. |
-| `Cannot find module ... worker-*.js` | Restart Nawa from a complete current build so its main process and worker artifacts belong to the same build. Retry the operation. |
-| MyAgent reports **Needs indexing** or **Needs refresh** | Select the files and click **Index** at the top of chat. |
-| SQL totals differ from native totals | Compare grain, boundaries, hidden rows, exclusions, formula-cache policy, import limits and numeric types. |
-| Classification is interrupted | List saved analyses and resume the compatible `analysisId`; inspect failed and uncertain rows. |
-| A source file changes | Refresh the engine you are using. Newly imported native generations must be validated under the saved approval mode; do not reuse stale receipts or classification results. |
+| Situation                                               | Action                                                                                                                                                                                                                                                                |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Native table shows **Needs review**                     | Click **Prepare & export** to have the agent review and apply clear policies. Only unresolved population/formula decisions need targeted review.                                                                                                                      |
+| Native table shows **Ready · Approved by agent**        | Query it immediately. Inspect its recorded policy and limits; manual review is optional unless you require explicit human review.                                                                                                                                     |
+| `Invalid row grain` or a missing-grain message          | Fill **What does one row represent? (required)** with the intended business record.                                                                                                                                                                                   |
+| Approval asks for confirmation again                    | A policy edit cleared it. Select the confirmation checkbox after the final edit.                                                                                                                                                                                      |
+| Approval stays disabled while idle                      | Restart Nawa with the current build. The current review UI disables approval only during validation.                                                                                                                                                                  |
+| `Cannot find module ... worker-*.js`                    | Restart Nawa from a complete current build so its main process and worker artifacts belong to the same build. Retry the operation.                                                                                                                                    |
+| MyAgent reports **Needs indexing** or **Needs refresh** | Select the files and click **Index** at the top of chat.                                                                                                                                                                                                              |
+| SQL totals differ from native totals                    | Compare grain, boundaries, hidden rows, exclusions, formula-cache policy, import limits and numeric types.                                                                                                                                                            |
+| Classification is interrupted                           | List saved analyses and resume the compatible `analysisId`; inspect failed and uncertain rows.                                                                                                                                                                        |
+| A source file changes                                   | Files prepared through selected-file Index refresh automatically after saving settles. Other imports need a manual refresh. Newly imported native generations must be validated under the saved approval mode; do not reuse stale receipts or classification results. |
 
 Selecting a folder, importing it, or indexing it never authorizes Chat to read all its files. Select each intended file, and report missing coverage for questions spanning multiple files.
 

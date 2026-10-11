@@ -84,6 +84,9 @@ export const sidebarArabic: Record<string, string> = {
   'Preparing data…': 'جارٍ تجهيز البيانات…',
   'Waiting to prepare data': 'في انتظار تجهيز البيانات',
   'Ready for analysis': 'جاهز للتحليل',
+  'Source file unavailable': 'الملف المصدر غير متاح',
+  'Embed selected files and prepare their tables. Indexed files refresh automatically after saving.':
+    'تضمين الملفات المحددة وتجهيز جداولها. يتم تحديث الملفات المفهرسة تلقائيًا بعد الحفظ.',
   'Needs a decision': 'يحتاج إلى قرار',
   'Data preparation failed': 'تعذر تجهيز البيانات',
   'No table data': 'لا توجد بيانات جدولية',

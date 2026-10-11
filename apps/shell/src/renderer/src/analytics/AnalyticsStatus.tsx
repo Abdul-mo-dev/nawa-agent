@@ -57,6 +57,9 @@ export function AnalyticsBadge({
   } else if (value?.state === 'changed') {
     state = 'attention'
     label = 'File changed — data needs updating'
+  } else if (value?.state === 'unavailable') {
+    state = 'unavailable'
+    label = 'Source file unavailable'
   } else if (value?.state === 'failed') {
     state = 'failed'
     label = 'Data preparation failed'

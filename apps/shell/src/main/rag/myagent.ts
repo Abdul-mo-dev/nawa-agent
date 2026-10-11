@@ -698,7 +698,7 @@ export class MyAgentRag {
         }
         return view
       } catch (e) {
-        return { path, status: 'stale', chunks: 0, error: errorText(e), verified: false }
+        return { path, status: 'unavailable', chunks: 0, error: errorText(e), verified: false }
       }
     }
     // This live check is explicitly requested, bounded, and never run by badge polling.
@@ -706,6 +706,14 @@ export class MyAgentRag {
       out.push(...(await Promise.all(paths.slice(offset, offset + 4).map(status))))
     }
     return out
+  }
+  /** Forget only Nawa's mapping; never delete shared MyAgent server documents. */
+  async forgetFile(s: RagSettings, path: string): Promise<void> {
+    await this.load()
+    for (const [id, entry] of this.entries)
+      if (entry.server === myAgentUrl(s.serverUrl) && samePath(entry.path, path))
+        this.entries.delete(id)
+    await this.save()
   }
   async clear(s: RagSettings, folder: string): Promise<void> {
     await authorizePath(await this.roots(), folder)

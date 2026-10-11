@@ -12,8 +12,9 @@ import { embeddingProvider } from './native-embedding'
 import { profileId } from './config'
 import { RagStore, type RankedChunk } from './store'
 import { ocrPdfPages, ocrImage } from './ocr'
+import { confirmedMissing } from '../prepared-files/source'
 export interface RagJob {
-  action: 'index' | 'statuses' | 'retrieve' | 'clear' | 'test' | 'recover'
+  action: 'index' | 'statuses' | 'retrieve' | 'clear' | 'prune' | 'test' | 'recover'
   roots: string[]
   settings: RagSettings
   apiKey: string
@@ -80,6 +81,15 @@ export class RagEngine {
       if (detached.length) this.store.remove(detached)
       this.rootsKey = rootsKey
     }
+    if (job.action === 'prune') {
+      for (const path of job.paths ?? []) {
+        signal.throwIfAborted()
+        if (!(await confirmedMissing(job.roots, path)))
+          throw new Error('Source deletion is not confirmed. Cached search data was retained.')
+        this.store.remove([path])
+      }
+      return null
+    }
     if (job.action === 'clear') {
       await authorizePath(job.roots, job.folder!)
       this.store.remove(this.store.allPaths().filter((path) => within(job.folder!, path)))
@@ -101,7 +111,7 @@ export class RagEngine {
                 stat.ino,
                 old.source_hash,
               ])
-            if (job.verify || this.verified.get(path) !== stamp) {
+            if (job.verify || old.status === 'unavailable' || this.verified.get(path) !== stamp) {
               const hash = await hashFile(path)
               if (hash !== old.source_hash && old.status !== 'failed')
                 this.store.state(
@@ -109,13 +119,15 @@ export class RagEngine {
                   'stale',
                   'File content changed since the last successful embedding.',
                 )
+              else if (hash === old.source_hash && old.status === 'unavailable')
+                this.store.state(path, 'embedded')
               this.verified.set(path, stamp)
               if (this.verified.size > 4096) this.verified.clear()
             }
           }
         } catch (e) {
           if (old && old.status !== 'embedding')
-            this.store.state(path, 'stale', `File unavailable: ${errorText(e)}`)
+            this.store.state(path, 'unavailable', `File unavailable: ${errorText(e)}`)
         }
         out.push({ ...this.store.view(path, profile), unsupported: !fileCapabilities(path).search })
       }
@@ -382,7 +394,7 @@ export class RagEngine {
     for (const path of paths) {
       signal.throwIfAborted()
       const file = this.store.get(path)
-      if (!file || file.status !== 'embedded' || file.profile !== profile) {
+      if (!file || !['embedded', 'unavailable'].includes(file.status) || file.profile !== profile) {
         warnings.push(
           `${basename(path)}: not embedded with the current model, changed, or failed; refresh the directory index.`,
         )
@@ -395,9 +407,10 @@ export class RagEngine {
           warnings.push(`${basename(path)} changed and was excluded.`)
           continue
         }
+        if (file.status === 'unavailable') this.store.state(path, 'embedded')
         allowed.push(path)
       } catch {
-        this.store.state(path, 'stale', 'Source unavailable.')
+        this.store.state(path, 'unavailable', 'Source unavailable.')
         warnings.push(`${basename(path)} is unavailable and was excluded.`)
       }
     }

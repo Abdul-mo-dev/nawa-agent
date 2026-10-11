@@ -1,7 +1,7 @@
 /** Public RAG contract. Secrets never appear in settings returned to the renderer. */
 export const RAG_CHANNEL = 'nawa:rag:v1'
 export const RAG_CHANGED = 'nawa:rag:changed'
-export type RagState = 'not-indexed' | 'embedding' | 'embedded' | 'stale' | 'failed'
+export type RagState = 'not-indexed' | 'embedding' | 'embedded' | 'stale' | 'failed' | 'unavailable'
 export interface RagSettings {
   backend: 'native' | 'local' | 'myagent'
   serverUrl: string
