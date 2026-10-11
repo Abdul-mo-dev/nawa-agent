@@ -71,6 +71,134 @@ const saved = (backend: 'local' | 'myagent' = 'myagent') => ({
   encryptedKey: Buffer.from('private-service-key').toString('base64'),
 })
 const service = () => new RagService({ roots: async () => [workspace], isHomeSender: () => true })
+it('exposes setup failures for only the selected files and clears them after a successful retry', async () => {
+  mocks.readFile.mockResolvedValue(
+    JSON.stringify({ ...saved(), settings: { ...settings, enabled: false } }),
+  )
+  const other = join(workspace, 'other.txt'),
+    s = service()
+  mocks.statuses.mockImplementation(async (_settings, paths: string[]) =>
+    paths.map((path) => ({ path, status: 'not-indexed', chunks: 0 })),
+  )
+  try {
+    await expect(s.indexSelected(1, workspace, [selectedFile], true)).rejects.toThrow(
+      'Choose an embedding model',
+    )
+    expect(await s.statuses([selectedFile, other])).toEqual([
+      expect.objectContaining({
+        path: selectedFile,
+        status: 'failed',
+        error: expect.stringContaining('Choose an embedding model'),
+      }),
+      { path: other, status: 'not-indexed', chunks: 0 },
+    ])
+    await s.save(settings)
+    mocks.indexSelected.mockResolvedValueOnce({
+      running: false,
+      embedded: 1,
+      files: [{ path: selectedFile, status: 'embedded' }],
+    })
+    await s.indexSelected(1, workspace, [selectedFile], true)
+    await vi.waitFor(() => expect(s.progress().running).toBe(false))
+    expect((await s.statuses([selectedFile]))[0]).toEqual({
+      path: selectedFile,
+      status: 'not-indexed',
+      chunks: 0,
+    })
+  } finally {
+    s.stop()
+  }
+})
+
+it('retains fatal worker failures after completion and while another file is indexed', async () => {
+  mocks.readFile.mockResolvedValue(JSON.stringify(saved('local')))
+  const s = service(),
+    other = join(workspace, 'other.txt')
+  const request = vi
+    .spyOn(s as never, 'request')
+    .mockRejectedValueOnce(new Error('Embedding worker could not load the model.'))
+    .mockResolvedValueOnce(null as never)
+    .mockResolvedValue([{ path: selectedFile, status: 'embedded', chunks: 8 }] as never)
+  try {
+    await s.indexSelected(1, workspace, [selectedFile], true)
+    await vi.waitFor(() => expect(s.progress().running).toBe(false))
+    expect(s.progress().files).toEqual([
+      { path: selectedFile, status: 'failed', error: 'Embedding worker could not load the model.' },
+    ])
+    expect((await s.statuses([selectedFile]))[0]).toMatchObject({
+      status: 'failed',
+      error: 'Embedding worker could not load the model.',
+    })
+    request.mockResolvedValueOnce({
+      running: false,
+      embedded: 1,
+      files: [{ path: other, status: 'embedded' }],
+    } as never)
+    await s.indexSelected(1, workspace, [other], true)
+    await vi.waitFor(() => expect(s.progress().running).toBe(false))
+    expect((await s.statuses([selectedFile]))[0].error).toBe(
+      'Embedding worker could not load the model.',
+    )
+  } finally {
+    s.stop()
+  }
+})
+
+it('does not leak failed-attempt diagnostics into a different embedding profile or cleared scope', async () => {
+  const s = service()
+  mocks.indexSelected.mockRejectedValueOnce(new Error('MyAgent authentication failed.'))
+  mocks.statuses.mockResolvedValue([{ path: selectedFile, status: 'not-indexed', chunks: 0 }])
+  try {
+    await s.indexSelected(1, workspace, [selectedFile], true)
+    await vi.waitFor(() => expect(s.progress().running).toBe(false))
+    expect((await s.statuses([selectedFile]))[0].status).toBe('failed')
+    await s.save({ ...settings, serverUrl: 'http://127.0.0.1:5999' }, '')
+    expect((await s.statuses([selectedFile]))[0].error).toBeUndefined()
+    expect(s.progress().files).toBeUndefined()
+    await s.save(settings, '')
+    await s.clear(workspace)
+    expect((await s.statuses([selectedFile]))[0].error).toBeUndefined()
+    expect(s.progress().files).toBeUndefined()
+  } finally {
+    s.stop()
+  }
+})
+
+it('retains changed-source reasons alongside a failed refresh and ignores consent rejection', async () => {
+  const s = service()
+  mocks.statuses.mockResolvedValue([
+    {
+      path: selectedFile,
+      status: 'stale',
+      chunks: 8,
+      error: 'File content changed since the last successful embedding.',
+    },
+  ])
+  try {
+    await expect(s.indexSelected(1, workspace, [selectedFile], false)).rejects.toThrow('Confirm')
+    expect((await s.statuses([selectedFile]))[0].error).not.toContain('Confirm')
+    mocks.indexSelected.mockResolvedValueOnce({
+      running: false,
+      failed: 1,
+      files: [
+        {
+          path: selectedFile,
+          status: 'failed',
+          error: 'Embedding server HTTP 404: model unavailable.',
+        },
+      ],
+    })
+    await s.indexSelected(1, workspace, [selectedFile], true)
+    await vi.waitFor(() => expect(s.progress().running).toBe(false))
+    expect((await s.statuses([selectedFile]))[0]).toMatchObject({
+      status: 'stale',
+      error: expect.stringContaining('content changed'),
+    })
+    expect((await s.statuses([selectedFile]))[0].error).toContain('model unavailable')
+  } finally {
+    s.stop()
+  }
+})
 it('enrolls successful explicit snapshots and does not widen or re-enroll background refresh', async () => {
   const onIndexed = vi.fn(async () => {})
   const s = new RagService({ roots: async () => [workspace], isHomeSender: () => true, onIndexed })

@@ -85,6 +85,37 @@ export const sidebarArabic: Record<string, string> = {
   'Waiting to prepare data': 'في انتظار تجهيز البيانات',
   'Ready for analysis': 'جاهز للتحليل',
   'Source file unavailable': 'الملف المصدر غير متاح',
+  'Embedding settings changed — index needs updating': 'تغيرت إعدادات التضمين — يلزم تحديث الفهرس',
+  'The saved file content or embedding settings differ from the indexed snapshot.':
+    'يختلف محتوى الملف المحفوظ أو إعدادات التضمين عن النسخة المفهرسة.',
+  'Right-click the file and choose Reindex / refresh for file chat. Unchanged content is reused.':
+    'انقر بزر الفأرة الأيمن على الملف واختر إعادة فهرسة / تحديث لمحادثة الملفات. يُعاد استخدام المحتوى الذي لم يتغير.',
+  'The saved file differs from the prepared table snapshot.':
+    'يختلف الملف المحفوظ عن نسخة الجداول المجهزة.',
+  'Right-click the file and choose Prepare tables for analysis, then review any flagged table decisions.':
+    'انقر بزر الفأرة الأيمن على الملف واختر تجهيز الجداول للتحليل، ثم راجع القرارات المطلوبة للجداول.',
+  'Review the table headers, included rows, column types and units using Review table data in More actions.':
+    'راجع عناوين الجداول والصفوف المشمولة وأنواع الأعمدة والوحدات باستخدام مراجعة بيانات الجداول في مزيد من الإجراءات.',
+  'Check the server address and API key in Knowledge settings, then retry indexing.':
+    'تحقق من عنوان الخادم ومفتاح API في إعدادات المعرفة، ثم أعد محاولة الفهرسة.',
+  'Unlock the file or save an unencrypted copy, then retry.':
+    'افتح قفل الملف أو احفظ نسخة غير مشفرة، ثم أعد المحاولة.',
+  'Check file permissions and close any application locking the file, then retry.':
+    'تحقق من أذونات الملف وأغلق أي تطبيق يقفل الملف، ثم أعد المحاولة.',
+  'Load an embedding model and check its model name, server address and settings in Knowledge, then retry indexing.':
+    'حمّل نموذج تضمين وتحقق من اسم النموذج وعنوان الخادم وإعداداته في المعرفة، ثم أعد محاولة الفهرسة.',
+  'Check that the embedding server is running and its address is correct in Knowledge settings, then retry indexing.':
+    'تحقق من تشغيل خادم التضمين وصحة عنوانه في إعدادات المعرفة، ثم أعد محاولة الفهرسة.',
+  'Check that the file still exists and its drive or folder is accessible, then retry.':
+    'تحقق من وجود الملف وإمكانية الوصول إلى القرص أو المجلد، ثم أعد المحاولة.',
+  'Save a copy in a supported format, then index or prepare that copy.':
+    'احفظ نسخة بتنسيق مدعوم، ثم فهرس أو جهز تلك النسخة.',
+  'Use a smaller file or adjust the relevant limit in Knowledge settings, then retry.':
+    'استخدم ملفاً أصغر أو عدّل الحد المناسب في إعدادات المعرفة، ثم أعد المحاولة.',
+  'Fix the reported issue, then right-click the file and choose Reindex / refresh for file chat.':
+    'عالج المشكلة المذكورة، ثم انقر بزر الفأرة الأيمن على الملف واختر إعادة فهرسة / تحديث لمحادثة الملفات.',
+  'Fix the reported issue, then right-click the file and choose Prepare tables for analysis.':
+    'عالج المشكلة المذكورة، ثم انقر بزر الفأرة الأيمن على الملف واختر تجهيز الجداول للتحليل.',
   'Embed selected files and prepare their tables. Indexed files refresh automatically after saving.':
     'تضمين الملفات المحددة وتجهيز جداولها. يتم تحديث الملفات المفهرسة تلقائيًا بعد الحفظ.',
   'Needs a decision': 'يحتاج إلى قرار',

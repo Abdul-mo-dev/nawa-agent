@@ -148,6 +148,7 @@ describe('analytics worker admission', () => {
         action: 'prepare',
         paths: [file],
         indexAuthorized: true,
+        backgroundRefresh: true,
       })
       expect(workers()[0].settings).toEqual({ ...settings, allowAgentPreparation: true })
       expect(service.progress()).toMatchObject({ running: true, folder, paths: [file] })

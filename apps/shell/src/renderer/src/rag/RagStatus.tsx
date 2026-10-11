@@ -4,6 +4,7 @@ import { pathKey } from '../explorer/model'
 import { useSidebarText } from '../explorer/sidebar-i18n'
 import { useFileStatuses } from '../explorer/useFileStatuses'
 import { fileCapabilities } from '../../../shared/file-capabilities'
+import { fileStatusHelp } from '../explorer/file-status-help'
 
 export function useRagStatuses(files: Array<{ path: string; mtimeMs: number; sizeBytes: number }>) {
   return useFileStatuses(files, window.nawaRag, 'File search status is unavailable.')
@@ -14,18 +15,19 @@ export function RagBadge({
   error,
   progress,
   path = value?.path,
+  expanded,
 }: {
   value?: RagFileStatus
   error?: string
   progress?: RagProgress | null
   path?: string
+  expanded?: boolean
 }) {
   const { s } = useSidebarText()
   const active = progress?.running === true
-  const job =
-    active && path
-      ? progress.files?.find((file) => pathKey(file.path) === pathKey(path))
-      : undefined
+  const job = path
+    ? progress?.files?.find((file) => pathKey(file.path) === pathKey(path))
+    : undefined
   const current = active && path && pathKey(progress.current) === pathKey(path)
   let state: FileStatusState = 'waiting'
   let label = 'Not indexed'
@@ -38,11 +40,10 @@ export function RagBadge({
   } else if (value?.unsupported) {
     state = 'unavailable'
     label = 'Search unavailable for this format'
-  } else if (job?.status === 'pending') {
+  } else if (active && job?.status === 'pending') {
     label = 'Waiting to index'
   } else if (
-    job?.status === 'checking' ||
-    job?.status === 'indexing' ||
+    (active && (job?.status === 'checking' || job?.status === 'indexing')) ||
     (current && !job) ||
     (!job && value?.status === 'embedding')
   ) {
@@ -60,7 +61,11 @@ export function RagBadge({
         }),
       )
     }
-  } else if (job?.status === 'failed' || job?.status === 'canceled' || value?.status === 'failed') {
+  } else if (
+    value?.status === 'failed' ||
+    ((job?.status === 'failed' || job?.status === 'canceled') &&
+      (active || !value || !['embedded', 'stale', 'unavailable'].includes(value.status)))
+  ) {
     state = 'failed'
     label = job?.status === 'canceled' ? 'Indexing stopped' : 'Indexing failed'
     if (job?.error || value?.error) details.push(job?.error || value!.error!)
@@ -69,7 +74,19 @@ export function RagBadge({
     label = 'Source file unavailable'
   } else if (value?.status === 'stale') {
     state = 'attention'
-    label = 'File changed — index needs updating'
+    label = /Embedding model\/settings changed/i.test(value.error ?? '')
+      ? 'Embedding settings changed — index needs updating'
+      : 'File changed — index needs updating'
+    if (value.error) details.push(value.error)
+    else
+      details.push(
+        s('The saved file content or embedding settings differ from the indexed snapshot.'),
+      )
+    details.push(
+      s(
+        'Right-click the file and choose Reindex / refresh for file chat. Unchanged content is reused.',
+      ),
+    )
   } else if (value?.status === 'embedded' || job?.status === 'embedded') {
     state = value?.partial ? 'attention' : 'ready'
     label = value?.partial ? 'Partially indexed' : 'Indexed for search'
@@ -81,6 +98,27 @@ export function RagBadge({
     label = 'Checking file…'
   }
   if (!error && value?.error && !details.includes(value.error)) details.push(value.error)
+  const reason = error || job?.error || value?.error || ''
+  if (state === 'failed' || state === 'unavailable')
+    details.push(
+      s(
+        fileStatusHelp(
+          reason ||
+            (value?.unsupported
+              ? 'Unsupported format'
+              : value?.status === 'unavailable'
+                ? 'File unavailable'
+                : ''),
+          'search',
+        ),
+      ),
+    )
+  else if (
+    value?.status === 'stale' &&
+    reason &&
+    !/content changed|embedding profile changed/i.test(reason)
+  )
+    details.push(s(fileStatusHelp(reason, 'search')))
   details.push(...(value?.warnings ?? []))
   if (path) {
     const capability = fileCapabilities(path)
@@ -99,6 +137,7 @@ export function RagBadge({
       label={s('Search') + ': ' + s(label)}
       details={details}
       percent={percent}
+      expanded={expanded}
     />
   )
 }

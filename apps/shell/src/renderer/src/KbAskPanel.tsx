@@ -8,7 +8,7 @@ import {
   Markdown,
 } from '@genoffice/ui'
 import { agentPolicyOf } from '@genoffice/ai-provider/browser'
-import { useI18n } from './locale'
+import { aiLangDirective, useI18n } from './locale'
 import { useSidebarText } from './explorer/sidebar-i18n'
 import { createShellTransport } from './ai/transport'
 import { loadKnowledgeBaseRequest } from './ai/knowledge-base-request'
@@ -42,7 +42,9 @@ export function KbAskPanel({
 }: {
   onOpenPath: (path: string) => void
 }): React.JSX.Element {
-  const { t } = useI18n()
+  const { lang, t } = useI18n()
+  const langRef = useRef(lang)
+  langRef.current = lang
   const { s } = useSidebarText()
   const [messages, setMessages] = useState<AskMessage[]>([])
   const [draft, setDraft] = useState('')
@@ -148,7 +150,8 @@ export function KbAskPanel({
           read: (path, offset) => window.aiOffice.kbRead(path, offset),
         }),
         systemSuffix: () =>
-          '\nEarlier answers are conversation reference only. Search and read current sources again before using file facts in this answer.',
+          '\nEarlier answers are conversation reference only. Search and read current sources again before using file facts in this answer.' +
+          aiLangDirective(langRef.current),
         events: {
           onText: (text) => {
             if (current()) patchLast({ text })

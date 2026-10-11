@@ -153,6 +153,8 @@ export class AnalyticsEngine {
         }
         const f = this.store.file(path),
           datasets = this.store.datasets([path])
+        const stat = await lstat(path)
+        if (!stat.isFile()) throw new Error('Source is no longer a regular file.')
         if (!f) {
           out.push({
             path,
@@ -163,10 +165,8 @@ export class AnalyticsEngine {
           })
           continue
         }
-        const stat = await lstat(path)
         let state = f.state as AnalyticsFileStatus['state'],
           reason = f.error
-        if (!stat.isFile()) throw new Error('Source is no longer a regular file.')
         if (!['importing', 'failed'].includes(state)) {
           if (stat.size !== f.size || stat.mtimeMs !== f.mtime || stat.ctimeMs !== f.ctime)
             state = 'changed'
@@ -180,6 +180,17 @@ export class AnalyticsEngine {
         }
         if (state === 'changed')
           reason = 'Source fingerprint/metadata changed. Re-import and review before analysis.'
+        else if (state === 'needs-review') {
+          const issues = datasets
+            .flatMap((dataset) => [
+              dataset.data.preparationError,
+              ...(dataset.data.preparedPolicy?.notes ?? []),
+            ])
+            .filter(Boolean)
+          reason =
+            [...new Set([reason, ...issues].filter(Boolean))].join('\n').slice(0, 4096) ||
+            'Review the table headers, included rows, column types and units before analysis.'
+        }
         out.push({
           path,
           state,
@@ -488,7 +499,9 @@ export class AnalyticsEngine {
               continue
             }
             const refreshed =
-              previous && previous.get(d.id)?.sourceHash !== d.sourceHash
+              previous &&
+              [...previous.values()].some((prior) => samePath(prior.path, d.path)) &&
+              previous.get(d.id)?.sourceHash !== d.sourceHash
                 ? refreshedPolicy(previous.get(d.id), d)
                 : null
             const baseline = d.preparedPolicy

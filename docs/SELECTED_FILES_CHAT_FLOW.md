@@ -154,6 +154,12 @@ An embedding connection error does not block table preparation. Explicit indexin
 
 Hover or focus each file's status icon for progress and details. Configure embeddings under **Settings → Knowledge**. Additional indexing and table-review controls are available from the main file panel's **More actions**.
 
+Indexing, refresh and table preparation report progress and failures through the file status icons without opening a modal. Details dialogs open only when you click the dedicated **Indexing details** button or **Indexing & analysis details** menu option.
+
+Right-click a file for **Chat with this file**, **Index for file chat**, **Prepare tables for analysis**, and **Indexing & analysis details**. Previously indexed sources offer **Reindex / refresh for file chat**, which checks the saved content and embedding profile and reuses unchanged data. Table preparation runs without embeddings or chat-model calls; manual refresh retains compatible reviewed table policies and validates the new population. The details dialog shows live readiness, row and passage counts, warnings and review reasons. Right-clicking a selected file preserves the selected file group; right-clicking another file targets only that file. Folder context menus do not recursively index files.
+
+Hover or keyboard-focus a failed status icon to see the original failure and a recovery hint. Setup and worker failures are associated with the requested files even when no index record was created; they remain visible during the session until retry, successful refresh, a different embedding profile, or cache clearing. Saved per-file import/index failures remain in their engine's metadata. Changed-content icons explain which snapshot needs refreshing, and table-review icons include available validation notes and unresolved decisions. Successful retries remove failed-attempt overlays.
+
 ## 9. Common incomplete outcomes
 
 | Condition                                              | Expected outcome                                                                |

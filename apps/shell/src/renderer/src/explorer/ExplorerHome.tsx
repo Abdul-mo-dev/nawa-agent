@@ -4,6 +4,10 @@ import { WorkspaceControlPanel } from './WorkspaceControlPanel'
 import { PanelDialog } from './PanelDialog'
 import { RagToolbar } from '../rag/RagToolbar'
 import { AnalyticsToolbar } from '../analytics/AnalyticsToolbar'
+import { RagBadge, useRagStatuses } from '../rag/RagStatus'
+import { AnalyticsBadge, useAnalyticsStatuses } from '../analytics/AnalyticsStatus'
+import type { SelectedFileActions } from './IndexSelectedButton'
+import { fileChatSelection, fileIndexAction } from './file-chat-actions'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, MouseEvent } from 'react'
 import type { FolderRoot, HomeApi, RecentPage } from '../../../shared/home-api'
@@ -88,7 +92,16 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
   const [address, setAddress] = useState('')
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null)
   const [busy, setBusy] = useState(false)
-  const [menu, setMenu] = useState<{ x: number; y: number; actions: MenuAction[] } | null>(null)
+  const [menu, setMenu] = useState<{
+    x: number
+    y: number
+    actions: MenuAction[]
+    items?: Item[]
+    isRoot?: boolean
+  } | null>(null)
+  const fileActionsRef = useRef<SelectedFileActions>(null)
+  const [indexBusy, setIndexBusy] = useState(false)
+  const [fileDetails, setFileDetails] = useState<Item[] | null>(null)
   const [dialog, setDialog] = useState<DialogState | null>(null)
   const [name, setName] = useState('')
   const [dialogError, setDialogError] = useState<string | null>(null)
@@ -136,7 +149,16 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
     Math.max(300, windowWidth - (navigationVisible ? effectiveNavWidth : 0) - 385),
   )
   const title = folder ? basename(folder) : t(location.kind as 'home' | 'recent' | 'starred')
-  const suspended = !!menu || !!dialog || settingsOpen || !!fileTools
+  const suspended = !!menu || !!dialog || settingsOpen || !!fileTools || !!fileDetails
+  const statusFiles = (fileDetails ?? menu?.items ?? [])
+    .filter(
+      (item) =>
+        item.kind === 'file' &&
+        roots.some((root) => (root.readable ?? root.usable) && isWithin(item.path, root.path)),
+    )
+    .slice(0, 256)
+  const searchStatus = useRagStatuses(statusFiles)
+  const tableStatus = useAnalyticsStatuses(statusFiles)
   useEditorSlot(center, suspended)
   const notify = useCallback((text: string, error = false) => setNotice({ text, error }), [])
   const failure = useCallback((error: unknown) => notify(errorText(error), true), [notify])
@@ -493,6 +515,7 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
     }
   }
   const ask = (list: Item[]) => {
+    void window.aiOfficeTabs.activate('home').catch(failure)
     if (!list.length) {
       changePrefs({ pane: 'ai' })
       return
@@ -508,6 +531,18 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
   const fileActions = (list: Item[], isRoot = false): MenuAction[] => {
     const one = list.length === 1 ? list[0] : undefined,
       protectedSelection = isRoot || list.some(protectedItem)
+    const selection = fileChatSelection(list, roots, folder)
+    const indexing = fileIndexAction(selection.files, searchStatus.statuses)
+    const prepareFiles = (mode: 'all' | 'analysis') => {
+      if (!selection.folder) return
+      ask(selection.files)
+      // Capture the menu's file list, even when selection or navigation changes next.
+      void fileActionsRef.current?.prepare(
+        selection.folder,
+        (mode === 'analysis' ? selection.tables : selection.files).map((item) => item.path),
+        mode,
+      )
+    }
     return [
       {
         label: t('open'),
@@ -518,7 +553,53 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
           if (one) openItem(one)
         },
       },
-      { label: t('ask'), icon: 'sparkles', action: () => ask(list) },
+      {
+        label: t(
+          selection.files.length === list.length
+            ? list.length === 1
+              ? 'chatWithFile'
+              : 'chatWithFiles'
+            : 'ask',
+        ),
+        icon: 'sparkles',
+        action: () => ask(list),
+      },
+      ...(selection.files.length
+        ? [
+            ...(indexing.searchable || selection.tables.length
+              ? [
+                  {
+                    id: 'index-for-chat',
+                    label: t(indexing.label),
+                    hint: t('indexForChatHelp'),
+                    icon:
+                      indexing.label === 'refreshForChat'
+                        ? ('refresh' as const)
+                        : ('search' as const),
+                    disabled: !selection.folder || indexBusy,
+                    action: () => prepareFiles('all'),
+                  },
+                ]
+              : []),
+            ...(selection.tables.length
+              ? [
+                  {
+                    label: t('prepareTables'),
+                    icon: 'grid' as const,
+                    hint: t('prepareTablesHelp'),
+                    disabled: !selection.folder || indexBusy,
+                    action: () => prepareFiles('analysis'),
+                  },
+                ]
+              : []),
+            {
+              label: t('filePreparationDetails'),
+              icon: 'info' as const,
+              disabled: !selection.authorized,
+              action: () => setFileDetails([...selection.files]),
+            },
+          ]
+        : []),
       {
         label: t('cut'),
         icon: 'cut',
@@ -603,7 +684,7 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
       setSelected(new Set([item.path]))
       anchor.current = item.path
     }
-    setMenu({ x: event.clientX, y: event.clientY, actions: fileActions(list, isRoot) })
+    setMenu({ x: event.clientX, y: event.clientY, actions: [], items: [...list], isRoot })
   }
   const toolbarMenu = (event: MouseEvent, actions: MenuAction[]) => {
     const rect = event.currentTarget.getBoundingClientRect()
@@ -1511,6 +1592,8 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
           onActivity={setPanelActivity}
           closeLabel={t('close')}
           folder={folder && currentRootPath ? folder : null}
+          fileActionsRef={fileActionsRef}
+          onIndexBusyChange={setIndexBusy}
           selectedFiles={selectedItems
             .filter((item) => item.kind === 'file')
             .map((item) => item.path)}
@@ -1598,7 +1681,13 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
           onClick={() => changePrefs({ view: 'tiles' })}
         />
       </footer>
-      {menu && <Menu {...menu} onClose={closeMenu} />}
+      {menu && (
+        <Menu
+          {...menu}
+          actions={menu.items ? fileActions(menu.items, menu.isRoot) : menu.actions}
+          onClose={closeMenu}
+        />
+      )}
       {dialog && (
         <Dialog
           title={
@@ -1704,6 +1793,52 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
           )}
         </Dialog>
       )}
+      <PanelDialog
+        open={!!fileDetails}
+        title={t('filePreparationDetails')}
+        onClose={() => setFileDetails(null)}
+        footer={
+          <button
+            type="button"
+            className="set-btn"
+            onClick={() => {
+              setFileDetails(null)
+              openSettings('knowledge')
+            }}
+          >
+            {s('Knowledge settings')}
+          </button>
+        }
+      >
+        <p>{t('indexForChatHelp')}</p>
+        {fileDetails &&
+          statusFiles.map((item) => (
+            <section className="nawa-file-preparation-details" key={item.path}>
+              <h3 dir="auto">{item.name}</h3>
+              <p className="nawa-file-preparation-path" dir="auto">
+                {item.path}
+              </p>
+              <div className="nawa-file-preparation-status">
+                <RagBadge
+                  expanded
+                  path={item.path}
+                  value={searchStatus.statuses[item.path]}
+                  error={searchStatus.error}
+                  progress={searchStatus.progress}
+                />
+              </div>
+              <div className="nawa-file-preparation-status">
+                <AnalyticsBadge
+                  expanded
+                  path={item.path}
+                  value={tableStatus.statuses[item.path]}
+                  error={tableStatus.error}
+                  progress={tableStatus.progress}
+                />
+              </div>
+            </section>
+          ))}
+      </PanelDialog>
       <PanelDialog
         open={!!fileTools}
         title={s(fileTools === 'search' ? 'Index selected files' : 'Review table data')}

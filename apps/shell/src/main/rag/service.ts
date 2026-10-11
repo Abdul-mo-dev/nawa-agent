@@ -1,7 +1,7 @@
 import { Worker } from 'node:worker_threads'
 import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, rename, writeFile, rm } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { app, ipcMain, safeStorage, type WebContents } from 'electron'
 import type { MyAgentToolAction, MyAgentToolResponse } from '../../shared/myagent-tools-api'
 import workerPath from './worker?modulePath'
@@ -63,6 +63,8 @@ export class RagService {
   private clients = new Map<number, WebContents>()
   private saved: Saved | null = null
   private state = blankProgress()
+  // Setup/worker failures can occur before a file has a persistent index record.
+  private failures = new Map<string, { path: string; profile: string; error: string }>()
   private indexing: {
     owner: number
     id: string
@@ -78,6 +80,35 @@ export class RagService {
   private readonly mappingPath = join(this.directory, 'myagent-files-v1.json')
   private remote?: MyAgentRag
   constructor(private options: Options) {}
+  private fileKey(path: string): string {
+    return process.platform === 'win32' ? resolve(path).toLowerCase() : resolve(path)
+  }
+  private recordFailure(paths: string[], profile: string, cause: unknown): void {
+    const error = (cause instanceof Error ? cause.message : String(cause)).slice(0, 4096)
+    for (const path of paths) {
+      const key = this.fileKey(path)
+      this.failures.delete(key)
+      this.failures.set(key, { path, profile, error })
+      if (this.failures.size > 4096) this.failures.delete(this.failures.keys().next().value!)
+    }
+  }
+  private recordProgress(progress: RagProgress, profile: string): void {
+    for (const file of progress.files ?? []) {
+      if (file.status === 'failed')
+        this.recordFailure([file.path], profile, file.error || progress.message)
+      else if (file.status === 'embedded') this.failures.delete(this.fileKey(file.path))
+    }
+  }
+  private clearFailures(folder: string): void {
+    for (const [key, failure] of this.failures)
+      if (within(folder, failure.path)) this.failures.delete(key)
+    if (this.state.folder && within(folder, this.state.folder)) this.state = blankProgress()
+    else if (this.state.files)
+      this.state = {
+        ...this.state,
+        files: this.state.files.filter((file) => !within(folder, file.path)),
+      }
+  }
   private myAgent(): MyAgentRag {
     return (this.remote ??= new MyAgentRag(this.mappingPath, () => this.options.roots()))
   }
@@ -183,7 +214,9 @@ export class RagService {
         } finally {
           await rm(tmp, { force: true }).catch(() => undefined)
         }
+        const previousProfile = this.saved ? profileId(this.saved.settings) : null
         this.saved = next
+        if (previousProfile && previousProfile !== profileId(settings)) this.state = blankProgress()
         this.changed()
         return this.settings()
       } finally {
@@ -383,7 +416,30 @@ export class RagService {
       if (!within(folder, path))
         throw new Error('Selected files must be inside the opened directory.')
     }
-    return this.index(owner, folder, false, consent, [...paths], expectedProfile)
+    try {
+      return await this.index(owner, folder, false, consent, [...paths], expectedProfile)
+    } catch (cause) {
+      // Rejected scope, consent and concurrent-operation requests do not mark unrelated files.
+      if (
+        consent &&
+        !this.indexing &&
+        !this.settingsBusy &&
+        expectedProfile === undefined &&
+        !/already running|settings changed|service is stopping/i.test(String(cause))
+      ) {
+        try {
+          const roots = await this.options.roots()
+          await authorizePath(roots, folder)
+          for (const path of paths) await authorizePath(roots, dirname(path))
+          const profile = profileId((await this.load()).settings)
+          this.recordFailure(paths, profile, cause)
+          this.changed()
+        } catch {
+          /* Authorization/settings failures remain the original request error. */
+        }
+      }
+      throw cause
+    }
   }
   async index(
     owner: number,
@@ -403,7 +459,7 @@ export class RagService {
     if (expectedProfile !== undefined && profileId(saved.settings) !== expectedProfile)
       throw new Error('Embedding settings changed. Click Index to refresh with the new settings.')
     if (!saved.settings.enabled || (saved.settings.backend === 'local' && !saved.settings.model))
-      throw new Error('Configure and enable the RAG backend in Search settings first.')
+      throw new Error('Choose an embedding model in Knowledge settings, then click Index again.')
     await authorizePath(await this.options.roots(), folder)
     if (paths)
       for (const path of paths) await authorizePath(await this.options.roots(), dirname(path))
@@ -428,8 +484,10 @@ export class RagService {
           }
         : {}),
     }
+    for (const path of paths ?? []) this.failures.delete(this.fileKey(path))
     const report = (p: RagProgress) => {
       this.state = p
+      this.recordProgress(p, profileId(saved.settings))
       this.changed()
     }
     const done =
@@ -464,6 +522,25 @@ export class RagService {
       .then(
         async (result) => {
           this.state = result as RagProgress
+          if (this.state.incomplete) {
+            this.state = {
+              ...this.state,
+              files: this.state.files?.map((file) =>
+                ['pending', 'checking', 'indexing'].includes(file.status)
+                  ? {
+                      ...file,
+                      status: abort.signal.aborted ? ('canceled' as const) : ('failed' as const),
+                      error: this.state.message,
+                    }
+                  : file,
+              ),
+            }
+            this.state.failed = Math.max(
+              this.state.failed ?? 0,
+              this.state.files?.filter((file) => file.status === 'failed').length ?? 0,
+            )
+          }
+          this.recordProgress(this.state, profileId(saved.settings))
           if (owner !== 0 && paths && this.options.onIndexed && !abort.signal.aborted) {
             // Remember only successful snapshots, not failed/unavailable selected files.
             const sources = (await this.statuses(paths).catch(() => []))
@@ -475,12 +552,28 @@ export class RagService {
           }
         },
         async (e) => {
+          const reason = e instanceof Error ? e.message : String(e)
+          const files = this.state.files?.map((file) =>
+            ['pending', 'checking', 'indexing'].includes(file.status)
+              ? {
+                  ...file,
+                  status: abort.signal.aborted ? ('canceled' as const) : ('failed' as const),
+                  error: reason,
+                }
+              : file,
+          )
           this.state = {
             ...this.state,
             running: false,
             incomplete: true,
-            message: e instanceof Error ? e.message : String(e),
+            message: reason,
+            files,
+            failed: Math.max(
+              this.state.failed ?? 0,
+              files?.filter((file) => file.status === 'failed').length ?? 0,
+            ),
           }
+          this.recordProgress(this.state, profileId(saved.settings))
           if (saved.settings.backend !== 'myagent')
             await this.request(this.reader, {
               action: 'recover',
@@ -509,27 +602,40 @@ export class RagService {
   }
   async statuses(paths: string[], verify = false): Promise<RagFileStatus[]> {
     const settings = (await this.load()).settings
-    if (settings.backend === 'myagent')
-      return this.myAgent().statuses(
-        settings,
-        paths,
-        verify ? await this.key(settings) : '',
-        verify,
-      )
-    return (await this.request(this.reader, {
-      action: 'statuses',
-      roots: [],
-      settings,
-      apiKey: '',
-      paths,
-      verify,
-    })) as RagFileStatus[]
+    const values =
+      settings.backend === 'myagent'
+        ? await this.myAgent().statuses(
+            settings,
+            paths,
+            verify ? await this.key(settings) : '',
+            verify,
+          )
+        : ((await this.request(this.reader, {
+            action: 'statuses',
+            roots: [],
+            settings,
+            apiKey: '',
+            paths,
+            verify,
+          })) as RagFileStatus[])
+    const profile = profileId(settings)
+    return values.map((value) => {
+      const failure = this.failures.get(this.fileKey(value.path))
+      if (!failure || failure.profile !== profile || value.unsupported) return value
+      return {
+        ...value,
+        status:
+          value.status === 'unavailable' || value.status === 'stale' ? value.status : 'failed',
+        error: [...new Set([value.error, failure.error].filter(Boolean))].join('\n'),
+      }
+    })
   }
   async clear(folder: string): Promise<void> {
     if (this.indexing) throw new Error('Stop indexing before clearing a folder index.')
     const settings = (await this.load()).settings
     if (settings.backend === 'myagent') {
       await this.myAgent().clear(settings, folder)
+      this.clearFailures(folder)
       await this.options.onCleared?.(folder)
       this.changed()
       return
@@ -541,6 +647,7 @@ export class RagService {
       apiKey: '',
       folder,
     })
+    this.clearFailures(folder)
     await this.options.onCleared?.(folder)
     this.changed()
   }

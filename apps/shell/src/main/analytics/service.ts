@@ -517,7 +517,8 @@ export class AnalyticsService {
         folder,
         paths: tables,
         indexAuthorized: true,
-        ...(owner === 0 ? { backgroundRefresh: true } : {}),
+        // Manual refresh and automatic refresh retain compatible reviewed table policies.
+        backgroundRefresh: true,
       },
       signal,
     )) as AnalyticsEnvelope

@@ -97,6 +97,17 @@ it('retains cached passages through temporary source unavailability and recovers
   expect((await f.statuses())[0].status).toBe('embedded')
 })
 
+it('reports the access failure for a file that has never been indexed', async () => {
+  const f = await fixture()
+  await rm(f.file)
+  expect((await f.statuses())[0]).toMatchObject({
+    status: 'unavailable',
+    error: expect.stringContaining('File unavailable:'),
+  })
+  expect((await f.statuses())[0].error).toContain('ENOENT')
+  expect(f.store.get(f.file)).toBeUndefined()
+})
+
 it('prunes only a confirmed missing source and leaves other indexed records intact', async () => {
   const f = await fixture()
   await f.index()

@@ -276,7 +276,8 @@ it('rebuilds real SQLite data with exact totals and rejects receipts from previo
   cleanups.push(async () => {
     engine.close()
   })
-  await engine.execute({ action: 'prepare', paths: [f.file] })
+  // The context-menu refresh path also handles first-time imports.
+  await engine.execute({ action: 'prepare', paths: [f.file], backgroundRefresh: true })
   const dataset = engine.store.datasets([f.file])[0]!.data
   const query = async () =>
     (
@@ -313,6 +314,25 @@ it('rebuilds real SQLite data with exact totals and rejects receipts from previo
   expect(engine.store.result(before.id)).toBeUndefined()
 })
 
+it('reports a missing analytical source before it has any imported table generation', async () => {
+  const f = await fixture()
+  const engine = new AnalyticsEngine(
+    join(f.directory, 'analytics.sqlite3'),
+    [f.folder],
+    DEFAULT_ANALYTICS_SETTINGS,
+    () => {},
+  )
+  cleanups.push(async () => {
+    engine.close()
+  })
+  await rm(f.file)
+  expect((await engine.statuses([f.file], true))[0]).toMatchObject({
+    state: 'unavailable',
+    message: expect.stringContaining('ENOENT'),
+  })
+  expect(engine.store.datasets([f.file])).toEqual([])
+})
+
 it('leaves refreshed tables needing review when automatic approval is disabled', async () => {
   const f = await fixture()
   const engine = new AnalyticsEngine(
@@ -336,6 +356,9 @@ it('leaves refreshed tables needing review when automatic approval is disabled',
   await writeFile(f.file, 'id,amount\nA,4.20\n')
   await f.settle()
   expect(engine.store.datasets([f.file])[0]!.data.status).toBe('needs-review')
+  expect((await engine.statuses([f.file], true))[0]!.message).toContain(
+    'previous table policy still needed review',
+  )
   expect(engine.store.datasets([f.file])[0]!.data.preparedPolicy).toBeDefined()
   await expect(engine.execute({ action: 'prune', paths: [f.file] })).rejects.toThrow(
     'not confirmed',

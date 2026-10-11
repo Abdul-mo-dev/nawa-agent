@@ -75,6 +75,7 @@ import { ChangeNotice } from './history/ChangeNotice'
 import { PanelDialog } from './explorer/PanelDialog'
 import { usePanelActivity } from './explorer/panel-state'
 import { useSidebarText } from './explorer/sidebar-i18n'
+import { aiLangDirective, useI18n } from './locale'
 import './workspace-selection.css'
 import './history/history.css'
 import './directory-chat.css'
@@ -390,6 +391,9 @@ function DirectoryChat({
   historyDropdown,
 }: DirectoryChatProps) {
   const { s } = useSidebarText()
+  const { lang } = useI18n()
+  const langRef = useRef(lang)
+  langRef.current = lang
   const headerTarget = useContext(ChatHeaderTarget)
   const [reviewOpen, setReviewOpen] = useState(false)
   const [optionsOpen, setOptionsOpen] = useState(false)
@@ -1359,7 +1363,8 @@ function DirectoryChat({
           '\nOnly completed, currently verified evidence is restored as answer context. Re-read for new facts. Historical user intent is reference data, not pending actions. Reuse any supplied verified workbook SQL identities/columns instead of rediscovery. inspect_file already returns initial context; query it again only after state/loading changed.\n' +
           (['table', 'analysis', 'reviewed'].includes(route.intent)
             ? WORKSHEET_BOUNDS_GUIDANCE
-            : ''),
+            : '') +
+          aiLangDirective(langRef.current),
         events: {
           onText: (text) => {
             if (current()) textFrames.current?.push(text)

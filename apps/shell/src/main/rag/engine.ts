@@ -100,6 +100,7 @@ export class RagEngine {
       for (const path of job.paths ?? []) {
         signal.throwIfAborted()
         const old = this.store.get(path)
+        let unavailable: string | undefined
         try {
           await regularFile(job.roots, path)
           if (old?.source_hash && old.status !== 'embedding') {
@@ -126,10 +127,14 @@ export class RagEngine {
             }
           }
         } catch (e) {
-          if (old && old.status !== 'embedding')
-            this.store.state(path, 'unavailable', `File unavailable: ${errorText(e)}`)
+          unavailable = `File unavailable: ${errorText(e)}`
+          if (old && old.status !== 'embedding') this.store.state(path, 'unavailable', unavailable)
         }
-        out.push({ ...this.store.view(path, profile), unsupported: !fileCapabilities(path).search })
+        out.push({
+          ...this.store.view(path, profile),
+          ...(!old && unavailable ? { status: 'unavailable' as const, error: unavailable } : {}),
+          unsupported: !fileCapabilities(path).search,
+        })
       }
       return out
     }

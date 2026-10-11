@@ -3,6 +3,7 @@ import { FileStatusIcon, type FileStatusState } from '../explorer/FileStatusIcon
 import { pathKey } from '../explorer/model'
 import { useSidebarText } from '../explorer/sidebar-i18n'
 import { useFileStatuses } from '../explorer/useFileStatuses'
+import { fileStatusHelp } from '../explorer/file-status-help'
 
 export function useAnalyticsStatuses(
   files: Array<{ path: string; mtimeMs: number; sizeBytes: number }>,
@@ -15,11 +16,13 @@ export function AnalyticsBadge({
   error,
   progress,
   path = value?.path,
+  expanded,
 }: {
   value?: AnalyticsFileStatus
   error?: string
   progress?: AnalyticsProgress | null
   path?: string
+  expanded?: boolean
 }) {
   const { s } = useSidebarText()
   const current = progress?.running && path && pathKey(progress.current) === pathKey(path)
@@ -54,9 +57,20 @@ export function AnalyticsBadge({
   } else if (value?.state === 'needs-review') {
     state = 'attention'
     label = 'Needs a decision'
+    details.push(
+      s(
+        'Review the table headers, included rows, column types and units using Review table data in More actions.',
+      ),
+    )
   } else if (value?.state === 'changed') {
     state = 'attention'
     label = 'File changed — data needs updating'
+    details.push(s('The saved file differs from the prepared table snapshot.'))
+    details.push(
+      s(
+        'Right-click the file and choose Prepare tables for analysis, then review any flagged table decisions.',
+      ),
+    )
   } else if (value?.state === 'unavailable') {
     state = 'unavailable'
     label = 'Source file unavailable'
@@ -72,5 +86,14 @@ export function AnalyticsBadge({
     label = 'Checking file…'
   }
   if (!error && value?.message && state !== 'busy') details.push(value.message)
-  return <FileStatusIcon state={state} label={s('Analysis') + ': ' + s(label)} details={details} />
+  if (state === 'failed' || value?.state === 'unavailable')
+    details.push(s(fileStatusHelp(error || value?.message || '', 'analysis')))
+  return (
+    <FileStatusIcon
+      state={state}
+      label={s('Analysis') + ': ' + s(label)}
+      details={details}
+      expanded={expanded}
+    />
+  )
 }

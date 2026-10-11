@@ -1,19 +1,28 @@
-import { useEffect, useRef, useState } from 'react'
-import { isWithin } from './model'
+import { useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react'
+import { isWithin, pathKey } from './model'
+import { fileCapabilities } from '../../../shared/file-capabilities'
 import { Icon } from './Icons'
 import { PanelDialog } from './PanelDialog'
 import { usePanelActivity } from './panel-state'
 import { useSidebarText } from './sidebar-i18n'
 
-/** A direct selected-file action. Embeddings and exact table preparation run independently. */
+export interface SelectedFileActions {
+  prepare(folder: string, paths: readonly string[], mode?: 'all' | 'analysis'): Promise<void>
+}
+
+/** The toolbar and context menu share one lock, progress subscription and on-demand details. */
 export function IndexSelectedButton({
   folder,
   selectedFiles,
   onOpenSettings,
+  actionsRef,
+  onBusyChange,
 }: {
   folder: string | null
   selectedFiles: string[]
   onOpenSettings(): void
+  actionsRef?: Ref<SelectedFileActions>
+  onBusyChange?(busy: boolean): void
 }) {
   const { s } = useSidebarText()
   const [submitting, setSubmitting] = useState(false),
@@ -68,6 +77,9 @@ export function IndexSelectedButton({
     paths.length <= 256 &&
     paths.every((path) => isWithin(path, folder))
   const busy = submitting || running
+  useEffect(() => {
+    onBusyChange?.(busy)
+  }, [busy, onBusyChange])
   usePanelActivity(
     'ai',
     'selected-index',
@@ -80,26 +92,41 @@ export function IndexSelectedButton({
           }
         : null,
   )
-  const index = async () => {
-    if (working.current || busy || !valid || !folder) return
+  const prepare = async (
+    requestedFolder: string,
+    requestedPaths: readonly string[],
+    mode: 'all' | 'analysis' = 'all',
+  ) => {
+    const requested = [...new Map(requestedPaths.map((path) => [pathKey(path), path])).values()]
+    if (
+      working.current ||
+      busy ||
+      !requestedFolder ||
+      !requested.length ||
+      requested.length > 256 ||
+      !requested.every((path) => isWithin(path, requestedFolder))
+    )
+      return
     // Selection changes never broaden an in-flight request.
-    const requestedFolder = folder,
-      requested = [...paths]
     working.current = true
     setSubmitting(true)
     setErrors([])
     const embed = async () => {
       const { settings } = await window.nawaRag.settings()
-      if (!settings.enabled || (settings.backend === 'local' && !settings.model.trim()))
-        throw new Error(
-          s('Choose an embedding model in Knowledge settings, then click Index again.'),
-        )
-      await window.nawaRag.indexSelected(requestedFolder, requested, true)
+      const searchable = requested.filter(
+        (path) => settings.backend === 'myagent' || fileCapabilities(path).search,
+      )
+      if (!searchable.length) return
+      // Main records setup failures against the requested files for their status tooltips.
+      await window.nawaRag.indexSelected(requestedFolder, searchable, true)
     }
+    const tables = requested.filter((path) => fileCapabilities(path).analysis)
     try {
       const results = await Promise.allSettled([
-        embed(),
-        window.nawaAnalytics.prepareSelected(requestedFolder, requested),
+        mode === 'all' ? embed() : Promise.resolve(),
+        tables.length
+          ? window.nawaAnalytics.prepareSelected(requestedFolder, tables)
+          : Promise.resolve(),
       ])
       const problems: string[] = []
       for (const [index, result] of results.entries()) {
@@ -107,7 +134,7 @@ export function IndexSelectedButton({
           problems.push(
             `${s(index === 0 ? 'File search' : 'Data analysis')}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
           )
-        else if (index === 1) {
+        else if (index === 1 && result.value) {
           const data = result.value as Awaited<
             ReturnType<typeof window.nawaAnalytics.prepareSelected>
           >
@@ -121,7 +148,6 @@ export function IndexSelectedButton({
       }
       if (alive.current) {
         setErrors(problems)
-        setDetailsOpen(problems.length > 0)
       }
     } finally {
       working.current = false
@@ -131,6 +157,7 @@ export function IndexSelectedButton({
       }
     }
   }
+  useImperativeHandle(actionsRef, () => ({ prepare }))
   const hint = busy
     ? 'Indexing selected files. Progress is shown in the file table.'
     : !paths.length || !folder
@@ -149,7 +176,9 @@ export function IndexSelectedButton({
         disabled={!valid || busy}
         aria-busy={busy}
         title={s(hint)}
-        onClick={() => void index()}
+        onClick={() => {
+          if (valid && folder) void prepare(folder, paths)
+        }}
       >
         <Icon
           name={busy ? 'refresh' : 'search'}
