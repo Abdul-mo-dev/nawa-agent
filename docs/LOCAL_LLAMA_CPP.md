@@ -99,6 +99,22 @@ $env:NAWA_LLAMA_TEST_MODEL = 'Agent-A1-4B'
 npm exec --workspace @genoffice/ai-provider -- vitest run tests/local-llama.integration.test.ts
 ```
 
+The directory-table benchmark runs the actual agent loop, provider streaming, SQLite calculations and source verification against temporary prepared CSV files. It compares the current workflow with schema prefetch disabled and enabled, and checks exact decimal totals, including a value beyond JavaScript's safe integer range. Native editors and the application UI are outside this benchmark's scope.
+
+```powershell
+$env:NAWA_LLAMA_TEST_URL = 'http://127.0.0.1:8083/v1'
+$env:NAWA_LLAMA_TEST_MODEL = 'gemma-4-e4b'
+$env:NAWA_LLAMA_TEST_CONTEXT = '16384'
+$env:NAWA_ANALYTICS_BENCHMARK_REPORT = "$PWD/.task/analytics-live/benchmark.json"
+npm run test -w @genoffice/shell -- tests/analytics-live.test.ts
+```
+
+Ordinary tests skip this live benchmark. Its token counts come from the server's streaming usage, including cached prompt tokens. The optimized workflow must produce correct results; a failed observational baseline is recorded and cannot establish a percentage saving between successful answers. Run order and prompt caching affect wall time. The context setting above is the application's request budget; the running server must support it independently.
+
+For an acceptance run without the comparative baseline, set `NAWA_ANALYTICS_TEST_OPTIMIZED_ONLY=1`. Remove that variable to restore the full comparison.
+
+On 2026-10-11, the Gemma server at port 8083 rejected the SQL tool's array-item type union with `NotImplemented: map: filter-mapping not implemented`. The same scalar types expressed with `anyOf` were accepted. The analytical SQL tool now uses that equivalent schema, allowing full-tool-set token counting and model requests on this server.
+
 ## Implementation references
 
 - [Local endpoint detection](../packages/ai-provider/src/local-endpoint.ts)

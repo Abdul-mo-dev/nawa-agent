@@ -1264,9 +1264,9 @@ function DirectoryChat({
         mutation: directoryMutationSkill(files, selected),
       })
       let tableTaskContext: string | undefined
-      if (route.evidence.calculation && route.target && !preparation) {
+      if (route.evidence.calculation && selected.files.length && !preparation) {
         try {
-          tableTaskContext = await selectedTableTaskContext(files, route.target)
+          tableTaskContext = await selectedTableTaskContext(files, route.target ?? selected.files)
         } catch {
           // Keep tools available to diagnose unavailable, changed or unprepared tables.
         }

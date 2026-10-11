@@ -73,6 +73,10 @@ Before the first chat-model request, Nawa saves the current request identity to 
 
 The chat model receives the question, selected-file context, relevant tool definitions and any accepted prior evidence. It can request tools, read their results and request more tools before drafting the answer.
 
+Numerical requests receive a bounded, source-checked table catalog before the first model call, including questions spanning multiple selected files. Ready table IDs and available columns let the model calculate directly. Omitted schemas, column pages and file statuses remain explicit; the model discovers further metadata only when needed. Compatible metrics share one query, and independent calculations can run within one model tool turn. Native readers supply formulas, definitions and source records when those details are needed.
+
+Routine analytical responses retain exact values, population coverage, warnings, source versions and receipt IDs. Chat previews show at most 20 result rows and label omitted output. Detailed SQL, parameters and request records remain in the saved receipt and can be retrieved with `inspect_result`; it is optional after a successful calculation. This reduces repeated context without changing calculation inputs or final source verification.
+
 The chat model writes the answer; the embedding model helps match questions to indexed passages. Each has its own configuration. The configured chat provider receives the request context and tool outputs, and may run locally or remotely. Choosing llama.cpp for embeddings preserves your separate chat-model choice.
 
 The tools run through Nawa's local application bridge. The background service checks request ownership, registered workspace access, selected paths and tool-specific limits. The model receives bounded results and source references.

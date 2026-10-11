@@ -277,7 +277,7 @@ export function routedDirectorySkill(
   const discover: AgentToolDef = {
     name: 'discover_file_tools',
     description:
-      'Activate additional file capabilities and return their schemas when the current tools are insufficient. Does not grant file access.',
+      'Activate additional file capabilities when current tools are insufficient. Their schemas are advertised in the next model request. Does not grant file access.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -510,8 +510,8 @@ export function routedDirectorySkill(
         return {
           output: JSON.stringify({
             capability,
-            tools: composed().tools,
-            guidance: composed().systemPrompt,
+            tools: composed().tools.map((tool) => tool.name),
+            schemas: 'Activated tool schemas and guidance are available in the next model request.',
           }),
           summary: `Enabled ${capability} tools`,
           mutated: false,

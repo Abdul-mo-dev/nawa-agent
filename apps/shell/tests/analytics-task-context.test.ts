@@ -20,6 +20,13 @@ const dataset = {
   moreColumns: false,
 }
 
+it('does not discover data for an empty file selection', async () => {
+  const analytics = vi.fn()
+  const context = JSON.parse(await selectedTableTaskContext({ analytics }, []))
+  expect(analytics).not.toHaveBeenCalled()
+  expect(context).toMatchObject({ metadataOnly: true, datasets: [], selectedFileCount: 0 })
+})
+
 it('loads the verified Ready schema without importing, reading cells or querying numbers', async () => {
   const analytics = vi.fn().mockResolvedValue({ datasets: [dataset], nextOffset: null })
   const context = JSON.parse(await selectedTableTaskContext({ analytics }, path))
@@ -55,6 +62,15 @@ it('keeps empty, blocked and paginated catalogs explicit instead of assuming rea
   expect(context.nextOffset).toBe(25)
 })
 
+it('preserves approval origin so automatic approval is not presented as human review', async () => {
+  const approval = { by: 'agent', at: 1, reason: 'Validated under saved settings.' }
+  const analytics = vi
+    .fn()
+    .mockResolvedValue({ datasets: [{ ...dataset, approval, preparationState: 'ready' }] })
+  const context = JSON.parse(await selectedTableTaskContext({ analytics }, path))
+  expect(context.datasets[0]).toMatchObject({ approval, preparationState: 'ready' })
+})
+
 it('bounds complete metadata entries and labels omissions without cutting JSON', async () => {
   const analytics = vi.fn().mockResolvedValue({
     datasets: Array.from({ length: 25 }, (_, i) => ({
@@ -69,4 +85,56 @@ it('bounds complete metadata entries and labels omissions without cutting JSON',
   const context = JSON.parse(output)
   expect(context.datasetsOmittedFromThisPage).toBe(25 - context.datasets.length)
   expect(context.nextOffset).toBe(25)
+})
+
+it('provides multiple selected schemas in one read-only call and exposes unsupported coverage', async () => {
+  const second = 'C:\\sample files\\sales.csv'
+  const notes = 'C:\\sample files\\notes.txt'
+  const analytics = vi.fn().mockResolvedValue({
+    datasets: [
+      dataset,
+      { ...dataset, id: 'sales', path: second },
+      { ...dataset, path: 'C:\\outside\\private.xlsx' },
+    ],
+    selectedFiles: [
+      { path, state: 'ready', tables: 1 },
+      { path: second, state: 'ready', tables: 1 },
+      {
+        path: notes,
+        state: 'unsupported',
+        tables: 0,
+        message: 'Use native reading for this file.',
+      },
+      { path: 'C:\\outside\\private.xlsx', state: 'ready', tables: 1 },
+    ],
+    nextOffset: null,
+    nextFileOffset: null,
+  })
+  const context = JSON.parse(await selectedTableTaskContext({ analytics }, [path, second, notes]))
+  expect(analytics).toHaveBeenCalledExactlyOnceWith('discover', { query: '' })
+  expect(context.datasets.map((table: { id: string }) => table.id)).toEqual([
+    'ready-employees',
+    'sales',
+  ])
+  expect(context.selectedFileCount).toBe(3)
+  expect(context.selectedFiles).toHaveLength(3)
+  expect(context.selectedFiles[2]).toMatchObject({ path: notes, state: 'unsupported' })
+  expect(context.guidance).toContain('Independent calculations')
+  expect(context.guidance).toContain('do not union unrelated tables')
+})
+
+it('retains both dataset and file pagination when providing schemas for a large selection', async () => {
+  const paths = Array.from({ length: 40 }, (_, i) => `C:\\tables\\${i}.csv`)
+  const analytics = vi.fn().mockResolvedValue({
+    datasets: paths.slice(0, 25).map((path, i) => ({ ...dataset, id: `dataset-${i}`, path })),
+    selectedFiles: paths.slice(0, 16).map((path) => ({ path, state: 'ready', tables: 1 })),
+    nextOffset: 25,
+    nextFileOffset: 16,
+  })
+  const output = await selectedTableTaskContext({ analytics }, paths)
+  const context = JSON.parse(output)
+  expect(new TextEncoder().encode(output).length).toBeLessThanOrEqual(6000)
+  expect(context).toMatchObject({ selectedFileCount: 40, nextOffset: 25, nextFileOffset: 16 })
+  expect(context.datasetsOmittedFromThisPage).toBe(25 - context.datasets.length)
+  expect(context.selectedFilesOmittedFromThisPage).toBe(16 - context.selectedFiles.length)
 })

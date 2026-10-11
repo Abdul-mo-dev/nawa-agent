@@ -102,6 +102,39 @@ it('retries a premature column question with native analysis instead of finalizi
   expect(finished.mock.calls[0][0].text).not.toContain('specify the column')
 })
 
+it('advertises activated schemas without duplicating them and their prompt in tool history', async () => {
+  const inputSchema = {
+    type: 'object',
+    properties: { filters: { description: 'Detailed schema '.repeat(100), type: 'array' } },
+  }
+  const part = (name: string): AgentSkill => ({
+    id: name,
+    systemPrompt: 'Detailed evidence guidance '.repeat(100),
+    tools: [{ name, description: 'Tool description', inputSchema }],
+    executeTool: () => ({ output: '{}', summary: 'done' }),
+  })
+  const skill = routedDirectorySkill(directoryRoute('list selected files', scope), {
+    reader: part('list_files'),
+    inspection: part('inspect_file'),
+    analytics: part('query_data'),
+    knowledge: part('discover_knowledge_tools'),
+    mutation: part('update_file'),
+  })
+  expect(skill.tools.some((tool) => tool.name === 'query_data')).toBe(false)
+  const activation = await skill.executeTool({
+    id: 'activate',
+    name: 'discover_file_tools',
+    input: { capability: 'analysis' },
+  })
+  const value = JSON.parse(activation.output)
+  expect(value.tools).toContain('query_data')
+  expect(value).not.toHaveProperty('guidance')
+  expect(value).not.toHaveProperty('inputSchema')
+  expect(skill.tools.find((tool) => tool.name === 'query_data')?.inputSchema).toEqual(inputSchema)
+  expect(skill.systemPrompt).toContain('Detailed evidence guidance')
+  expect(activation.output.length).toBeLessThan(300)
+})
+
 it.each([
   'prepare these tables for analysis',
   'prepare employee-data.xlsx for native analysis',

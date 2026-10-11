@@ -189,12 +189,14 @@ describe('sanitizeAiSettings', () => {
   })
 
   it('keeps Windows-style paths with spaces and non-ASCII (reviewer case: C:\\Users\\Ana María\\codex.exe)', () => {
-    // on POSIX the reviewer's string cannot name a real file, so exercise the
-    // same shape (backslashes, dot, space, í) as a literal file name; on
-    // Windows the exact reviewer string is stat'd directly and behaves the same
+    // POSIX permits the Windows spelling as a literal filename. Windows needs
+    // a real nested path; an embedded drive letter would make the fixture invalid.
     const dir = mkdtempSync(join(tmpdir(), 'genoffice-ai-guard-'))
     tempDirs.push(dir)
-    const cliPath = join(dir, 'C:\\Users\\Ana María\\codex.exe')
+    const cliPath = process.platform === 'win32'
+      ? join(dir, 'Ana María', 'codex.exe')
+      : join(dir, 'C:\\Users\\Ana María\\codex.exe')
+    if (process.platform === 'win32') mkdirSync(join(dir, 'Ana María'))
     writeFileSync(cliPath, 'bin\n')
     expect(validCliPath(cliPath)).toBe(true)
   })
