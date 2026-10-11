@@ -30,6 +30,7 @@ import {
 import type { OpFailure } from '../op-errors'
 
 const FORMULAS_NOT_CACHED = (message: string): Warning => ({ code: 'formulas_not_cached', message })
+const FORMULA_ERRORS = (message: string): Warning => ({ code: 'formula_errors', message })
 
 export const sheetCommand: CommandDef = {
   name: 'sheet',
@@ -76,8 +77,7 @@ export const sheetCommand: CommandDef = {
     { name: 'out', value: 'path', description: 'apply: write here instead of in place' },
     {
       name: 'force',
-      description:
-        'apply: overwrite an existing --out file, or write while Nawa has the file open',
+      description: 'apply: overwrite an existing --out file, or write while Nawa has the file open',
     },
   ],
   async run(args, ctx) {
@@ -416,8 +416,14 @@ async function applyCells(
   }
 }
 
-function writeWarnings(w: { warning?: string; notes?: Warning[] }): { warnings?: Warning[] } {
-  const warnings = [...(w.warning ? [FORMULAS_NOT_CACHED(w.warning)] : []), ...(w.notes ?? [])]
+function writeWarnings(w: { warning?: string; formulaError?: string; notes?: Warning[] }): {
+  warnings?: Warning[]
+} {
+  const warnings = [
+    ...(w.warning ? [FORMULAS_NOT_CACHED(w.warning)] : []),
+    ...(w.formulaError ? [FORMULA_ERRORS(w.formulaError)] : []),
+    ...(w.notes ?? []),
+  ]
   return warnings.length ? { warnings } : {}
 }
 

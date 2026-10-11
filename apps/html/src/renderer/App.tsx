@@ -7,6 +7,8 @@ import {
   useAutoSavePref,
   type FindPanelStrings,
   type FindTarget,
+  aiPanelInitiallyOpen,
+  rememberAiPanelOpen,
 } from '@genoffice/ui'
 import {
   pollUntilReady,
@@ -14,7 +16,12 @@ import {
 } from '@genoffice/electron-utils/headless-export'
 import { useI18n } from './i18n/locale'
 import { parseDocText, serializeDocText, type Envelope } from './document/envelope'
-import { SourceEditor, type CursorInfo, type SourceEditorHandle } from './source/SourceEditor'
+import {
+  SourceEditor,
+  type CursorInfo,
+  type SourceRange,
+  type SourceEditorHandle,
+} from './source/SourceEditor'
 import { PreviewFrame, type PreviewFrameHandle } from './preview/PreviewFrame'
 import { instrumentForPreview } from './preview/instrument'
 import type { ComputedSnapshot, ElementRect, FromInspector } from './preview/inspector-protocol'
@@ -24,10 +31,10 @@ import { AiAskPopover, type AnchorRect, type AskMode } from './components/AiAskP
 import {
   EDIT_QUEUE_MAX,
   buildSelectionInstruction,
-  excerptOf,
   resolveQueueItem,
   type EditQueueItem,
 } from './ai/edit-queue'
+import { buildProjection } from './ai/redact'
 import { Breadcrumb, type NodeState } from './components/Breadcrumb'
 import {
   Ribbon,
@@ -38,6 +45,8 @@ import {
 } from './components/Ribbon'
 import { CropDialog, CutoutDialog, type ImageDialogLabels } from '@genoffice/ui'
 import { FloatToolbar } from './components/FloatToolbar'
+import { RedactDialog } from './components/RedactDialog'
+import { redactClearPlan, redactMarkPlan, type RedactPlan } from './document/redact-edit'
 import {
   insertOp,
   insertPresetHtml,
@@ -45,6 +54,8 @@ import {
   TEXT_INSERT_KINDS,
   type InsertKind,
 } from './document/insert-presets'
+import { isDocEmpty } from './document/blank'
+import { documentSkeleton } from './document/skeleton'
 import { moveTarget } from './document/move-target'
 import { StylePanel } from './components/StylePanel'
 import { floatPosition, parseDeclarations } from './document/float-position'
@@ -58,7 +69,9 @@ import {
 import { compileOps, type HtmlOp, type OpError } from './document/ops'
 import { injectBrief, parseBrief, type Brief } from './document/brief'
 import { applyPatches } from './document/patch'
+import { adoptImageRewrites } from './document/image-rewrites'
 import { deriveAutoFileName, deriveNameFromPrompt, derivePageTitleName } from './document/auto-name'
+import { runGuardedPrint } from './print-guard'
 import type { ExportFormat, SaveMode } from '../shared/ipc'
 
 type LoadStatus = 'loading' | 'ready' | 'error'
@@ -113,7 +126,7 @@ async function loadImageDataUrl(src: string): Promise<string | null> {
 }
 
 export default function App() {
-  const { t } = useI18n()
+  const { lang, t } = useI18n()
   const [status, setStatus] = useState<LoadStatus>('loading')
   const [path, setPath] = useState<string | null>(null)
   const [text, setText] = useState('')
@@ -132,7 +145,7 @@ export default function App() {
   const [previewNonce, setPreviewNonce] = useState(0)
   const [draftHtml, setDraftHtml] = useState<string | null>(null)
   const [historyState, setHistoryState] = useState({ undo: false, redo: false })
-  const [aiOpen, setAiOpen] = useState(() => localStorage.getItem('htmlapp.showAi') !== '0')
+  const [aiOpen, setAiOpen] = useState(() => aiPanelInitiallyOpen('htmlapp.showAi'))
   const [aiPreset, setAiPreset] = useState<AiPreset | null>(null)
   const [editQueue, setEditQueue] = useState<EditQueueItem[]>([])
   const [askMode, setAskMode] = useState<AskMode | null>(null)
@@ -190,6 +203,8 @@ export default function App() {
     src: string
     image: string
   } | null>(null)
+  /** the range awaiting a label, with the selection text it was opened on */
+  const [redactDialog, setRedactDialog] = useState<(SourceRange & { seed: string }) | null>(null)
 
   const editorRef = useRef<SourceEditorHandle>(null)
   const previewRef = useRef<PreviewFrameHandle>(null)
@@ -199,6 +214,7 @@ export default function App() {
   const savingRef = useRef(false)
   const statusRef = useRef<LoadStatus>('loading')
   const pushedTextRef = useRef<string | null>(null)
+  const previewTimerRef = useRef<number | null>(null)
   /** parse-map version of the copy currently served to the preview; messages from older copies are ignored */
   const pushedVersionRef = useRef(-1)
   /** versions whose sids the running frame still describes: the loaded copy plus every in-place commit since
@@ -294,6 +310,10 @@ export default function App() {
    */
   const pushPreview = useCallback(
     (nextText: string, reload = true) => {
+      if (previewTimerRef.current !== null) {
+        window.clearTimeout(previewTimerRef.current)
+        previewTimerRef.current = null
+      }
       if (pushedTextRef.current === nextText) return
       const map = getMap()
       window.htmlApi.updatePreview(instrumentForPreview(nextText, map, inspectorSource))
@@ -309,8 +329,17 @@ export default function App() {
   // push the instrumented buffer to html-preview:// and reload the frame, debounced per keystroke
   useEffect(() => {
     if (status !== 'ready' || pushedTextRef.current === text) return
-    const id = window.setTimeout(() => pushPreview(text), PREVIEW_DEBOUNCE_MS)
-    return () => window.clearTimeout(id)
+    if (previewTimerRef.current !== null) window.clearTimeout(previewTimerRef.current)
+    previewTimerRef.current = window.setTimeout(() => {
+      previewTimerRef.current = null
+      pushPreview(text)
+    }, PREVIEW_DEBOUNCE_MS)
+    return () => {
+      if (previewTimerRef.current !== null) {
+        window.clearTimeout(previewTimerRef.current)
+        previewTimerRef.current = null
+      }
+    }
   }, [text, status, pushPreview])
 
   useEffect(() => {
@@ -327,7 +356,7 @@ export default function App() {
   }, [canvasMode])
 
   useEffect(() => {
-    localStorage.setItem('htmlapp.showAi', aiOpen ? '1' : '0')
+    rememberAiPanelOpen('htmlapp.showAi', aiOpen)
   }, [aiOpen])
 
   useEffect(() => {
@@ -368,7 +397,7 @@ export default function App() {
 
   /** every text change goes through here so the version counter and the map cache stay coherent */
   const commitText = useCallback(
-    (next: string, manual: boolean) => {
+    (next: string, manual: boolean, preservePending = false) => {
       textRef.current = next
       versionRef.current += 1
       if (manual) lastManualVersionRef.current = versionRef.current
@@ -376,7 +405,7 @@ export default function App() {
       setTextSel(null)
       // any other document change reloads the preview and drops the live pokes; forget them too rather than
       // committing them later against sids the rebuilt parse map may have reassigned
-      if (!flushingStylesRef.current) {
+      if (!flushingStylesRef.current && !preservePending) {
         if (styleTimerRef.current !== null) window.clearTimeout(styleTimerRef.current)
         styleTimerRef.current = null
         pendingStylesRef.current = {}
@@ -415,8 +444,17 @@ export default function App() {
     [commitText, getMap],
   )
 
+  const flushStylesRef = useRef<(() => void) | null>(null)
+  const flushDraftsRef = useRef<(() => void) | null>(null)
+  /** land live style pokes and open panel drafts in the source before anything reads, saves or edits it */
+  const flushPending = useCallback(() => {
+    flushDraftsRef.current?.()
+    flushStylesRef.current?.()
+  }, [])
+
   const replaceAll = useCallback(
     (html: string, highlight: boolean) => {
+      flushPending()
       // a generated document carries the confirmed brief so later turns (and re-opens) stay anchored to it
       const pinned =
         highlight && briefRef.current && !parseBrief(html)
@@ -427,16 +465,8 @@ export default function App() {
       frameScrollRef.current = null
       commitText(pinned, false)
     },
-    [commitText],
+    [commitText, flushPending],
   )
-
-  const flushStylesRef = useRef<(() => void) | null>(null)
-  const flushDraftsRef = useRef<(() => void) | null>(null)
-  /** land live style pokes and open panel drafts in the source before anything reads, saves or edits it */
-  const flushPending = useCallback(() => {
-    flushStylesRef.current?.()
-    flushDraftsRef.current?.()
-  }, [])
 
   /** apply a toolbar/inspector batch; the selection follows the edited element (or clears when it is gone) */
   const runManual = useCallback(
@@ -504,6 +534,72 @@ export default function App() {
     [applyOps, getMap, flushPending, pushPreview],
   )
 
+  /**
+   * Land a redaction plan. The marks the op vocabulary can express go through
+   * `runManual`, so they are validated, journaled and undoable like any toolbar
+   * edit; the one insertion that no op can address (the comment in front of a
+   * `<script>` literal) is spliced through the same patch primitive and the same
+   * commit path, one step earlier in the pipeline.
+   */
+  const applyRedaction = useCallback(
+    (plan: RedactPlan | null): boolean => {
+      if (!plan) return false
+      if (plan.ops.length > 0) return runManual(plan.ops, 'keep')
+      if (plan.patches.length === 0) return false
+      // pending style pokes land first: they move the offsets the plan was built on
+      flushPending()
+      const base = textRef.current
+      editorRef.current?.applyPatches(plan.patches, false)
+      commitText(applyPatches(base, plan.patches), true)
+      return true
+    },
+    [commitText, flushPending, runManual],
+  )
+
+  /**
+   * The source pane's "hide this from the model" command.
+   *
+   * An already-marked region is taken off rather than labelled again, which is
+   * what makes coming back to a mark undo it. The seed is collapsed to one line
+   * because a selection can cross lines and the label goes into a single-line
+   * field — and because a label is meant to name the span, not quote it. The raw
+   * selection is kept alongside it: a mark may only be written over the exact text
+   * the reader was looking at when they opened the dialog.
+   */
+  const onRedactSelection = useCallback(
+    (range: SourceRange) => {
+      flushPending()
+      const base = textRef.current
+      const clear = redactClearPlan(base, getMap(), range.from, range.to)
+      if (clear) {
+        applyRedaction(clear)
+        return
+      }
+      setRedactDialog({ ...range, seed: range.text.replace(/\s+/g, ' ').trim() })
+    },
+    [applyRedaction, flushPending, getMap],
+  )
+
+  /** the label is in: write the mark, unless the range moved out from under the dialog */
+  const confirmRedaction = useCallback(
+    (label: string) => {
+      const range = redactDialog
+      setRedactDialog(null)
+      if (!range) return
+      flushPending()
+      const base = textRef.current
+      if (base.slice(range.from, range.to) !== range.text) return
+      applyRedaction(redactMarkPlan(base, getMap(), range.from, range.to, label))
+      editorRef.current?.focus()
+    },
+    [applyRedaction, flushPending, getMap, redactDialog],
+  )
+
+  const cancelRedaction = useCallback(() => {
+    setRedactDialog(null)
+    editorRef.current?.focus()
+  }, [])
+
   // ── selection model: one current element shared by the preview, the source pane, the toolbar and the AI ──
 
   const selectSidRef = useRef<
@@ -545,8 +641,9 @@ export default function App() {
     const src = textRef.current
     // one pin per element; several queued edits on the same element share it and list their ordinals
     const bySid = new Map<number, string[]>()
+    const proj = map && buildProjection(src, map)
     items.forEach((item, i) => {
-      const target = map && resolveQueueItem(src, map, item).target
+      const target = proj && resolveQueueItem(proj, map, item).target
       if (target) bySid.set(target.sid, [...(bySid.get(target.sid) ?? []), String(i + 1)])
     })
     const marks = [...bySid].map(([sid, ordinals]) => ({ sid, label: ordinals.join('·') }))
@@ -575,9 +672,10 @@ export default function App() {
         }
         case 'gx:markClick': {
           const map = getMap()
+          const proj = buildProjection(textRef.current, map)
           // a shared pin opens the most recent edit on that element; the others stay reachable from the queue card
           const item = editQueueRef.current
-            .filter((q) => resolveQueueItem(textRef.current, map, q).target?.sid === msg.sid)
+            .filter((q) => resolveQueueItem(proj, map, q).target?.sid === msg.sid)
             .at(-1)
           if (!item) return
           selectSid(item.sid, { reveal: true })
@@ -778,6 +876,14 @@ export default function App() {
     if (rel && selectedSidRef.current === sid)
       runManual([{ op: 'set_attr', sid, name: 'src', value: rel }])
   }
+  /** ribbon Insert > Insert skeleton: a standards-mode page in the UI language, for a still-blank document */
+  const insertSkeleton = useCallback(() => {
+    // the menu is disabled once the page has content, and re-checked here so
+    // the action cannot fire from a stale render (a keyboard path, a queued click)
+    if (!isDocEmpty(textRef.current)) return
+    replaceAll(documentSkeleton(lang), false)
+  }, [lang, replaceAll])
+
   /** ribbon Insert menu: a starter element after the selection (or at the end of the body), then straight into editing */
   const insertElement = async (kind: InsertKind, opts: InsertOptions = {}) => {
     let imageSrc: string | undefined
@@ -884,7 +990,8 @@ export default function App() {
     return {
       sid: selectedEntry.sid,
       tag: selectedEntry.tag,
-      excerpt: excerptOf(text, selectedEntry),
+      // user-facing popover: the raw source text, unlike the queue's model-facing excerpt
+      excerpt: sourceText(text, selectedEntry).trim() || `<${selectedEntry.tag}>`,
       start: selectedEntry.range[0],
     }
   }, [selectedEntry, text])
@@ -910,7 +1017,7 @@ export default function App() {
     setEditQueue((prev) => prev.filter((q) => !qids.includes(q.qid)))
   const queueFocus = (qid: string) => {
     const item = editQueue.find((q) => q.qid === qid)
-    const target = item && resolveQueueItem(text, getMap(), item).target
+    const target = item && resolveQueueItem(buildProjection(text, getMap()), getMap(), item).target
     if (target) selectSid(target.sid, { reveal: true })
   }
   const askSendNow = (instruction: string) => {
@@ -1088,15 +1195,21 @@ export default function App() {
           defaultName: provisionalNameRef.current ?? undefined,
         })
         if (result.ok && 'path' in result) {
+          const adopted = adoptImageRewrites(textAtSave, textRef.current, result.imageRewrites)
+          if (adopted.liveText !== textRef.current) {
+            editorRef.current?.setDoc(adopted.liveText)
+            commitText(adopted.liveText, false, true)
+          }
           setPath((previous) => {
-            // a new path changes the preview's <base>; relative assets only resolve after a reload
             if (previous !== result.path) setPreviewNonce((n) => n + 1)
             return result.path
           })
-          setSavedText(textAtSave)
-          // edits that landed during the write keep the document dirty
-          setSaveState(textRef.current === textAtSave ? 'saved' : 'idle')
-          if (textRef.current !== textAtSave) window.htmlApi.setDirty(true)
+          savedTextRef.current = adopted.savedText
+          setSavedText(adopted.savedText)
+          const saved = adopted.liveText === adopted.savedText
+          setSaveState(saved ? 'saved' : 'idle')
+          if (!saved) window.htmlApi.setDirty(true)
+          pushPreview(adopted.liveText)
           return true
         }
         setSaveState(result.ok ? 'idle' : 'failed')
@@ -1109,7 +1222,7 @@ export default function App() {
         savingRef.current = false
       }
     },
-    [flushPending],
+    [commitText, flushPending, pushPreview],
   )
 
   const zoomIn = useCallback(() => setZoom((z) => clampZoom(Math.round(z) + ZOOM_STEP)), [])
@@ -1157,10 +1270,35 @@ export default function App() {
         setNotice(t('exportFailed'))
         return false
       }
+      if ('skipped' in result && result.skipped?.length) {
+        setNotice(
+          t('exportHtmlSkipped', { count: result.skipped.length, first: result.skipped[0]! }),
+        )
+      }
       return !('canceled' in result)
     } finally {
       exportingRef.current = false
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- t is not referentially stable
+  }, [])
+
+  const printingRef = useRef(false)
+  const runPrint = useCallback(async () => {
+    if (statusRef.current !== 'ready') return false
+    return runGuardedPrint(
+      printingRef,
+      async () => {
+        // serialize inside the gate so a throw still releases the flag
+        flushPending()
+        return window.htmlApi.printHtml({
+          html: serializeDocText({ text: textRef.current, envelope: envelopeRef.current }),
+        })
+      },
+      (error) => {
+        console.error('[html] print failed:', error)
+        setNotice(t('printFailed', { error }))
+      },
+    )
     // eslint-disable-next-line react-hooks/exhaustive-deps -- t is not referentially stable
   }, [])
 
@@ -1227,6 +1365,9 @@ export default function App() {
     })
     const offRenamed = window.htmlApi.onFileRenamed((next) => setPath(next))
     const offExport = window.htmlApi.onExportRequest((format) => void runExport(format))
+    // Shell menu Print / ⌘P. The menu owns the accelerator, so this subscription
+    // is the only route the keystroke takes; without it ⌘P did nothing at all.
+    const offPrint = window.htmlApi.onPrintRequest(() => void runPrint())
     const offTheme = window.htmlApi.onThemeChanged(() => {
       // let main.tsx flip data-theme first
       window.setTimeout(
@@ -1247,7 +1388,8 @@ export default function App() {
         event.preventDefault()
         openFind(false)
       } else if (key === 'h' && !event.shiftKey) {
-        // Word's replace shortcut; macOS Cmd+H is the system hide role and never reaches here
+        // Word's replace shortcut: Ctrl+H on Windows/Linux, Control+H on macOS —
+        // its ⌘H belongs to the system Hide role, so the menu keeps that key
         event.preventDefault()
         openFind(true)
       } else if (key === '=' || key === '+') {
@@ -1278,10 +1420,11 @@ export default function App() {
       offClose()
       offRenamed()
       offExport()
+      offPrint()
       offTheme()
       window.removeEventListener('keydown', onKeyDown, true)
     }
-  }, [doSave, runExport, cycleView, zoomIn, zoomOut, flushPending, openFind])
+  }, [doSave, runExport, runPrint, cycleView, zoomIn, zoomOut, flushPending, openFind])
 
   // pinch / ctrl+wheel over the stage chrome around the frame; wheel inside the frame arrives as gx:zoom
   useEffect(() => {
@@ -1430,6 +1573,8 @@ export default function App() {
         onToggleAi={() => setAiOpen((v) => !v)}
         canInsert={canvasMode === 'edit'}
         onInsert={(kind, opts) => void insertElement(kind, opts)}
+        onInsertSkeleton={insertSkeleton}
+        canInsertSkeleton={canvasMode === 'edit' && isDocEmpty(textRef.current)}
         onAiPreset={(text) => {
           flushPending()
           setAiOpen(true)
@@ -1583,6 +1728,8 @@ export default function App() {
                 initialText={text}
                 onChange={onEditorChange}
                 onCursor={onCursor}
+                onBeforeReplace={flushPending}
+                onRedact={onRedactSelection}
               />
             </div>
           </div>
@@ -1671,6 +1818,13 @@ export default function App() {
           queueFull={editQueue.length >= EDIT_QUEUE_MAX}
         />
       )}
+      {redactDialog && (
+        <RedactDialog
+          seed={redactDialog.seed}
+          onSubmit={confirmRedaction}
+          onCancel={cancelRedaction}
+        />
+      )}
       {pictureDialog?.kind === 'cutout' && (
         <CutoutDialog
           labels={imageDialogLabels}
@@ -1682,6 +1836,7 @@ export default function App() {
       {pictureDialog?.kind === 'crop' && (
         <CropDialog
           labels={imageDialogLabels}
+          lang={lang}
           image={pictureDialog.image}
           onApply={(png) => void applyPictureBytes(pictureDialog.sid, pictureDialog.src, png)}
           onCancel={() => setPictureDialog(null)}

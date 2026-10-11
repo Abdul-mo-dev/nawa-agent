@@ -1,12 +1,23 @@
 import type { zh } from './zh'
 
 export const id = {
+  redactMenuLabel: 'Sembunyikan pilihan dari AI',
+  redactDialogDesc:
+    'Kata-kata tetap ada di dokumen dan berkas; model hanya melihat placeholder di bawah. Beri nama agar model tahu apa yang diwakili.',
+  redactDialogScope:
+    'Penyembunyian ini hanya berlaku untuk AI di aplikasi ini. CLI, alat MCP, dan ekspor tanpa antarmuka membaca berkas secara langsung, sehingga kata-kata ini tetap terlihat olehnya.',
+  redactDialogPlaceholder: 'Nama placeholder, mis. telepon pelanggan',
+  redactCancel: 'Batal',
+  redactInsert: 'Sembunyikan',
+
   loading: 'Memuat…',
   loadFailed: 'Tidak dapat membuka file',
   untitled: 'Tanpa judul',
   saveFailed: 'Gagal menyimpan: {error}',
   saveFailedStatus: 'Gagal menyimpan',
   exportFailed: 'Ekspor gagal',
+  printFailed: 'Gagal mencetak: {error}',
+  exportHtmlSkipped: 'Diekspor, tetapi {count} aset tidak dapat disematkan (mis. {first})',
   viewPreview: 'Pratinjau',
   viewSplit: 'Terpisah',
   viewSource: 'Sumber',
@@ -53,7 +64,6 @@ export const id = {
   save: 'Simpan (⌘S)',
   saveAs: 'Simpan Sebagai…',
   ribbonCollapse: 'Ciutkan Pita',
-  ribbonPin: 'Sematkan Pita',
   ribbonExpand: 'Perluas Pita',
   ribbonGroupInsert: 'Sisipkan',
   editText: 'Edit teks',
@@ -119,6 +129,7 @@ export const id = {
   insertImageUrl: 'Gambar dari URL…',
   insertConfirm: 'Sisipkan',
   insertMore: 'Lainnya',
+  insertSkeleton: 'Sisipkan kerangka',
   insertTableSize: 'Tabel {r}×{c}',
   insertTablePickSize: 'Pilih ukuran tabel',
   insertPlaceholderTableHeader: 'Judul {n}',

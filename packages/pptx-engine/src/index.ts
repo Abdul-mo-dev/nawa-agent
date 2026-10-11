@@ -4,6 +4,7 @@
  * Phase 1 scope: openPptx (parsing) + savePptx's "no changes = byte identical"
  * path (proving fidelity). Element-level patch regeneration is left for Phase 3.
  */
+import { stripRedactExt, syncRedactExt } from './redaction-xml'
 import JSZip from 'jszip'
 import { PackageArchive, relsPathFor, resolveTarget, type Relationship } from './zip'
 import { parseClrMap, parseTheme, type Theme } from './theme'
@@ -57,13 +58,14 @@ import {
   type NewTableOptions,
 } from './insert'
 import { BLANK_SLIDE_XML } from './blank'
-import { escapeXmlAttr } from './xml-utils'
+import { escapeXmlAttr, hasContentTypeOverride, maxRelationshipIdNumber } from './xml-utils'
 import { elementSpid } from './animation'
 import { stripStaleEmbeddedFonts } from './embedded-fonts'
 import { ensureCreationId, matchesElementRef } from './identity'
 import { listMasterParts, parseMasterPart } from './master-edit'
 import type {
   Paragraph,
+  TextRun,
   PPrDirty,
   SlideDeck,
   Slide,
@@ -93,6 +95,15 @@ import { moveSlide } from './sections'
 import { cleanupSupersededSlideResources, removePartWithOwnedResources } from './resource-cleanup'
 
 export * from './types'
+export {
+  REDACT_EXT_URI,
+  hasRedactExtIn,
+  readRedactLabel,
+  redactExtXml,
+  setRedactExt,
+  stripRedactExt,
+  syncRedactExt,
+} from './redaction-xml'
 export { cleanupSupersededSlideResources }
 export type { ResourceCleanupStats } from './resource-cleanup'
 export {
@@ -170,6 +181,7 @@ export {
   buildSpXml,
   buildTableXml,
   buildTableGridXml,
+  MAX_INSERT_TABLE_DIM,
   buildGrpSpXml,
   calcBoundingBox,
   type NewElementOptions,
@@ -682,11 +694,18 @@ export function reparseDeck(opened: OpenedPptx): OpenedPptx {
  *   even flagged dirty they use original bytes.
  */
 export async function savePptx(opened: OpenedPptx): Promise<Uint8Array> {
-  return buildZip(opened).generateAsync({
-    type: 'uint8array',
-    compression: 'DEFLATE',
-    compressionOptions: { level: 6 },
-  })
+  try {
+    return await buildZip(opened).generateAsync({
+      type: 'uint8array',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 6 },
+    })
+  } catch (err) {
+    // A save that never landed cannot vouch for any edit: drop the snapshot so
+    // a later commitSaved bakes the deck instead of clearing it.
+    saveSnapshot.delete(opened)
+    throw err
+  }
 }
 
 /**
@@ -708,8 +727,22 @@ export async function savePptxToFile(opened: OpenedPptx, filePath: string): Prom
     compressionOptions: { level: 6 },
     streamFiles: true,
   })
-  await pipeline(source, createWriteStream(filePath))
+  try {
+    await pipeline(source, createWriteStream(filePath))
+  } catch (err) {
+    saveSnapshot.delete(opened)
+    throw err
+  }
 }
+
+/**
+ * The slide XML each in-flight save pulled into its package, keyed by the
+ * opened deck. buildZip records it before the stream starts, and commitSaved
+ * clears dirty state only for the slides it matches — a slide that was clean
+ * at snapshot time, or whose XML moved afterwards, holds edits the finished
+ * write never contained.
+ */
+const saveSnapshot = new WeakMap<OpenedPptx, Map<string, string>>()
 
 /**
  * Sync the in-memory model with what savePptx/savePptxToFile just wrote, without
@@ -722,14 +755,18 @@ export async function savePptxToFile(opened: OpenedPptx, filePath: string): Prom
  * patchedElementXml pair as buildZip, so memory and disk are byte-identical and
  * the next save's byte slices are safe to reuse.
  *
+ * Only slides the finished save actually carried are cleared, so an edit
+ * committed while the stream was running stays dirty and lands in the next save.
  * Call only after a successful save; on failure keep the dirty state so the next
  * save retries the patches.
  */
 export function commitSaved(opened: OpenedPptx): void {
   const { deck, archive } = opened
+  const snapshot = saveSnapshot.get(opened)
   for (const slide of deck.slides) {
     if (!slideIsDirty(slide)) continue
     const xml = patchSlideXml(slide)
+    if (snapshot && snapshot.get(slide.path) !== xml) continue
     for (const el of slide.elements) {
       el.anchor.originalXml = patchedElementXml(el)
       delete el.dirty
@@ -743,6 +780,7 @@ export function commitSaved(opened: OpenedPptx): void {
     delete slide.structureDirty
     archive.entries.set(slide.path, Buffer.from(xml, 'utf8'))
   }
+  saveSnapshot.delete(opened)
 }
 
 /**
@@ -765,16 +803,17 @@ function slideIsDirty(s: Slide): boolean {
 function buildZip(opened: OpenedPptx): JSZip {
   const { deck, archive } = opened
   stripStaleEmbeddedFonts(deck, archive)
-  const dirtyByPath = new Map<string, Slide>()
+  const patched = new Map<string, string>()
   for (const s of deck.slides) {
-    if (slideIsDirty(s)) dirtyByPath.set(s.path, s)
+    if (slideIsDirty(s)) patched.set(s.path, patchSlideXml(s))
   }
+  saveSnapshot.set(opened, patched)
 
   const zip = new JSZip()
   for (const [path, data] of archive.entries) {
-    const slide = dirtyByPath.get(path)
-    if (slide) {
-      zip.file(path, patchSlideXml(slide))
+    const xml = patched.get(path)
+    if (xml !== undefined) {
+      zip.file(path, xml)
       continue
     }
     const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase()
@@ -957,8 +996,7 @@ function imageRelFor(archive: PackageArchive, slide: Slide, mediaPath: string): 
   const rels =
     archive.readText(relsPath) ??
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>'
-  let maxRid = 0
-  for (const m of rels.matchAll(/Id="rId(\d+)"/g)) maxRid = Math.max(maxRid, Number(m[1]))
+  const maxRid = maxRelationshipIdNumber(rels)
   const rid = `rId${maxRid + 1}`
   // slide parts live in ppt/slides/, media in ppt/media/
   const target = mediaPath.replace(/^ppt\//, '../')
@@ -1714,6 +1752,40 @@ export function setElementImageFill(
 }
 
 /**
+ * Withhold a picture, video or audio shape from the model, or stop withholding it
+ * (`label` null/empty clears). A `label` puts `go:redact` in the element's
+ * `<a:spPr><a:extLst>` — the one extension slot a picture has, since `p:nvPicPr`
+ * admits only `cNvPr` + `cNvPicPr` and `cNvPr` takes attributes alone, which the
+ * reader's own alt text already uses.
+ *
+ * The words of a *text* element are withheld through `TextRun.redact` on the edit
+ * path instead, because a run is a finer unit than an element and the text-edit
+ * pipeline already carries run attributes.
+ *
+ * Byte surgery on `originalXml` with no separate dirty flag, exactly as
+ * `setPictureOpacity` does for `a:alphaModFix`: a picture's shape properties are
+ * never regenerated from the model, so this is the only place the mark can live.
+ */
+export function setElementRedaction(slide: Slide, sourceId: string, label: string | null): boolean {
+  const el = slide.elements.find((e) => e.id === sourceId && e.type === 'picture')
+  if (!el) return false
+  const pic = el as import('./types').PictureElement
+  const clean = (label ?? '').trim()
+  const next = clean
+    ? syncRedactExt(patchedElementXml(el), 'p:spPr', clean)
+    : stripRedactExt(patchedElementXml(el))
+  if (next === patchedElementXml(el)) return false
+  if (clean) pic.redact = clean
+  else delete pic.redact
+  el.dirty = el.dirtyTransform = el.dirtyFill = el.dirtyStroke = false
+  el.dirtySrcRect = false
+  el.dirtyPPr = undefined
+  el.anchor.originalXml = next
+  slide.structureDirty = true
+  return true
+}
+
+/**
  * Whole-picture opacity (0..1; ≥1 clears alphaModFix). Byte surgery on the
  * <a:blip> child, baked directly into originalXml (no separate dirty flag).
  */
@@ -1843,8 +1915,7 @@ function registerNewSlide(opened: OpenedPptx, sourceIndex: number, newPath: stri
   const presPath = 'ppt/presentation.xml'
   const pres = archive.readText(presPath)
   if (!presRels || !pres) return null
-  let maxRid = 0
-  for (const m of presRels.matchAll(/Id="rId(\d+)"/g)) maxRid = Math.max(maxRid, Number(m[1]))
+  const maxRid = maxRelationshipIdNumber(presRels)
   const newRid = `rId${maxRid + 1}`
   const relXml = `<Relationship Id="${newRid}" Type="${SLIDE_REL_TYPE}" Target="${newPath.slice('ppt/'.length)}"/>`
   archive.entries.set(
@@ -2009,10 +2080,18 @@ function ensureDefaultContentType(archive: PackageArchive, ext: string, contentT
   const ct = archive.readText(ctPath)
   if (!ct) return
   if (new RegExp(`<Default\\s[^>]*Extension="${ext}"`, 'i').test(ct)) return
-  // Insert the Default after the root <Types …> open tag (after the first >)
+  // Insert before </Types>. indexOf('>') finds the XML declaration's closing
+  // angle bracket first, so splicing there would put the Default between the
+  // declaration and <Types> — outside the root element — and every OPC reader
+  // would then reject the package (genoffice#1518).
   const def = `<Default Extension="${ext}" ContentType="${contentType}"/>`
-  const at = ct.indexOf('>') + 1
-  archive.entries.set(ctPath, Buffer.from(ct.slice(0, at) + def + ct.slice(at), 'utf8'))
+  archive.entries.set(
+    ctPath,
+    Buffer.from(
+      ct.replace('</Types>', () => `${def}</Types>`),
+      'utf8',
+    ),
+  )
 }
 
 const MIME_BY_EXT: Record<string, string> = {
@@ -2220,10 +2299,10 @@ export function deleteSlide(opened: OpenedPptx, index: number): boolean {
   )?.id
   if (!rid) return false
 
-  const sldTag = new RegExp(`<p:sldId\\s[^>]*r:id="${rid}"[^>]*/>`).exec(pres)?.[0]
+  const sldTag = new RegExp(`<p:sldId\\s[^>]*r:id=["']${rid}["'][^>]*/>`).exec(pres)?.[0]
   if (!sldTag) return false
   archive.entries.set(presPath, Buffer.from(pres.replace(sldTag, ''), 'utf8'))
-  const relTag = new RegExp(`<Relationship\\s[^>]*Id="${rid}"[^>]*/>`).exec(presRels)?.[0]
+  const relTag = new RegExp(`<Relationship\\s[^>]*Id=["']${rid}["'][^>]*/>`).exec(presRels)?.[0]
   if (relTag) {
     archive.entries.set(presRelsPath, Buffer.from(presRels.replace(relTag, ''), 'utf8'))
   }
@@ -2449,8 +2528,7 @@ export function setSlideLayout(
     break
   }
   if (!next) {
-    let maxRid = 0
-    for (const m of rels.matchAll(/Id="rId(\d+)"/g)) maxRid = Math.max(maxRid, Number(m[1]))
+    const maxRid = maxRelationshipIdNumber(rels)
     next = rels.replace(
       '</Relationships>',
       `<Relationship Id="rId${maxRid + 1}" Type="${LAYOUT_REL_TYPE}" Target="${escapeXmlAttr(relTarget)}"/></Relationships>`,
@@ -2468,7 +2546,7 @@ export function setSlideLayout(
     // ftr/sldNum/dt live outside the content-slot namespace (their idx 2/3/4 must not block body slots)
     if (m && !['ftr', 'sldNum', 'dt'].includes(type))
       taken.add(phSlotKey(type, /\bidx="([^"]*)"/.exec(m[1]!)?.[1] ?? ''))
-    for (const idm of xml.matchAll(/<p:cNvPr\s[^>]*\bid="(\d+)"/g))
+    for (const idm of xml.matchAll(/<p:cNvPr\s[^>]*\bid=["'](\d+)["']/g))
       maxId = Math.max(maxId, Number(idm[1]))
   }
   const missing = layoutPhs.filter((ph) => !taken.has(phSlotKey(ph.type, ph.idx)))
@@ -2522,9 +2600,18 @@ export function setSlideSize(opened: OpenedPptx, cx: number, cy: number): boolea
   if (old.cx === cx && old.cy === cy) return false
   const presPath = 'ppt/presentation.xml'
   const pres = archive.readText(presPath)
-  if (!pres || !/<p:sldSz\b[^>]*\/?>/.test(pres)) return false
-  const next = pres.replace(/<p:sldSz\b[^>]*?(\/?)>/, (tag) =>
-    tag.replace(/\bcx="\d+"/, `cx="${cx}"`).replace(/\bcy="\d+"/, `cy="${cy}"`),
+  if (!pres) return false
+  const sldSz = /<p:sldSz\b[^>]*?\/?>/.exec(pres)?.[0]
+  if (!sldSz) return false
+  // re-emit the tag from its parsed attributes: cx=/cy= are rewritten whatever
+  // quote style they were written in, and a tag carrying neither cannot be
+  // resized — reporting success would rescale the model while the saved file
+  // kept the old size
+  const hasCx = /\bcx=["']\d+["']/.test(sldSz)
+  const hasCy = /\bcy=["']\d+["']/.test(sldSz)
+  if (!hasCx && !hasCy) return false
+  const next = pres.replace(sldSz, () =>
+    sldSz.replace(/\bcx=["']\d+["']/, `cx="${cx}"`).replace(/\bcy=["']\d+["']/, `cy="${cy}"`),
   )
   archive.entries.set(presPath, Buffer.from(next, 'utf8'))
   deck.size = { cx, cy }
@@ -2728,7 +2815,7 @@ export function ensureTableStylePart(
   if (existing) return
   const ctPath = '[Content_Types].xml'
   const ct = archive.readText(ctPath)
-  if (ct && !ct.includes(`PartName="/${path}"`)) {
+  if (ct && !hasContentTypeOverride(ct, path)) {
     archive.entries.set(
       ctPath,
       Buffer.from(
@@ -2743,8 +2830,7 @@ export function ensureTableStylePart(
   const presRelsPath = 'ppt/_rels/presentation.xml.rels'
   const presRels = archive.readText(presRelsPath)
   if (presRels && !presRels.includes('/relationships/tableStyles"')) {
-    let maxRid = 0
-    for (const m of presRels.matchAll(/Id="rId(\d+)"/g)) maxRid = Math.max(maxRid, Number(m[1]))
+    const maxRid = maxRelationshipIdNumber(presRels)
     const rel = `<Relationship Id="rId${maxRid + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/tableStyles" Target="tableStyles.xml"/>`
     archive.entries.set(
       presRelsPath,
@@ -2800,12 +2886,12 @@ export function editChartElement(
   if (!rels) return false
 
   // Find the r:id in originalXml
-  const rIdInFrame = /r:id="([^"]+)"/.exec(el.anchor.originalXml)
+  const rIdInFrame = /r:id=["']([^"']+)["']/.exec(el.anchor.originalXml)
   if (!rIdInFrame) return false
   const rId = rIdInFrame[1]!
 
   // Find the chart part path in the rels
-  const relRe = new RegExp(`Id="${escapeRegex(rId)}"[^>]*Target="([^"]+)"`)
+  const relRe = new RegExp(`Id=["']${escapeRegex(rId)}["'][^>]*Target=["']([^"']+)["']`)
   const relMatch = relRe.exec(rels)
   if (!relMatch) return false
   const chartPath = resolveTarget(slide.path, relMatch[1]!)
@@ -3099,9 +3185,11 @@ export interface ReplaceOptions {
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /**
- * Deck-wide replace (matches within a run; cross-run matches are not handled —
- * consistent with byte-faithful run-structure patches). Covers text/shape, table
- * cells, and direct group children; dynamic field runs are skipped.
+ * Deck-wide replace (a match may span consecutive runs of a paragraph: the
+ * replacement lands in the run holding its first character and the matched text
+ * is cut from the runs it covers, so untouched text keeps its own rPr). Covers
+ * text/shape, table cells, and direct group children; dynamic field runs are
+ * skipped and no match spans one.
  * Returns the replacement count; elements on changed slides are flagged dirty.
  */
 export function replaceAllInDeck(
@@ -3116,26 +3204,76 @@ export function replaceAllInDeck(
   let count = 0
   const changed = new Set<number>()
 
+  // A field run or an <a:br/> soft-break sentinel is a hard barrier: matches may
+  // only span the consecutive plain runs between them.
+  const isBarrier = (r: TextRun): boolean => !!r.field || r.text === '\n'
+  const segmentsOf = (p: Paragraph): TextRun[][] => {
+    const segments: TextRun[][] = []
+    let current: TextRun[] = []
+    for (const r of p.runs) {
+      if (isBarrier(r)) {
+        if (current.length) segments.push(current)
+        current = []
+      } else if (r.text) current.push(r)
+    }
+    if (current.length) segments.push(current)
+    return segments
+  }
+
   const replaceInParagraphs = (paragraphs: Paragraph[]): boolean => {
     let hit = false
-    for (const p of paragraphs)
-      for (const r of p.runs) {
+    for (const p of paragraphs) {
+      if (budget <= 0) return hit
+      for (const runs of segmentsOf(p)) {
         if (budget <= 0) return hit
-        if (r.field || !r.text) continue
-        re.lastIndex = 0
-        let n = 0
-        const next = r.text.replace(re, (m) => {
-          if (n >= budget) return m
-          n++
-          return replace
-        })
-        if (n > 0) {
-          r.text = next
-          count += n
-          budget -= n
-          hit = true
-        }
+        hit = replaceInRuns(runs) || hit
       }
+    }
+    return hit
+  }
+
+  const replaceInRuns = (runs: TextRun[]): boolean => {
+    let hit = false
+    let full = ''
+    const ends: number[] = []
+    for (const r of runs) {
+      full += r.text
+      ends.push(full.length)
+    }
+    const out = runs.map(() => '')
+    const runAt = (offset: number): number => {
+      for (let k = 0; k < ends.length; k++) if (offset < ends[k]!) return k
+      return ends.length - 1
+    }
+    const keep = (from: number, to: number): void => {
+      let off = from
+      for (let k = 0; k < ends.length && off < to; k++) {
+        const end = ends[k]!
+        if (end <= off) continue
+        const take = Math.min(end, to) - off
+        out[k] += full.slice(off, off + take)
+        off += take
+      }
+    }
+    re.lastIndex = 0
+    let cursor = 0
+    let n = 0
+    let m: RegExpExecArray | null
+    while (budget > 0 && (m = re.exec(full)) !== null) {
+      n++
+      budget--
+      keep(cursor, m.index)
+      out[runAt(m.index)] += replace
+      cursor = m.index + m[0].length
+    }
+    if (n > 0) {
+      keep(cursor, full.length)
+      for (let i = 0; i < runs.length; i++) {
+        if (runs[i]!.text !== out[i]) runs[i]!.text = out[i]!
+      }
+      count += n
+      hit = true
+    }
     return hit
   }
 
@@ -3734,6 +3872,8 @@ export function setTableColWidth(
   if (!el || el.type !== 'table') return false
   const table = el as TableElement
   if (col < 0 || col >= table.colWidths.length) return false
+  // a non-finite EMU (NaN, 1e308 overflow) would serialize verbatim into w=
+  if (!Number.isFinite(wEmu)) return false
 
   let xml = patchedElementXml(el)
   const gc = gridColSpans(xml)[col]
@@ -3779,6 +3919,7 @@ export function setTableRowHeight(
   if (!el || el.type !== 'table') return false
   const table = el as TableElement
   if (row < 0 || row >= table.rowHeights.length) return false
+  if (!Number.isFinite(hEmu)) return false
 
   let xml = patchedElementXml(el)
   const tr = nthTagSpan(xml, 'a:tr', row)
@@ -3987,8 +4128,7 @@ export function pasteElements(
     archive.readText(relsPath) ??
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>'
   let relsDirty = false
-  let maxRid = 0
-  for (const m of relsXml.matchAll(/Id="rId(\d+)"/g)) maxRid = Math.max(maxRid, Number(m[1]))
+  let maxRid = maxRelationshipIdNumber(relsXml)
   // The target slide's existing relationships (type+resolved target → rId); ones created during the paste count too
   const byKey = new Map<string, string>()
   for (const rel of archive.readRels(slide.path).values()) {
@@ -4018,9 +4158,15 @@ export function pasteElements(
         rid = `rId${++maxRid}`
         const target = rel.external ? rel.target : relTargetFromSlide(landed)
         const mode = rel.external ? ' TargetMode="External"' : ''
+        // Replacement must be a function: a string replacement expands $&, $`,
+        // $' and $$, and an external target is a user-supplied URL, so a $& in
+        // it substituted the matched </Relationships> into the middle of the
+        // Target attribute and left the part malformed. Several other
+        // relationship writers here already pass a function.
         relsXml = relsXml.replace(
           '</Relationships>',
-          `<Relationship Id="${rid}" Type="${rel.type}" Target="${escapeXmlAttr(target)}"${mode}/></Relationships>`,
+          () =>
+            `<Relationship Id="${rid}" Type="${rel.type}" Target="${escapeXmlAttr(target)}"${mode}/></Relationships>`,
         )
         relsDirty = true
         byKey.set(key, rid)
@@ -4030,7 +4176,7 @@ export function pasteElements(
       }
     }
     xml = xml.replace(
-      /(<p:cNvPr\s[^>]*\bid=")\d+(")/g,
+      /(<p:cNvPr\s[^>]*\bid=["'])\d+(["'])/g,
       (_a, pre: string, post: string) => `${pre}${nextId++}${post}`,
     )
     // Pasted elements are new identities: mint fresh creationIds so durable ids

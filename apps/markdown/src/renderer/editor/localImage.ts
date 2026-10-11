@@ -3,8 +3,10 @@ import { Image } from '@tiptap/extension-image'
 import { Link } from '@tiptap/extension-link'
 import { Paragraph } from '@tiptap/extension-paragraph'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
+import { MAX_PASTED_IMAGE_BYTES } from '../../shared/ipc'
 import { t } from '../i18n/locale'
 import { showToast } from '../components/toast-bus'
+import { getImageHostConfig } from '../imageHostCache'
 
 /** Directory of the open .md file; relative image paths resolve against it for display */
 let imageBaseDir: string | null = null
@@ -41,7 +43,11 @@ export function resolveImageSrc(src: string, baseDir: string | null = imageBaseD
   const encodeSegment = (seg: string) => encodeURIComponent(seg).replace(/%3A/gi, ':')
   const toAssetUrl = (path: string) => {
     const raw = `md-asset://${path.startsWith('/') ? '' : '/'}${path.replace(/\\/g, '/').split('/').map(encodeSegment).join('/')}`
-    return (window as unknown as { genofficeBridge?: { assetUrl(src: string): string } }).genofficeBridge?.assetUrl(raw) ?? raw
+    return (
+      (
+        window as unknown as { genofficeBridge?: { assetUrl(src: string): string } }
+      ).genofficeBridge?.assetUrl(raw) ?? raw
+    )
   }
   // a Windows drive path would also match the URL-scheme regex — check it first
   if (src.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(src)) return toAssetUrl(src)
@@ -56,7 +62,10 @@ export function resolveImageSrc(src: string, baseDir: string | null = imageBaseD
  * bakes display URLs into the stored document / serialized markdown.
  */
 export function unresolveImageSrc(src: string, baseDir: string | null = imageBaseDir): string {
-  src = (window as unknown as { genofficeBridge?: { originalAssetUrl(src: string): string } }).genofficeBridge?.originalAssetUrl(src) ?? src
+  src =
+    (
+      window as unknown as { genofficeBridge?: { originalAssetUrl(src: string): string } }
+    ).genofficeBridge?.originalAssetUrl(src) ?? src
   if (!src.startsWith('md-asset://')) return src
   let path = decodeURIComponent(src.slice('md-asset://'.length))
   // Windows drive paths were prefixed with '/' to form a valid URL path
@@ -86,21 +95,43 @@ async function persistAndInsert(
   file: File,
   pos: number,
 ): Promise<void> {
+  if (file.size > MAX_PASTED_IMAGE_BYTES) {
+    showToast(t('imageTooLarge', { mb: Math.round(MAX_PASTED_IMAGE_BYTES / 1024 / 1024) }), 'error')
+    return
+  }
   const bytes = new Uint8Array(await file.arrayBuffer())
   let binary = ''
   for (let i = 0; i < bytes.length; i += 0x8000) {
     binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
   }
-  const rel = await window.markdownApi.saveImage({
-    base64: btoa(binary),
-    ext: EXT_BY_MIME[file.type]!,
-  })
+  const base64 = btoa(binary)
+  const alt = file.name.replace(/\.[a-z0-9]+$/i, '')
+  // a configured image host gets the paste first (genoffice#388); the local
+  // assets/ copy is the fallback when it is disabled or the upload fails, so
+  // the note stays self-contained even offline
+  const host = await getImageHostConfig()
+  if (host) {
+    const up = await window.markdownApi.uploadImage({
+      base64,
+      ext: EXT_BY_MIME[file.type]!,
+      name: file.name,
+    })
+    if (up.ok && up.url) {
+      editor
+        .chain()
+        .focus()
+        .insertContentAt(pos, { type: 'image', attrs: { src: up.url, alt } })
+        .run()
+      return
+    }
+    showToast(t('imageHostFallback', { error: up.error ?? '' }), 'error')
+  }
+  const rel = await window.markdownApi.saveImage({ base64, ext: EXT_BY_MIME[file.type]! })
   // untitled documents have no assets/ directory yet — tell the user to save first
   if (!rel) {
     showToast(t('imageNeedsSavedDocument'), 'error')
     return
   }
-  const alt = file.name.replace(/\.[a-z0-9]+$/i, '')
   editor
     .chain()
     .focus()
@@ -119,6 +150,9 @@ function imageMarkdown(attrs: JSONContent['attrs']): string {
   const src = String(attrs?.src ?? '')
   const alt = String(attrs?.alt ?? '')
   const title = String(attrs?.title ?? '')
+  const escapedAlt = alt.replace(/[\\[\]]/g, '\\$&')
+  const destination = /[\s()<>\\"]/u.test(src) ? `<${src.replace(/[\\<>]/g, '\\$&')}>` : src
+  const titleText = title ? ` ${JSON.stringify(title)}` : ''
   // markdown has no image size syntax; a sized picture keeps its HTML form
   if (attrs?.width != null || attrs?.height != null) {
     const parts = [`src="${attr(src)}"`]
@@ -128,7 +162,7 @@ function imageMarkdown(attrs: JSONContent['attrs']): string {
     if (attrs.height != null) parts.push(`height="${attr(attrs.height)}"`)
     return `<img ${parts.join(' ')} />`
   }
-  return title ? `![${alt}](${src} "${title}")` : `![${alt}](${src})`
+  return `![${escapedAlt}](${destination}${titleText})`
 }
 
 /**

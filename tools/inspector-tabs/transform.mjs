@@ -261,7 +261,7 @@ export function validateExplorer(ts, source) {
   for (const name of ['assistant', 'details', 'rag', 'analytics'])
     assert(!!attr(ts, opening(ts, panel), name), `Missing ${name} panel`)
 }
-/** Current three-tab host; validateExplorer above still checks historical transform fixtures. */
+/** Current workspace panel; validateExplorer above still checks historical transform fixtures. */
 export function validateCurrentExplorer(ts, source) {
   const sf = tree(ts, 'ExplorerHome.tsx', source)
   const panel = one(element(ts, sf, 'WorkspaceControlPanel'), 'WorkspaceControlPanel')
@@ -270,7 +270,15 @@ export function validateCurrentExplorer(ts, source) {
     chat.getStart(sf) > panel.getStart(sf) && chat.end < panel.end,
     'Chat moved outside the current sidebar host.',
   )
-  for (const name of ['active', 'assistant', 'folder', 'onChange', 'onAddFolder']) {
+  for (const name of [
+    'visible',
+    'assistant',
+    'folder',
+    'selectedFiles',
+    'onOpenSettings',
+    'onClose',
+    'onActivity',
+  ]) {
     assert(!!attr(ts, opening(ts, panel), name), `Current sidebar is missing ${name}`)
   }
   for (const name of ['registeredRoots', 'onAddFolder', 'scopePaths']) {

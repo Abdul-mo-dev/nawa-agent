@@ -78,11 +78,11 @@ if (changedFiles.length === 0) {
   process.exit(0)
 }
 
-const prettierScript = join(repoRoot, 'node_modules', 'prettier', 'bin', 'prettier.cjs')
+const prettierEntry = join(repoRoot, 'node_modules', 'prettier', 'bin', 'prettier.cjs')
 const prettierMode = mode === '--write' ? '--write' : '--check'
 const result = spawnSync(
   process.execPath,
-  [prettierScript, prettierMode, '--ignore-unknown', '--', ...changedFiles],
+  [prettierEntry, prettierMode, '--ignore-unknown', '--', ...changedFiles],
   {
     cwd: repoRoot,
     stdio: 'inherit',

@@ -218,6 +218,52 @@ it('binds capability results to endpoint/model and does not assume Custom vision
   ).toContain('half')
 })
 
+it.each([
+  ['minimax', 'MiniMax-M3', true],
+  ['minimax', 'MiniMax-M2.7', false],
+  ['atlascloud', 'minimaxai/minimax-m3', false],
+  ['atlascloud', 'zai-org/glm-5.3', false],
+  ['atlascloud', 'zai-org/glm-5.3-flash', true],
+  ['deepseek', 'deepseek-v4-pro', false],
+  ['deepseek', 'deep-seek-v4.1-flash', true],
+  ['kimi', 'kimi-k3', true],
+  ['ling', 'Ling-3.0-flash', false],
+  ['ling', 'Ling-3.0-flash-VL', true],
+  ['longcat', 'LongCat-2.0', false],
+  ['longcat', 'LongCat-2.5-Preview', true],
+  ['glm', 'glm-5.3', false],
+  ['qwen', 'qwen3-vl', true],
+  ['custom', 'MiniMax-M3', false],
+] as const)('uses current vision capabilities for %s / %s', (provider, model, expected) => {
+  const settings = defaultAiSettings()
+  settings.provider = provider
+  settings.providers[provider] = { apiKey: '', model }
+  expect(modelSupportsVision(settings)).toBe(expected)
+})
+
+it('lets explicit and endpoint-bound tested vision capabilities refine registry defaults', () => {
+  const settings = defaultAiSettings()
+  settings.provider = 'minimax'
+  const config = { apiKey: '', model: 'MiniMax-M3', policy: { vision: false } }
+  settings.providers.minimax = config
+  expect(modelSupportsVision(settings)).toBe(false)
+  settings.providers.minimax = {
+    ...config,
+    policy: {
+      vision: false,
+      tested: {
+        identity: modelCapabilityIdentity('minimax', config),
+        at: 1,
+        tools: true,
+        vision: true,
+      },
+    },
+  }
+  expect(modelSupportsVision(settings)).toBe(true)
+  settings.providers.minimax.model = 'MiniMax-M2.7'
+  expect(modelSupportsVision(settings)).toBe(false)
+})
+
 it('does not silently move a half-configured local request to a cloud provider', () => {
   const settings = defaultAiSettings()
   settings.provider = 'custom'
@@ -372,6 +418,75 @@ it('preserves the current signed tool chain while dropping completed exchanges',
   )
   expect(result.messages).toEqual(active)
   expect(messages).toHaveLength(5)
+})
+
+it.each([
+  'Correct the unsupported claim.',
+  'The turn limit is reached; answer from the gathered evidence.',
+])(
+  'keeps the actual task and receipts when internal guidance follows an oversized tool result: %s',
+  async (guidance) => {
+    const active: AgentMessage[] = [
+      { role: 'user', text: 'Count records in the selected employees.csv.' },
+      { role: 'assistant', text: '', toolCalls: [{ id: 'query', name: 'query_data', input: {} }] },
+      {
+        role: 'tool',
+        results: [
+          {
+            id: 'query',
+            name: 'query_data',
+            output: JSON.stringify({
+              id: 'analysis_123',
+              rows: Array.from({ length: 1000 }, (_, index) => ({ index, value: 'record' })),
+            }),
+          },
+        ],
+      },
+      { role: 'assistant', text: 'Draft answer' },
+      { role: 'user', text: guidance, continuation: true },
+    ]
+    const result = await prepareModelRequest(
+      'gemini',
+      { apiKey: 'key', model: 'gemini-test', policy: { contextTokens: 4096, outputTokens: 1024 } },
+      'https://example.invalid',
+      '',
+      [
+        { role: 'user', text: 'old task' },
+        { role: 'assistant', text: 'x'.repeat(10000) },
+        ...active,
+      ],
+      [],
+      1024,
+      signal(),
+    )
+    expect(result.messages[0]).toEqual(active[0])
+    expect(result.messages.at(-1)).toEqual(active.at(-1))
+    const evidence = result.messages.find((message) => message.role === 'tool')
+    expect(evidence?.role === 'tool' && JSON.parse(evidence.results[0]!.output)).toMatchObject({
+      id: 'analysis_123',
+      contextTruncated: true,
+      rowsOmitted: 995,
+    })
+  },
+)
+
+it('rejects an oversized active instruction instead of replacing it with its correction', async () => {
+  await expect(
+    prepareModelRequest(
+      'gemini',
+      { apiKey: 'key', model: 'gemini-test', policy: { contextTokens: 4096, outputTokens: 1024 } },
+      'https://example.invalid',
+      '',
+      [
+        { role: 'user', text: 'important original instruction '.repeat(500) },
+        { role: 'assistant', text: 'Draft' },
+        { role: 'user', text: 'Correct it.', continuation: true },
+      ],
+      [],
+      1024,
+      signal(),
+    ),
+  ).rejects.toThrow('context budget')
 })
 
 it('retains an auditable receipt and labels omitted rows instead of cutting JSON', () => {

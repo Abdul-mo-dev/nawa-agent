@@ -1,24 +1,17 @@
-# Contributing to GenOffice
+# Contributing to Nawa
 
 Thanks for your interest in contributing. This document covers the local
 setup, the checks a change must pass, and the conventions used in this
 repository.
 
-## How changes land here
+## Source and contributions
 
-This GitHub repository is a mirror: development happens in a private tree,
-and `main` here advances through single squashed snapshot commits
-(`Sync snapshot (<date>)`). That is why every file in a sync shows the same
-last-commit message, and why nobody — maintainers included — pushes to
-`main` directly.
-
-External pull requests are welcome and are reviewed here. Once a change is
-accepted, a maintainer imports it into the private tree with your authorship
-preserved as a `Co-authored-by:` trailer, and it ships to `main` in the next
-snapshot; your PR is then closed with a note pointing at the snapshot that
-carried it. GitHub will show the PR as "closed" rather than "merged" — the
-code and the attribution still land. Issues and feature requests are handled
-directly on this repository as usual.
+This repository is the Nawa fork of [GenOffice](https://github.com/genspark-ai/genoffice).
+Submit Nawa issues and pull requests to
+[Abdul-mo-dev/nawa-agent](https://github.com/Abdul-mo-dev/nawa-agent). Preserve
+upstream attribution and the existing Apache-2.0 license when importing changes.
+GenOffice's private development and snapshot-release workflow belongs to the
+upstream project; it is not a requirement of this fork.
 
 ## Repository layout
 
@@ -74,15 +67,30 @@ editor didn't touch survives the round trip untouched.
 
 ## Getting started
 
-Prerequisites: Node 22+, npm 10+, and a Rust toolchain (`cargo` on PATH,
+Prerequisites: Node 22.12+, npm 10+, and a Rust toolchain (`cargo` on PATH,
 needed only for the sheets xlsx sidecar).
 
 ```bash
-npm install
+npm ci
 npm run fixtures     # generate test .docx fixtures (one-time, and after docx-engine changes)
 npm run dev          # all editors + shell against Vite dev servers
 npm run dev:docs     # or run a single app
 ```
+
+### Image dependency pins
+
+The root overrides pin Sharp to `0.35.5` and image-size to `2.0.3`. The existing
+Transformers `3.8.1` and PptxGenJS `4.0.1` packages also appear as exact root
+development dependencies so these overrides remain effective in npm versions
+with the [workspace-link override defect](https://github.com/npm/cli/issues/9659).
+They are the same versions already required by the shell and PPTX test fixtures;
+this does not add another model runtime or another document engine.
+
+When upgrading those parent packages, update the matching root compatibility
+pins, regenerate the lock, and run `npm ls sharp image-size --all`. Both shell
+OCR and Transformers must resolve the patched Sharp package; packaging verifies
+the root Sharp version against the shell manifest. Preserve the lock's optional
+platform packages so Windows/macOS builds remain reproducible from Linux.
 
 ## Checks every change must pass
 
@@ -151,20 +159,21 @@ local build without signing credentials is unsigned.
 None are required — the apps run with all of these unset. They exist for
 testing and local overrides:
 
-| Variable                                                    | Effect                                                                        |
-| ----------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `BUILD_DIR`                                                 | Override the electron-builder output directory (default `apps/shell/release`) |
-| `GENOFFICE_USER_DATA`                                       | Override the Electron userData directory (test isolation)                     |
-| `GENOFFICE_LANG`                                            | Force the UI language instead of following the OS locale                      |
-| `GENOFFICE_FAKE_UPDATE`                                     | Exercise the updater UI without a real release feed                           |
-| `GENOFFICE_CLOUD_SLIDE`, `GENOFFICE_CLOUD_SLIDE_TIER`       | Route slide generation through the cloud endpoint                             |
-| `GSK_API_KEY`, `GSK_CLI_PATH`                               | Genspark credentials / CLI location for the built-in AI provider              |
-| `AI_SEARCH_DISABLE_GSK`, `SERPER_API_KEY`, `TAVILY_API_KEY` | Disable the gsk search backend / supply a Serper or Tavily key                |
-| `XLSX_SIDECAR_PATH`, `XLSX_OPEN_PATH`, `XLSX_DEBUG_PORT`    | Point at a locally built xlsx sidecar and its debug port                      |
-| `*_DEV_PORT`, `*_RENDERER_URL`                              | Per-app Vite dev server ports and renderer URLs (set by `npm run dev`)        |
+| Variable                                                                                          | Effect                                                                           |
+| ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `BUILD_DIR`                                                                                       | Override the electron-builder output directory (default `apps/shell/release`)    |
+| `GENOFFICE_USER_DATA`                                                                             | Override the Electron userData directory (test isolation)                        |
+| `GENOFFICE_LANG`                                                                                  | Force the UI language instead of following the OS locale                         |
+| `GENOFFICE_FAKE_UPDATE`                                                                           | Exercise the updater UI without a real release feed                              |
+| `GENOFFICE_CLOUD_SLIDE`, `GENOFFICE_CLOUD_SLIDE_TIER`                                             | Route slide generation through the cloud endpoint                                |
+| `GSK_API_KEY`, `GSK_CLI_PATH`                                                                     | Genspark credentials / CLI location for the built-in AI provider                 |
+| `AI_SEARCH_DISABLE_GSK`, `SERPER_API_KEY`, `SERPLY_API_KEY`, `TAVILY_API_KEY`, `PARALLEL_API_KEY` | Disable the gsk search backend / supply a Serper, Serply, Tavily or Parallel key |
+| `XLSX_SIDECAR_PATH`, `XLSX_OPEN_PATH`, `XLSX_DEBUG_PORT`                                          | Point at a locally built xlsx sidecar and its debug port                         |
+| `*_DEV_PORT`, `*_RENDERER_URL`                                                                    | Per-app Vite dev server ports and renderer URLs (set by `npm run dev`)           |
 
 AI features degrade rather than break without credentials: requests surface an
-inline sign-in prompt, and web search falls back to a keyless backend.
+inline sign-in prompt, and web search falls back to keyless backends (Parallel's
+free Search MCP, then DuckDuckGo).
 
 ## Coding conventions
 

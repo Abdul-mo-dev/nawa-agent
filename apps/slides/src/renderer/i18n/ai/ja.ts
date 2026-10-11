@@ -133,6 +133,7 @@ export const ja = {
   aiClarifyOther: 'その他（自由記入）',
   aiClarifySkip: 'アンケートをスキップ',
   aiClarifyNext: '次へ',
+  aiClarifyPrev: '前へ',
   aiClarifySubmit: '生成する',
   aiSumReadAttachment: '添付ファイルを読み取り',
   aiSumReadAttachmentName: '添付ファイル {name} を読み取り',
@@ -221,4 +222,5 @@ export const ja = {
   aiSumSaveTemplate: 'スタイル テンプレート「{name}」を保存',
   aiSumTemplatesEmpty: 'スタイル テンプレート一覧（空）',
   aiSumListTemplates: '{count} 個のスタイル テンプレートを一覧表示',
+  aiPageCloudToLocal: 'クラウド生成不可効 — ローカルで生成',
 } satisfies Record<keyof typeof zh, string>

@@ -1,3 +1,9 @@
+import {
+  assertDirectoryStagePicker,
+  assertDirectoryStageWrite,
+  assertDirectoryStageLocalRead,
+  directoryStageFor,
+} from '../../../../packages/electron-utils/src/directory-stage'
 import { assertDirectoryStageCapability } from '../../../../packages/electron-utils/src/directory-stage'
 import {
   existsSync,
@@ -10,7 +16,7 @@ import {
 } from 'node:fs'
 import { mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, extname, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
   BrowserWindow,
@@ -39,6 +45,10 @@ import {
   type HeadlessExportTarget,
   installRendererProtocol,
   rendererUrl,
+  MAX_REMOTE_IMAGE_BYTES,
+  readBodyCapped,
+  printHtmlDocument,
+  type PrintDialogOutcome,
 } from '@genoffice/electron-utils'
 import { createI18n, getUiLang } from '@genoffice/i18n'
 import {
@@ -48,7 +58,7 @@ import {
   type LegacyAiSettings,
 } from '@genoffice/ai-provider'
 import { createAiSettingsStore } from '@genoffice/electron-utils/ai-settings-store'
-import { generateImageTool } from '@genoffice/ai-search'
+import { generateImageTool, documentMediaRoots } from '@genoffice/ai-search'
 import { parseFileToText } from '@genoffice/file-parse'
 import { convertHtmlToDocx } from '../../../../packages/html2docx/src'
 import { atomicWriteFile } from './atomic-write'
@@ -56,7 +66,8 @@ import { ElectronBrowserDriver } from '../../../../packages/html2docx/src/driver
 import {
   copyImageIntoOwnedAssets,
   discardPendingOwnedAssets,
-  extractHtmlImageSources,
+  extractHtmlAssetReferences,
+  isInDocDir,
   pendingOwnedAssetsForDocument,
   prepareAssetsForSaveAs,
   reconcileOwnedAssets,
@@ -92,6 +103,8 @@ import type {
   ExportPdfRequest,
   ExportResult,
   ImageData,
+  PrintHtmlRequest,
+  PrintResult,
   SaveHtmlRequest,
   SaveHtmlResult,
   SaveMode,
@@ -154,6 +167,31 @@ const tDlg = createI18n({
     errParseFailed: 'Failed to parse file',
     errImageNoText: 'Image attachments have no text; the image is sent along with the user message',
     errNotImage: 'not a supported image type',
+  },
+  vi: {
+    dlgSaveTitle: 'Lưu tài liệu HTML',
+    filterHtml: 'Tài liệu HTML',
+    dlgPickImage: 'Chọn một hình ảnh',
+    filterImages: 'Hình ảnh',
+    untitledFile: 'Không có tiêu đề',
+    closeUnsavedMsg: 'Tài liệu này có những thay đổi chưa được lưu.',
+    closeUnsavedDetail: 'Bạn có muốn lưu các thay đổi trước khi đóng không?',
+    btnSave: 'Lưu',
+    btnDontSave: 'Không lưu',
+    btnCancel: 'Hủy',
+    dlgAddAttachment: 'Thêm tệp đính kèm',
+    filterSupported: 'Các tệp được hỗ trợ',
+    filterAll: 'Tất cả các tệp',
+    errUnsupportedExt: 'Tệp .{ext} không được hỗ trợ',
+    errNotFile: 'không phải là tệp',
+    errTooLarge: 'vượt quá giới hạn {mb}MB',
+    errImageTooLarge: 'hình ảnh vượt quá giới hạn 5MB',
+    errUnreadable: 'không thể đọc được',
+    errFileTooLarge: 'Tệp vượt quá giới hạn kích thước',
+    errParseFailed: 'Không thể phân tích tệp',
+    errImageNoText:
+      'Tệp đính kèm hình ảnh không có văn bản; hình ảnh được gửi cùng với tin nhắn của người dùng',
+    errNotImage: 'loại hình ảnh không được hỗ trợ',
   },
   ja: {
     dlgSaveTitle: 'HTML ドキュメントを保存',
@@ -913,6 +951,9 @@ function closePresentViewsOf(ownerWcId: number): void {
 
 /** A4 at 96dpi; html2docx re-measures at the authored width itself when the page asks for more. */
 const HTML2DOCX_VIEWPORT = { width: 794, height: 1123, deviceScaleFactor: 2 }
+// A renderer that never yields must not strand the export: watchdog destroys
+// the hidden conversion window.
+const HTML_EXPORT_TIMEOUT_MS = 180_000
 
 /** Print the document in a hidden script-free window (sheets-style). Relative assets
  * resolve through html-asset:// against the document's folder, exactly as in the preview. */
@@ -952,12 +993,35 @@ export function sendHtmlPrintRequest(contents: WebContents): void {
   contents.send(HTML_CHANNELS.printRequest)
 }
 
+// Scripting stays on here, unlike the PDF export window: Chromium rejects
+// executeJavaScript under `javascript: false`, and the fonts/images readiness
+// probe needs it. Print and Export-PDF therefore differ for <script>-built content.
+function printHtml(html: string, docPath: string | undefined): Promise<PrintDialogOutcome> {
+  const base = docPath ? assetBaseHref(dirname(docPath)) : null
+  return printHtmlDocument({
+    html: buildPreviewDocument(html, base),
+    window: new BrowserWindow({ show: false, webPreferences: { sandbox: true } }),
+    fileName: 'print.html',
+    dirPrefix: 'genoffice-html-print-',
+  })
+}
+
 export function htmlIsDirty(webContentsId: number): boolean {
   return dirtyByWc.has(webContentsId)
 }
 
 export function htmlFilePath(webContentsId: number): string | undefined {
   return savePathByWc.get(webContentsId)
+}
+
+/** Adopt a browser Save As target after its scoped write succeeds; the source still exists. */
+export function htmlAdoptSavedPath(contents: WebContents, filePath: string): void {
+  if (contents.isDestroyed()) return
+  savePathByWc.set(contents.id, filePath)
+  openPathByWc.set(contents.id, filePath)
+  const allowed = allowedByWc.get(contents.id) ?? new Set<string>()
+  allowed.add(filePath)
+  allowedByWc.set(contents.id, allowed)
 }
 
 /** The file was renamed on disk — re-grant the new path and tell the renderer */
@@ -1036,6 +1100,7 @@ export async function htmlDiscardPendingAssets(contents: WebContents): Promise<v
 
 /** Menu Save / Save As: ask the renderer to serialize and save; clean views resolve true immediately on plain save */
 export function requestHtmlSave(contents: WebContents, mode: SaveMode): Promise<boolean> {
+  if (mode !== 'save') assertDirectoryStagePicker(contents)
   if (contents.isDestroyed()) return Promise.resolve(false)
   if (presentOwnerByWc.has(contents.id)) return Promise.resolve(true)
   if (mode === 'save' && !dirtyByWc.has(contents.id) && savePathByWc.has(contents.id)) {
@@ -1110,6 +1175,7 @@ export function htmlReadText(contents: WebContents): Promise<string> {
  * normal save runs unattended.
  */
 export function htmlSaveToPath(contents: WebContents, filePath: string): Promise<void> {
+  assertDirectoryStageWrite(contents, filePath)
   if (contents.isDestroyed()) return Promise.reject(new Error('the document is no longer open'))
   const wcId = contents.id
   const previousPath = savePathByWc.get(wcId)
@@ -1160,6 +1226,11 @@ async function resolveSaveTarget(
   defaultName?: string,
 ): Promise<string | null | 'canceled'> {
   const current = savePathByWc.get(e.sender.id)
+  if (directoryStageFor(e.sender)) {
+    if (mode !== 'save') assertDirectoryStagePicker(e.sender)
+    assertDirectoryStageWrite(e.sender, current)
+    return current ?? null
+  }
   if (mode === 'save' && current) return current
   // AI auto-naming: silent first save of an untitled document
   if (mode === 'save' && !current && suggestedName) {
@@ -1207,7 +1278,7 @@ function registerImageProtocol(): void {
     let inDocDir = false
     for (const doc of new Set([...openPathByWc.values(), ...savePathByWc.values()])) {
       const dir = resolve(dirname(doc))
-      if (target === dir || !target.startsWith(dir + sep)) continue
+      if (!isInDocDir(target, dir)) continue
       if (await resolveSafeRelativeImagePath(doc, relative(dir, target))) {
         inDocDir = true
         break
@@ -1315,6 +1386,8 @@ function registerHtmlIpc(): void {
   })
 
   ipcMain.handle(HTML_CHANNELS.presentNewTab, (e, title: unknown) => {
+    assertDirectoryStagePicker(e.sender)
+
     const label = typeof title === 'string' ? title : ''
     if (presentHooks.openTab?.(e.sender, label)) return true
     const parent = BrowserWindow.fromWebContents(e.sender) ?? presentHooks.hostWindow?.(e.sender)
@@ -1379,11 +1452,12 @@ function registerHtmlIpc(): void {
         const isNewPath = currentPath !== target
         const imageSources = [...(request.imageSources ?? [])]
         const knownImageSources = new Set(imageSources)
-        for (const source of extractHtmlImageSources(request.text)) {
+        for (const source of extractHtmlAssetReferences(request.text)) {
           if (knownImageSources.has(source)) continue
           knownImageSources.add(source)
           imageSources.push(source)
         }
+        assertDirectoryStageWrite(e.sender, target)
         const prepared =
           currentPath && resolve(dirname(currentPath)) !== resolve(dirname(target))
             ? await prepareAssetsForSaveAs(currentPath, target, request.text, imageSources)
@@ -1391,6 +1465,7 @@ function registerHtmlIpc(): void {
         const textToWrite = prepared?.text ?? request.text
         const savedImageSources = prepared?.imageSources ?? imageSources
         try {
+          assertDirectoryStageWrite(e.sender, target)
           await writeTextAtomic(target, textToWrite)
         } catch (error) {
           if (prepared) await rollbackPreparedSaveAsAssets(prepared).catch(() => {})
@@ -1435,6 +1510,8 @@ function registerHtmlIpc(): void {
   )
 
   ipcMain.handle(HTML_CHANNELS.filesPick, async (e): Promise<AttachmentAddResult | null> => {
+    assertDirectoryStagePicker(e.sender)
+
     const win =
       BrowserWindow.fromWebContents(e.sender) ?? BrowserWindow.getFocusedWindow() ?? undefined
     const picked = await showOpenDialogWithMemory(dialog, win, {
@@ -1449,13 +1526,17 @@ function registerHtmlIpc(): void {
     return collectAttachments(picked.filePaths)
   })
 
-  ipcMain.handle(HTML_CHANNELS.filesAdd, (_e, paths: unknown) =>
-    collectAttachments(Array.isArray(paths) ? paths.filter((p) => typeof p === 'string') : []),
-  )
+  ipcMain.handle(HTML_CHANNELS.filesAdd, (_e, paths: unknown) => {
+    const acceptedPaths = Array.isArray(paths) ? paths.filter((p) => typeof p === 'string') : []
+    for (const path of acceptedPaths) assertDirectoryStageLocalRead(_e.sender, path)
+    return collectAttachments(acceptedPaths)
+  })
 
   ipcMain.handle(
     HTML_CHANNELS.filesAddPastedImage,
     (_e, data: unknown, ext: unknown): AttachmentAddResult => {
+      assertDirectoryStagePicker(_e.sender)
+
       const filePath = savePastedImage(data, ext)
       return filePath
         ? collectAttachments([filePath])
@@ -1471,6 +1552,7 @@ function registerHtmlIpc(): void {
       offset: number,
       maxChars: number,
     ): Promise<AttachmentReadResult> => {
+      assertDirectoryStageLocalRead(_e.sender, filePath)
       const name = basename(filePath)
       const ext = name.split('.').pop()?.toLowerCase() ?? ''
       if (!ATTACHMENT_EXTS.has(ext)) return { ok: false, error: tm('errUnsupportedExt', { ext }) }
@@ -1493,6 +1575,7 @@ function registerHtmlIpc(): void {
   )
 
   ipcMain.handle(HTML_CHANNELS.filesReadImage, (_e, filePath: string): AttachmentImageResult => {
+    assertDirectoryStageLocalRead(_e.sender, filePath)
     const name = basename(filePath)
     const ext = name.split('.').pop()?.toLowerCase() ?? ''
     const mime = ATTACHMENT_IMAGE_MIME[ext]
@@ -1509,6 +1592,8 @@ function registerHtmlIpc(): void {
   })
 
   ipcMain.handle(HTML_CHANNELS.pickImage, async (e): Promise<string | null> => {
+    assertDirectoryStagePicker(e.sender)
+
     const docPath = savePathByWc.get(e.sender.id)
     if (!docPath) return null
     const win =
@@ -1530,6 +1615,7 @@ function registerHtmlIpc(): void {
       const docPath = savePathByWc.get(e.sender.id)
       const ext = String(data?.ext ?? '').toLowerCase()
       if (!docPath || typeof data?.base64 !== 'string' || !data.base64) return null
+      assertDirectoryStageWrite(e.sender, docPath)
       // keep in sync with readImage's MIME map — every authored asset must stay DOCX-exportable
       if (!['png', 'jpg', 'jpeg', 'gif'].includes(ext)) return null
       return writeImageIntoOwnedAssets(docPath, `image.${ext}`, Buffer.from(data.base64, 'base64'))
@@ -1542,10 +1628,19 @@ function registerHtmlIpc(): void {
     HTML_CHANNELS.aiGenerateImage,
     (_e, op: { prompt?: unknown; aspectRatio?: unknown }) => {
       assertDirectoryStageCapability(_e.sender, 'media')
-      return generateImageTool(toolAiSettings(), {
-        prompt: String(op?.prompt ?? ''),
-        aspectRatio: op?.aspectRatio ? String(op.aspectRatio) : undefined,
-      })
+      return generateImageTool(
+        toolAiSettings(),
+        {
+          prompt: String(op?.prompt ?? ''),
+          aspectRatio: op?.aspectRatio ? String(op.aspectRatio) : undefined,
+        },
+        {
+          mediaRoots: documentMediaRoots(
+            htmlFilePath(_e.sender.id),
+            join(app.getPath('temp'), 'genoffice-pasted'),
+          ),
+        },
+      )
     },
   )
 
@@ -1587,7 +1682,8 @@ function registerHtmlIpc(): void {
         : ct.includes('gif')
           ? 'image/gif'
           : 'image/jpeg'
-      return { base64: Buffer.from(await resp.arrayBuffer()).toString('base64'), mime }
+      const bytes = await readBodyCapped(resp, MAX_REMOTE_IMAGE_BYTES)
+      return { base64: Buffer.from(bytes).toString('base64'), mime }
     } catch {
       return null
     }
@@ -1596,6 +1692,8 @@ function registerHtmlIpc(): void {
   ipcMain.handle(
     HTML_CHANNELS.exportDocx,
     async (e, request: ExportDocxRequest): Promise<ExportResult> => {
+      assertDirectoryStagePicker(e.sender)
+
       if (typeof request?.html !== 'string') {
         return { ok: false, error: 'html: bad export request' }
       }
@@ -1628,7 +1726,24 @@ function registerHtmlIpc(): void {
         const htmlPath = join(workDir, 'export.html')
         await writeFile(htmlPath, buildPreviewDocument(request.html, base), 'utf8')
         driver = await ElectronBrowserDriver.create(HTML2DOCX_VIEWPORT)
-        const { docx } = await convertHtmlToDocx({ url: pathToFileURL(htmlPath).href }, driver)
+        // AI-generated markup with a script that never yields keeps
+        // executeJavaScript pending forever, which would strand the hidden
+        // window and this handler; race a watchdog and destroy the window on
+        // timeout (same shape as the slides export guard).
+        const conversion = convertHtmlToDocx({ url: pathToFileURL(htmlPath).href }, driver).then(
+          ({ docx }) => docx,
+        )
+        let watchdog: ReturnType<typeof setTimeout> | undefined
+        const docx = await Promise.race([
+          conversion,
+          new Promise<Uint8Array>((_, reject) => {
+            watchdog = setTimeout(() => {
+              if (driver && !driver.isWindowDestroyed()) driver.destroyNow()
+              driver = null
+              reject(new Error('html export timed out'))
+            }, HTML_EXPORT_TIMEOUT_MS)
+          }),
+        ]).finally(() => clearTimeout(watchdog))
         await writeFile(picked.filePath, docx)
         openExportedDocx(picked.filePath)
         return { ok: true, path: picked.filePath }
@@ -1644,6 +1759,8 @@ function registerHtmlIpc(): void {
   ipcMain.handle(
     HTML_CHANNELS.exportPdf,
     async (e, request: ExportPdfRequest): Promise<ExportResult> => {
+      assertDirectoryStagePicker(e.sender)
+
       if (typeof request?.html !== 'string') {
         return { ok: false, error: 'html: bad export request' }
       }
@@ -1678,8 +1795,26 @@ function registerHtmlIpc(): void {
   )
 
   ipcMain.handle(
+    HTML_CHANNELS.printHtml,
+    async (e, request: PrintHtmlRequest): Promise<PrintResult> => {
+      assertDirectoryStagePicker(e.sender)
+
+      if (typeof request?.html !== 'string') {
+        return { ok: false, error: 'html: bad print request' }
+      }
+      // printHtml already reports why it failed and separates a dialog the
+      // user closed from a real failure, so the outcome maps straight onto
+      // PrintResult: the renderer can stay silent on cancel and must surface
+      // a failure instead of swallowing it.
+      return printHtml(request.html, savePathByWc.get(e.sender.id))
+    },
+  )
+
+  ipcMain.handle(
     HTML_CHANNELS.exportHtml,
     async (e, request: ExportHtmlRequest): Promise<ExportResult> => {
+      assertDirectoryStagePicker(e.sender)
+
       if (typeof request?.html !== 'string') {
         return { ok: false, error: 'html: bad export request' }
       }
@@ -1705,10 +1840,12 @@ function registerHtmlIpc(): void {
         return { ok: false, error: 'single-file export cannot overwrite the open document' }
       }
       try {
-        const { html } = await inlineImagesForSingleFile(request.html, docPath)
+        const { html, skipped } = await inlineImagesForSingleFile(request.html, docPath)
         await writeFile(picked.filePath, html, 'utf8')
         if (!isHeadlessMode()) shell.showItemInFolder(picked.filePath)
-        return { ok: true, path: picked.filePath }
+        return skipped.length
+          ? { ok: true, path: picked.filePath, skipped }
+          : { ok: true, path: picked.filePath }
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) }
       }

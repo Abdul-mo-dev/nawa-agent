@@ -30,8 +30,15 @@ const settings = () => ({
   apiKey: 'legacy-secret',
   providers: { custom: { model: 'local', apiKey: 'chat-secret' } },
   chatModels: [{ id: 'writer', config: { model: 'writer', apiKey: 'profile-secret' } }],
+  customEndpoints: [{ id: 'secondary', model: 'local', apiKey: 'endpoint-secret' }],
   media: { providers: { openai: { apiKey: 'media-secret' } } },
   search: { providers: { tavily: { apiKey: 'search-secret' } } },
+  language: 'ar',
+  fileSearch: {
+    rerank: true,
+    endpoint: 'openrouter',
+    keys: { openrouter: 'rerank-secret', custom: '' },
+  },
 })
 
 describe('protected AI settings', () => {
@@ -45,8 +52,10 @@ describe('protected AI settings', () => {
       'legacy-secret',
       'chat-secret',
       'profile-secret',
+      'endpoint-secret',
       'media-secret',
       'search-secret',
+      'rerank-secret',
     ]) {
       expect(disk).not.toContain(secret)
     }
@@ -54,8 +63,11 @@ describe('protected AI settings', () => {
     const publicSettings = withoutProtectedAiKeys(JSON.parse(disk)) as ReturnType<typeof settings>
     expect(publicSettings.providers.custom.apiKey).toBe('')
     expect(publicSettings.chatModels[0].config.apiKey).toBe('')
+    expect(publicSettings.customEndpoints[0].apiKey).toBe('')
     expect(publicSettings.media.providers.openai.apiKey).toBe('')
     expect(publicSettings.search.providers.tavily.apiKey).toBe('')
+    expect(publicSettings.fileSearch.keys.openrouter).toBe('')
+    expect(publicSettings.language).toBe('ar')
   })
 
   it('migrates existing plaintext keys on first read', () => {

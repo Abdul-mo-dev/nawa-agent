@@ -126,6 +126,7 @@ export const zh = {
   aiClarifyOther: '其他(可填写)',
   aiClarifySkip: '跳过调研',
   aiClarifyNext: '下一题',
+  aiClarifyPrev: '上一题',
   aiClarifySubmit: '开始生成',
   aiSumReadAttachment: '读取附件',
   aiSumReadAttachmentName: '读取附件 {name}',
@@ -214,4 +215,5 @@ export const zh = {
   aiSumSaveTemplate: '保存风格模板"{name}"',
   aiSumTemplatesEmpty: '风格模板列表（空）',
   aiSumListTemplates: '列出 {count} 个风格模板',
+  aiPageCloudToLocal: '云端不可用,已本地生成',
 }

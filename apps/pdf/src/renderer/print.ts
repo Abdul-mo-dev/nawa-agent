@@ -13,6 +13,14 @@ const TARGET_DPI = 200
  */
 const MAX_PRINT_PIXELS = 150_000_000
 
+/** How long to wait for the dialog to report back before giving up. Chromium
+    and Electron both fire `afterprint`, but a suppressed print (blocked popup,
+    kiosk policy, stubbed `window.print`) never does: unbounded, the promise
+    never settles, the print root keeps every rasterized data URL alive, and
+    the caller's busy flag stays set so no later print is accepted. Sized to
+    outlast a real dialog the user is still reading. */
+export const PRINT_DIALOG_TIMEOUT_MS = 300_000
+
 /**
  * Render scale for a document given each page's area at scale 1 (PDF points²):
  * full 200 DPI while the whole document fits the pixel budget, otherwise the
@@ -38,6 +46,35 @@ export function printScaleForAreas(areas: number[]): number {
  * The 200 DPI pixel budget is computed over the selected pages only, so a
  * small range out of a huge document still prints at full target quality.
  */
+/** Settles when the print dialog reports back, when `window.print` fails
+    outright, or when the wait exceeds the bound. Always detaches the listener
+    and the timer, so a wedged dialog cannot leak either. */
+function waitForPrintDialog(timeoutMs: number): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const detach = () => {
+      if (timer !== null) clearTimeout(timer)
+      timer = null
+      window.removeEventListener('afterprint', onAfterPrint)
+    }
+    function onAfterPrint(): void {
+      detach()
+      resolve()
+    }
+    timer = setTimeout(() => {
+      detach()
+      reject(new Error('the print dialog never reported completion; released the rendered pages'))
+    }, timeoutMs)
+    window.addEventListener('afterprint', onAfterPrint)
+    try {
+      window.print()
+    } catch (err) {
+      detach()
+      reject(err instanceof Error ? err : new Error(String(err)))
+    }
+  })
+}
+
 export async function printPdf(doc: PDFDocumentProxy, pages?: number[]): Promise<void> {
   const root = document.createElement('div')
   root.className = 'pdf-print-root'
@@ -50,6 +87,13 @@ export async function printPdf(doc: PDFDocumentProxy, pages?: number[]): Promise
           .filter((n) => Number.isInteger(n) && n >= 1 && n <= doc.numPages)
           .sort((a, b) => a - b)
       : Array.from({ length: doc.numPages }, (_x, i) => i + 1)
+  // A caller-supplied range that filters to nothing used to print an empty document:
+  // both loops no-op and window.print() runs against an empty root. Refuse instead.
+  if (pages && pages.length > 0 && targets.length === 0) {
+    throw new Error(
+      `none of the requested pages (${pages.join(', ')}) exist in this ${doc.numPages}-page document`,
+    )
+  }
   // First pass: measure each page at unit scale to budget the shared scale.
   // Stream one page at a time so no PDFPageProxy outlives its render — the
   // previous two-pass held all pages alive plus 2× viewports.
@@ -113,14 +157,7 @@ export async function printPdf(doc: PDFDocumentProxy, pages?: number[]): Promise
   document.body.appendChild(root)
   try {
     await Promise.all([...root.querySelectorAll('img')].map((img) => img.decode()))
-    await new Promise<void>((resolve) => {
-      const done = () => {
-        window.removeEventListener('afterprint', done)
-        resolve()
-      }
-      window.addEventListener('afterprint', done)
-      window.print()
-    })
+    await waitForPrintDialog(PRINT_DIALOG_TIMEOUT_MS)
   } finally {
     root.remove()
   }

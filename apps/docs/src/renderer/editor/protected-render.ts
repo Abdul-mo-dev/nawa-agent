@@ -7,22 +7,25 @@ import {
   autospaceBoundaries,
   autospacePadBetween,
   codePointLengthAt,
-  cjkDeclaredLineFactor,
   cssAutoLineMult,
   cssCsFontFamily,
+  hangulSpaceOffsets,
+  hangulSpaceWideningOn,
   cssFontFamily,
   cssRunFontFamily,
   cssGridLineBase,
   cssGridSpacingPt,
+  cssLeadTop,
   cssLineHeight,
+  cssExactLineCap,
   isCjk,
   isCjkFontName,
   lineHeightFactor,
   paraLineFactorCss,
+  runsLineFactor,
   runLetterSpacingCss,
   fontKerningCss,
   strutFontCss,
-  textHasCjk,
   textHasComplexScript,
   textHasHangul,
   WORD_AUTO_SPACING_PT,
@@ -30,7 +33,14 @@ import {
 } from '../line-metrics'
 import { custGeomBackgroundCss, shapeBackgroundCss, shapeTextInsetsPx } from './shape-svg'
 import { pictureTransformFns, quarterTurnInsetPx, quarterTurnMarginCss } from './image-rotation'
-import { DK_SIDE, dkBackground, dkBorder, dkColor, type DkBorderSide } from './dark-page'
+import {
+  DK_SIDE,
+  dkBackground,
+  dkBackgroundImage,
+  dkBorder,
+  dkColor,
+  type DkBorderSide,
+} from './dark-page'
 import { hfCellGeometry, hfCellParaStyle, hfRowStyle } from './hf-dom'
 import { INLINE_RULE_CLASS, inlineRuleDecls } from './inline-rule'
 import { fillInk } from './shading-ink'
@@ -71,6 +81,7 @@ import {
   cellClipStyle,
   borderWidthPx,
   cellPadCss,
+  modelEdgeBorders,
   outerBorderPx,
   cellVAlignGridCss,
   cellWritingMode,
@@ -81,7 +92,15 @@ import {
   tableBordersCss,
   tableRowEatCss,
 } from './extensions'
-import { cellClipTwips, inferredBidi } from './convert'
+import {
+  cellClipTwips,
+  cellSpacingBorderPx,
+  cellSpacingGridSharesTwips,
+  collapsedCellBw,
+  holdsDeclaredWidth,
+  inferredBidi,
+} from './convert'
+import { cellDiagonalCss, cellPadPx } from './border-metrics'
 
 // Word: links and TOC entries jump on modifier+click only
 const jumpHint = () =>
@@ -131,9 +150,10 @@ export function renderFieldSpec(field: FieldDisplay): DomSpec | null {
     const tocMult = cssAutoLineMult(field.lineRule, field.lineRawTwips, field.lineSpacing)
     if (tocMult && tocMult !== 1) tocStyles.push(`--doc-line-mult:${tocMult}`)
     if (tocStyles.length > 0) attrs.style = tocStyles.join(';')
-    const num: DomSpec[] = field.num
-      ? [['span', { class: 'doc-toc-num', contenteditable: 'false' }, field.num]]
-      : []
+    const numAttrs: Record<string, string> = { class: 'doc-toc-num', contenteditable: 'false' }
+    if (field.indentLeftTwips != null)
+      (field.num ? numAttrs : titleAttrs).style = `padding-left:${field.indentLeftTwips / 20}pt`
+    const num: DomSpec[] = field.num ? [['span', numAttrs, field.num]] : []
     return [
       'div',
       attrs,
@@ -208,9 +228,12 @@ export function renderFieldSpec(field: FieldDisplay): DomSpec | null {
 }
 
 export function renderFormulaSpec(formula: FormulaDisplay): DomSpec {
+  const size: Record<string, string> = formula.sizeHalfPoints
+    ? { style: `font-size:${formula.sizeHalfPoints / 2}pt` }
+    : {}
   const tokenStrip: DomSpec = [
     'span',
-    { class: 'doc-formula' + (formula.mathml ? ' doc-formula-has-math' : '') },
+    { class: 'doc-formula' + (formula.mathml ? ' doc-formula-has-math' : ''), ...size },
     ...formula.tokens.map((token, index): DomSpec => [
       'span',
       {
@@ -227,7 +250,7 @@ export function renderFormulaSpec(formula: FormulaDisplay): DomSpec {
   return [
     'span',
     { class: 'doc-formula-wrap' },
-    ['span', { class: 'doc-formula-math', contenteditable: 'false' }],
+    ['span', { class: 'doc-formula-math', contenteditable: 'false', ...size }],
     tokenStrip,
   ]
 }
@@ -255,6 +278,28 @@ function seriesColor(chart: ChartDisplay, s: number): string {
 function pointColor(chart: ChartDisplay, s: number, i: number): string {
   const explicit = chart.series[s]?.pointColors?.[i]
   return explicit ? `#${explicit}` : chartColor(chart, i)
+}
+
+/**
+ * Iterative max/min, for arrays whose length comes from the document. A chart
+ * part may declare up to MAX_CHART_CACHE_POINTS cached points while carrying a
+ * handful of <c:pt>, and cachePoints densifies the array to the declared count,
+ * so `categories` and the series `values` reach this file a million long.
+ * Spreading one of those into a Math.max/Math.min call overflows the argument
+ * limit (V8 throws at roughly 200k arguments). `seed` carries the extra value
+ * the spread call mixed in, and keeps the empty-array results of a bare
+ * Math.max() / Math.min() (-Infinity / Infinity).
+ */
+function maxNum(values: ArrayLike<number>, seed: number): number {
+  let out = seed
+  for (let i = 0; i < values.length; i++) out = Math.max(out, values[i])
+  return out
+}
+
+function minNum(values: ArrayLike<number>, seed: number): number {
+  let out = seed
+  for (let i = 0; i < values.length; i++) out = Math.min(out, values[i])
+  return out
 }
 
 /**
@@ -296,7 +341,10 @@ export function renderChartSpec(chart: ChartDisplay): DomSpec {
     ],
   ]
 
-  const colCount = Math.max(chart.categories.length, ...chart.series.map((s) => s.values.length))
+  const colCount = maxNum(
+    chart.series.map((s) => s.values.length),
+    chart.categories.length,
+  )
   const headCells: DomSpec[] = [['th', { class: 'doc-chart-corner' }, '\u00a0']]
   for (let c = 0; c < colCount; c++) {
     headCells.push([
@@ -516,7 +564,7 @@ export function drawChartSvg(dom: HTMLElement, chart: ChartDisplay | null): void
   // horizontal bars put category labels on the y axis; reserve room for the longest one
   const catLabelPx = (s: string) => chartTextPx(s, labelPx)
   const legendTextPx = (s: string) => chartTextPx(s, legendPx)
-  const maxCatPx = Math.max(0, ...chart.categories.map(catLabelPx))
+  const maxCatPx = maxNum(chart.categories.map(catLabelPx), 0)
   const width = chartPlotWidth(chart)
   // l/r/tr legends stack vertically in a side gutter, like Word; other
   // positions (and legacy models without legendPos) keep the bottom row
@@ -524,7 +572,7 @@ export function drawChartSvg(dom: HTMLElement, chart: ChartDisplay | null): void
     showLegend && (chart.legendPos === 'l' || chart.legendPos === 'r' || chart.legendPos === 'tr')
   const topLegend = showLegend && chart.legendPos === 't'
   const legendW = sideLegend
-    ? Math.min(Math.round(width * 0.35), 20 + Math.max(0, ...legendNames.map(legendTextPx)))
+    ? Math.min(Math.round(width * 0.35), 20 + maxNum(legendNames.map(legendTextPx), 0))
     : 0
   // bottom legends wrap into centered rows when the entries overflow the width, like Word
   const legendEntryW = (i: number) => 14 + legendTextPx(legendNames[i]) + 12
@@ -582,9 +630,9 @@ export function drawChartSvg(dom: HTMLElement, chart: ChartDisplay | null): void
   if (cartesian && !(chart.kind === 'bar' && chart.horizontal) && !geom.noCatLabels) {
     const cols = Math.max(chart.categories.length, 1)
     const slotW = (geom.width - geom.left - geom.right) / cols
-    const lines = Math.max(
+    const lines = maxNum(
+      chart.categories.map((c) => wrapChartText(c, slotW - 4, labelPx).length),
       1,
-      ...chart.categories.map((c) => wrapChartText(c, slotW - 4, labelPx).length),
     )
     geom.bottom += (lines - 1) * Math.round(labelPx * 1.2)
   }
@@ -762,7 +810,10 @@ function drawDataTable(
   table: NonNullable<ChartDisplay['dataTable']>,
   rowH: number,
 ): void {
-  const cols = Math.max(chart.categories.length, ...chart.series.map((s) => s.values.length), 1)
+  const cols = maxNum(
+    chart.series.map((s) => s.values.length),
+    Math.max(chart.categories.length, 1),
+  )
   const x0 = 4
   const x1 = geom.left
   const xEnd = geom.width - geom.right
@@ -859,7 +910,10 @@ function stackSums(
 
 /** bar / line / area charts share the same axes and scale */
 function drawAxes(svg: SVGElement, chart: ChartDisplay, geom: ChartGeom): void {
-  const cols = Math.max(chart.categories.length, ...chart.series.map((s) => s.values.length), 1)
+  const cols = maxNum(
+    chart.series.map((s) => s.values.length),
+    Math.max(chart.categories.length, 1),
+  )
   const stacked =
     (chart.kind === 'bar' || chart.kind === 'area' || chart.kind === 'line') &&
     chart.grouping !== undefined
@@ -872,8 +926,8 @@ function drawAxes(svg: SVGElement, chart: ChartDisplay, geom: ChartGeom): void {
     ? [...sums!.pos.map(norm), ...sums!.neg.map(norm)]
     : chart.series.flatMap((s) => s.values).filter((v): v is number => v !== null)
   // "nice" axis bounds (1/2/5×10ⁿ step, integer-friendly labels like Word/LO)
-  const rawMax = Math.max(0, ...values)
-  const rawMin = Math.min(0, ...values)
+  const rawMax = maxNum(values, 0)
+  const rawMin = minNum(values, 0)
   const step = niceStep((rawMax - rawMin) / 5 || 1)
   const min = Math.floor(rawMin / step) * step
   // Word/LO leave headroom: the top tick sits strictly above the data maximum
@@ -1083,10 +1137,13 @@ function drawAxes(svg: SVGElement, chart: ChartDisplay, geom: ChartGeom): void {
 
 /** radar: one spoke per category, polygon rings at the value steps, series as closed outlines (filled: opaque) */
 function drawRadar(svg: SVGElement, chart: ChartDisplay, geom: ChartGeom): void {
-  const cols = Math.max(chart.categories.length, ...chart.series.map((s) => s.values.length), 1)
+  const cols = maxNum(
+    chart.series.map((s) => s.values.length),
+    Math.max(chart.categories.length, 1),
+  )
   const values = chart.series.flatMap((s) => s.values).filter((v): v is number => v !== null)
-  const rawMax = Math.max(0, ...values)
-  const rawMin = Math.min(0, ...values)
+  const rawMax = maxNum(values, 0)
+  const rawMin = minNum(values, 0)
   const step = niceStep((rawMax - rawMin) / 5 || 1)
   const min = Math.floor(rawMin / step) * step
   let max = Math.ceil(rawMax / step) * step || step
@@ -1225,8 +1282,8 @@ function drawScatter(svg: SVGElement, chart: ChartDisplay, geom: ChartGeom): voi
   const all = pts.flat()
   if (all.length === 0) return
   const axis = (vals: number[]) => {
-    let rawMax = Math.max(...vals)
-    let rawMin = Math.min(...vals)
+    let rawMax = maxNum(vals, -Infinity)
+    let rawMin = minNum(vals, Infinity)
     // Excel-style auto minimum: anchor at 0 unless the data sits far above it
     // (date-serial x values must not squash the points against the right edge)
     if (rawMin > 0 && rawMin <= rawMax - rawMin) rawMin = 0
@@ -1310,7 +1367,10 @@ function drawScatter(svg: SVGElement, chart: ChartDisplay, geom: ChartGeom): voi
     })
   }
 
-  const maxSize = Math.max(0, ...all.map((p) => p.size ?? 0))
+  const maxSize = maxNum(
+    all.map((p) => p.size ?? 0),
+    0,
+  )
   const rMax = Math.min(plotW, plotH) * 0.125
   pts.forEach((points, s) => {
     const color = seriesColor(chart, s)
@@ -1345,7 +1405,10 @@ function drawScatter(svg: SVGElement, chart: ChartDisplay, geom: ChartGeom): voi
 /** horizontal bar charts (c:barDir="bar"): value axis on x, categories on y,
  * first category in the bottom row and series 1 at the bottom of each group, like Word */
 function drawAxesHorizontal(svg: SVGElement, chart: ChartDisplay, geom: ChartGeom): void {
-  const rows = Math.max(chart.categories.length, ...chart.series.map((s) => s.values.length), 1)
+  const rows = maxNum(
+    chart.series.map((s) => s.values.length),
+    Math.max(chart.categories.length, 1),
+  )
   const stacked = chart.grouping !== undefined
   const pct = chart.grouping === 'percentStacked'
   const sums = stacked ? stackSums(chart, rows) : null
@@ -1354,8 +1417,8 @@ function drawAxesHorizontal(svg: SVGElement, chart: ChartDisplay, geom: ChartGeo
   const values = stacked
     ? [...sums!.pos.map(norm), ...sums!.neg.map(norm)]
     : chart.series.flatMap((s) => s.values).filter((v): v is number => v !== null)
-  const rawMax = Math.max(0, ...values)
-  const rawMin = Math.min(0, ...values)
+  const rawMax = maxNum(values, 0)
+  const rawMin = minNum(values, 0)
   const step = niceStep((rawMax - rawMin) / 5 || 1)
   const min = Math.floor(rawMin / step) * step
   let max = Math.ceil(rawMax / step) * step || step
@@ -1733,22 +1796,43 @@ export function textboxBoxStyle(box: TextboxDisplay, opts?: { inCell?: boolean }
 }
 
 const AUTOSPACE_PAD_ATTRS = { class: 'doc-autospace-pad' }
+const HANGUL_SPACE_ATTRS = { class: 'doc-hangul-space' }
+
+/** texts directly before/after a run inside its paragraph (empty = none) */
+export type RunNeighbours = { prev?: string; next?: string }
 
 /**
- * static-DOM counterpart of the editor's autospace pad decorations: the
- * character after each CJK-Latin boundary (and the first one when leadPad)
- * carries the pad margin
+ * static-DOM counterpart of the editor's autospace pad and hangul-space
+ * decorations: the character after each CJK-Latin boundary (and the first one
+ * when leadPad) carries the pad margin; a space with a hangul neighbour gets
+ * the half-width space face
  */
-function padSegments(text: string, leadPad = false): unknown[] {
-  const cuts = autospaceBoundaries(text)
-  if (leadPad && text) cuts.unshift(0)
-  if (cuts.length === 0) return [text]
+function padSegments(
+  text: string,
+  pads: boolean,
+  leadPad: boolean,
+  neighbours: RunNeighbours,
+): unknown[] {
+  const wraps: Array<[number, number, object]> = []
+  if (pads) {
+    const cuts = autospaceBoundaries(text)
+    if (leadPad && text) cuts.unshift(0)
+    for (const cut of cuts) {
+      wraps.push([cut, cut + codePointLengthAt(text, cut), AUTOSPACE_PAD_ATTRS])
+    }
+  }
+  if (hangulSpaceWideningOn()) {
+    for (const i of hangulSpaceOffsets(text, neighbours.prev, neighbours.next)) {
+      wraps.push([i, i + 1, HANGUL_SPACE_ATTRS])
+    }
+  }
+  if (wraps.length === 0) return [text]
+  wraps.sort((a, b) => a[0] - b[0])
   const out: unknown[] = []
   let start = 0
-  for (const cut of cuts) {
-    if (cut > start) out.push(text.slice(start, cut))
-    const end = cut + codePointLengthAt(text, cut)
-    out.push(['span', AUTOSPACE_PAD_ATTRS, text.slice(cut, end)])
+  for (const [from, end, attrs] of wraps) {
+    if (from > start) out.push(text.slice(start, from))
+    out.push(['span', attrs, text.slice(from, end)])
     start = end
   }
   if (start < text.length) out.push(text.slice(start))
@@ -1756,11 +1840,16 @@ function padSegments(text: string, leadPad = false): unknown[] {
 }
 
 /** run → styled <span> (+ inline <img>) specs, shared by textbox and table-cell rendering */
-export function runSpanSpecs(run: Run, autoSpace?: boolean, leadPad = false): DomSpec[] {
+export function runSpanSpecs(
+  run: Run,
+  autoSpace?: boolean,
+  leadPad = false,
+  neighbours: RunNeighbours = {},
+): DomSpec[] {
   const out: DomSpec[] = []
   // a run can carry both w:t text and a w:drawing; the text renders before the
   // image (generate.ts / the editable path keep the same order)
-  if (run.text !== '' || !run.image) out.push(textSpanSpec(run, autoSpace, leadPad))
+  if (run.text !== '' || !run.image) out.push(textSpanSpec(run, autoSpace, leadPad, neighbours))
   if (run.image?.rule) {
     const decls = inlineRuleDecls({ ...run.image.rule, sizeHalfPoints: run.sizeHalfPoints })
     out.push([
@@ -1783,7 +1872,12 @@ export function runSpanSpecs(run: Run, autoSpace?: boolean, leadPad = false): Do
   return out
 }
 
-function textSpanSpec(run: Run, autoSpace?: boolean, leadPad = false): DomSpec {
+function textSpanSpec(
+  run: Run,
+  autoSpace?: boolean,
+  leadPad = false,
+  neighbours: RunNeighbours = {},
+): DomSpec {
   const cs = run.csFont && textHasComplexScript(run.text) ? run.csFont : undefined
   const letterSpacing = runLetterSpacingCss(run)
   const kerning = fontKerningCss(run)
@@ -1816,14 +1910,14 @@ function textSpanSpec(run: Run, autoSpace?: boolean, leadPad = false): DomSpec {
   ]
     .filter(Boolean)
     .join(';')
-  const content = autoSpace === false ? [run.text] : padSegments(run.text, leadPad)
+  const content = padSegments(run.text, autoSpace !== false, leadPad, neighbours)
   // hyperlink runs keep the editable path's look (.doc-link) and real href;
   // App-level click handling prevents in-place navigation (jump on mod+click)
   const attrs: Record<string, string> = {}
   if (runStyle) attrs.style = runStyle
   if (run.styleId) attrs['data-style'] = run.styleId
   if (run.link?.href) {
-    attrs.class = 'doc-link'
+    attrs.class = run.link.plain ? 'doc-link doc-link-plain' : 'doc-link'
     attrs.href = run.link.href
     if (run.link.tooltip) attrs.title = run.link.tooltip
     return ['a', attrs, ...content]
@@ -1831,18 +1925,35 @@ function textSpanSpec(run: Run, autoSpace?: boolean, leadPad = false): DomSpec {
   return ['span', attrs, ...content]
 }
 
+/** text directly touching run k on one side; a picture (drawn after its run's
+ *  text) breaks adjacency like the editor's non-text inlines, empty runs are skipped */
+function adjacentRunText(runs: Run[], k: number, step: 1 | -1): string {
+  if (step > 0 && runs[k].image) return ''
+  for (let j = k + step; j >= 0 && j < runs.length; j += step) {
+    const r = runs[j]
+    if (step < 0 && r.image) return ''
+    if (r.text !== '') return r.text
+    if (r.image) return ''
+  }
+  return ''
+}
+
 /** run spans with pads at run-boundary CJK-Latin seams (empty runs keep their span, no pad) */
 function runSpansWithPads(runs: Run[], autoSpace?: boolean): DomSpec[] {
   const out: DomSpec[] = []
   let prevText = ''
-  for (const run of runs) {
+  runs.forEach((run, k) => {
     let leadPad = false
+    const neighbours: RunNeighbours = {
+      prev: adjacentRunText(runs, k, -1),
+      next: adjacentRunText(runs, k, 1),
+    }
     if (run.text !== '') {
       leadPad = autoSpace !== false && autospacePadBetween(prevText, run.text)
       prevText = run.text
     }
-    out.push(...runSpanSpecs(run, autoSpace, leadPad))
-  }
+    out.push(...runSpanSpecs(run, autoSpace, leadPad, neighbours))
+  })
   return out
 }
 
@@ -1864,6 +1975,7 @@ function textboxRowSpec(para: TextboxParaDisplay): DomSpec {
     for (const [side, css] of Object.entries(geom.borders)) {
       decls.push(dkBorder(side as DkBorderSide, css))
     }
+    if (geom.diagonals) decls.push(dkBackgroundImage(geom.diagonals))
     const lines = (cell.paras.length > 0 ? cell.paras : [[]]).map((runs, k): DomSpec => {
       const attrs: Record<string, string> = { class: 'page-hf-cell-para' }
       const style = styleText(hfCellParaStyle(cell.paraProps?.[k]))
@@ -1890,7 +2002,17 @@ export function renderTextboxSpec(box: TextboxDisplay, opts?: { inCell?: boolean
     if (box.pageRelVFrom === 'page') boxAttrs['data-page-rel-from'] = 'page'
   }
   // page-absolute X: the column-layout counter-translate keys on this
-  if (box.floating && box.pageRelX) boxAttrs['data-page-rel-x'] = '1'
+  if (box.floating && box.pageRelX) {
+    boxAttrs['data-page-rel-x'] = '1'
+    if (box.pageRelXFrom === 'page') boxAttrs['data-page-rel-x-from'] = 'page'
+  }
+  // layoutInCell="0" page-positioned cell box: pinCellBoxesToPage lands it on
+  // the page from these raw offsets instead of the cell origin
+  if (opts?.inCell && cellBoxOnPage(box)) {
+    boxAttrs['data-cell-page'] = '1'
+    boxAttrs['data-cell-page-x'] = ((box.offsetXEmu ?? 0) / 9525).toFixed(1)
+    boxAttrs['data-cell-page-y'] = ((box.offsetYEmu ?? 0) / 9525).toFixed(1)
+  }
   // wrapNone/front/behind boxes never open pages: Word clips them at their
   // anchor's page edge (a letterhead's page-tall art box must not add a page)
   if (box.floating && !box.bandTopPx && !box.bandBottomPx && !box.wrapSide) {
@@ -1920,6 +2042,8 @@ export function renderTextboxSpec(box: TextboxDisplay, opts?: { inCell?: boolean
     }
     const lineMult = cssAutoLineMult(para.lineRule, para.lineRawTwips, para.lineSpacing)
     const lh = cssLineHeight(para.lineRule, para.lineRawTwips, para.lineSpacing)
+    const lhCap = cssExactLineCap(para.lineRule, para.lineRawTwips)
+    const leadTop = cssLeadTop(para.lineRule, para.lineRawTwips, para.lineSpacing)
     const pStyles = [
       para.align ? `text-align:${para.align}` : '',
       // .doc-textbox-para's pre-wrap would still wrap a nowrap (WordArt) box
@@ -1928,8 +2052,10 @@ export function renderTextboxSpec(box: TextboxDisplay, opts?: { inCell?: boolean
       // undeclared spacing inherits the document default via the
       // .doc-textbox-para stylesheet rule (an inline base would override it)
       lh ? `line-height:${lh}` : '',
+      lhCap ? `--doc-lh-cap:${lhCap}` : '',
       // explicit single (mult 1) still overrides an inherited style/doc multiple
       lineMult ? `--doc-line-mult:${lineMult}` : '',
+      leadTop ? `--doc-lead-top:${leadTop}` : '',
       // w:snapToGrid=0 opts the paragraph out of docGrid snapping (Word applies
       // the typed line grid inside textboxes too)
       para.snapToGrid === false ? '--doc-grid-pitch:0.0001px' : '',
@@ -1978,21 +2104,6 @@ function runStrutHalfPoints(runs: Run[]): { halfPoints: number; uniform: boolean
   return max === null ? null : { halfPoints: max, uniform: max === min }
 }
 
-/** Run[] port of extensions' latinParaFactor (declared run fonts override the doc factor). */
-function latinRunsFactor(runs: Run[], scriptVar: string): string {
-  let declaredMax = 0
-  let undeclared = false
-  for (const run of runs) {
-    // ascii slot only, like extensions' latinParaFactor: an eastAsia-only
-    // declaration must not set a Latin line's factor
-    const family = run.fontAscii
-    if (family) declaredMax = Math.max(declaredMax, lineHeightFactor(family))
-    else undeclared = true
-  }
-  if (declaredMax <= 0) return scriptVar
-  return undeclared ? `max(${scriptVar}, ${declaredMax})` : String(declaredMax)
-}
-
 /** Run[] port of extensions' paraDeclaredFontFamily (strut face follows the runs). */
 function runsDeclaredFontFamily(runs: Run[]): string | null {
   let first: string | null = null
@@ -2003,23 +2114,6 @@ function runsDeclaredFontFamily(runs: Run[]): string | null {
     first ??= cssRunFontFamily(ascii, ea)
   }
   return first
-}
-
-/** Per-paragraph --doc-line-factor from runs (Run[] port of extensions' paraLineFactor). */
-function runsLineFactor(runs: Run[], text: string): string {
-  const scriptVar = paraLineFactorCss(text)
-  if (!textHasCjk(text)) return latinRunsFactor(runs, scriptVar)
-  let declaredMax = 0
-  let undeclaredCjk = false
-  for (const run of runs) {
-    if (!textHasCjk(run.text)) continue
-    const family = run.eaSlotEmpty === true ? null : (run.font ?? run.fontAscii)
-    if (family && isCjkFontName(family)) {
-      declaredMax = Math.max(declaredMax, cjkDeclaredLineFactor(family) ?? lineHeightFactor(family))
-    } else undeclaredCjk = true
-  }
-  if (declaredMax <= 0) return scriptVar
-  return undeclaredCjk ? `max(${scriptVar}, ${declaredMax})` : String(declaredMax)
 }
 
 /**
@@ -2104,15 +2198,19 @@ function cellParaSpec(
  * wrapNone boxes overlay the cell without growing it */
 export function cellBoxesSpec(boxes: TextboxDisplay[]): DomSpec {
   if (boxes.length === 0) return ['div', { class: 'doc-cell-boxes' }]
+  // a page-positioned group (splitCellBoxGroup) gets its own strut: the
+  // preview un-positions it so the boxes resolve against the page box like
+  // top-level page-relative floats; Word does not grow the row for them
+  const onPage = boxes.every(cellBoxOnPage)
   let bottom = 0
   for (const b of boxes) {
-    if (b.noWrap) continue
+    if (b.noWrap || onPage) continue
     bottom = Math.max(bottom, (b.offsetYEmu ?? 0) / 9525 + (b.heightPx ?? b.minHeightPx ?? 0))
   }
   return [
     'div',
     {
-      class: 'doc-cell-boxes',
+      class: onPage ? 'doc-cell-boxes doc-cell-boxes-page' : 'doc-cell-boxes',
       contenteditable: 'false',
       style: bottom > 0 ? `height:${bottom.toFixed(1)}px` : '',
     },
@@ -2128,6 +2226,20 @@ export function cellBoxesSpec(boxes: TextboxDisplay[]): DomSpec {
       ]
     }),
   ]
+}
+
+/** one anchor paragraph's boxes split into page-positioned and in-cell struts */
+export function splitCellBoxGroup(group: TextboxDisplay[]): TextboxDisplay[][] {
+  const onPage = group.filter(cellBoxOnPage)
+  const inCell = group.filter((b) => !cellBoxOnPage(b))
+  return [onPage, inCell].filter((g) => g.length > 0)
+}
+
+/** a layoutInCell="0" box with a page/margin-relative offset: Word positions it
+ *  on the page, not in the cell (resume templates: avatar and header bar
+ *  anchored in the first cell of a page-anchored floating table) */
+export function cellBoxOnPage(box: TextboxDisplay): boolean {
+  return !!box.outsideCell && !!box.floating && !!box.pageRelV
 }
 
 /** read-only <table> DOM spec from the display model (vMerge -> rowSpan);
@@ -2156,6 +2268,7 @@ export function renderTableSpec(model: TableModel, nested = false): DomSpec {
           rowSpan++
         }
       }
+      const collapsedBw = collapsedCellBw(row, ci)
       const style = [
         // gridBefore/gridAfter placeholder: bare grid space, never bordered/filled
         cell.gridGap ? 'border:none;background:none' : '',
@@ -2173,15 +2286,28 @@ export function renderTableSpec(model: TableModel, nested = false): DomSpec {
         // per-cell borders are the only line source for style-less documents
         ...(['top', 'left', 'bottom', 'right'] as const).map((side) => {
           const v = borderLineCss(cell.borders?.[side])
-          if (!v) return ''
+          const collapsed =
+            side === 'left' ? collapsedBw?.l : side === 'right' ? collapsedBw?.r : undefined
+          const bw =
+            side === 'left' || side === 'right'
+              ? (collapsed ?? borderWidthPx(cell.borders?.[side]))
+              : undefined
+          if (!v) return collapsed !== undefined ? `--cell-bw-${DK_SIDE[side]}:${collapsed}px` : ''
           const css = `border-${side}:${v};${dkBorder(DK_SIDE[side], v)}`
           return side === 'left' || side === 'right'
-            ? `${css};--cell-bw-${DK_SIDE[side]}:${borderWidthPx(cell.borders?.[side])}px`
+            ? `${css};--cell-bw-${DK_SIDE[side]}:${bw}px`
             : `${css};${bdDeltaCss(side, cell.borders?.[side])}`
         }),
+        (() => {
+          const layers = (['tl2br', 'tr2bl'] as const)
+            .map((d) => cellDiagonalCss(cell.borders?.[d], d))
+            .filter((v): v is string => v !== null)
+            .join(',')
+          return layers ? `background-image:${layers};${dkBackgroundImage(layers)}` : ''
+        })(),
         ...(['top', 'left', 'bottom', 'right'] as const).map((side) =>
           cell.cellMarTwips?.[side] !== undefined
-            ? `--doc-cell-pad-${DK_SIDE[side]}:${(cell.cellMarTwips[side]! / 15).toFixed(1)}px`
+            ? `--doc-cell-pad-${DK_SIDE[side]}:${cellPadPx(cell.cellMarTwips[side]!)}`
             : '',
         ),
       ]
@@ -2207,7 +2333,9 @@ export function renderTableSpec(model: TableModel, nested = false): DomSpec {
               p,
             )
           })
-        : cell.paras.map((p) => cellParaSpec(p === '' ? [] : [...padSegments(p)], p, null))
+        : cell.paras.map((p) =>
+            cellParaSpec(p === '' ? [] : [...padSegments(p, true, false, {})], p, null),
+          )
       // nested tables spliced in at their paragraph anchors (cells with them are never editable)
       const nested = cell.nestedTables ?? []
       const anchorOf = (i: number) =>
@@ -2223,7 +2351,7 @@ export function renderTableSpec(model: TableModel, nested = false): DomSpec {
       let ni = 0
       const boxesAt = (pi: number) => {
         const group = boxGroups.get(pi)
-        if (group) content.push(cellBoxesSpec(group))
+        if (group) for (const g of splitCellBoxGroup(group)) content.push(cellBoxesSpec(g))
       }
       paraBlocks.forEach((blk, pi) => {
         while (ni < nested.length && anchorOf(ni) <= pi)
@@ -2261,17 +2389,29 @@ export function renderTableSpec(model: TableModel, nested = false): DomSpec {
     })
     const trAttrs: Record<string, string> = {}
     const rh = model.rowHeightsTwips?.[ri]
-    if (rh)
+    if (rh) {
+      const inFlow = row.filter((cell) => !cell.gridGap)
       trAttrs.style = rowHeightCss(
         rh,
-        row.filter((cell) => !cell.gridGap).map((cell) => cell.borders),
+        inFlow.map((cell) => cell.borders),
+        inFlow.map((cell) => cell.cellMarTwips),
+        model.rowHeightRules?.[ri] ?? null,
       )
+    }
     return ['tr', trAttrs, ...tds]
   })
 
   const tableChildren: unknown[] = []
+  const spacingShares = model.cellSpacingTwips
+    ? cellSpacingGridSharesTwips(model.colWidthsTwips?.length ?? 1, model.cellSpacingTwips)
+    : null
+  const spacingBorders = model.cellSpacingTwips
+    ? cellSpacingBorderPx(model.colWidthsTwips?.length ?? 1, model.borders)
+    : null
   const colPx = !model.widthPct
-    ? model.colWidthsTwips?.map((w) => Math.max(1, Math.round(w / 15)))
+    ? model.colWidthsTwips?.map((w, i) =>
+        Math.max(1, Math.round((w - (spacingShares?.[i] ?? 0)) / 15) + (spacingBorders?.[i] ?? 0)),
+      )
     : undefined
   if (colPx) {
     tableChildren.push(['colgroup', {}, ...colPx.map((w) => ['col', { style: `width:${w}px` }])])
@@ -2309,9 +2449,11 @@ export function renderTableSpec(model: TableModel, nested = false): DomSpec {
     // indent shifts the table right, so it comes out of the budget
     const widthPx =
       colPx.reduce((sum, w) => sum + w, 0) +
-      (model.cellSpacingTwips ? 0 : outerBorderPx(model.borders ?? null))
+      (model.cellSpacingTwips
+        ? Math.round(((colPx.length + 1) * 2 * model.cellSpacingTwips) / 15)
+        : outerBorderPx(model.borders ?? null, modelEdgeBorders(model)))
     // w:tblLayout fixed holds the declared widths even past the paper edge (see DocTable.renderHTML)
-    if (!nested && model.fixedLayout) {
+    if (!nested && (model.fixedLayout || holdsDeclaredWidth(model))) {
       widthExpr = `${widthPx}px`
       tableStyles.push(`width:${widthExpr}`, 'max-width:none')
       if (model.align === 'center')
@@ -2351,7 +2493,12 @@ export function renderTableSpec(model: TableModel, nested = false): DomSpec {
     )
   }
   if (model.fill) tableStyles.push(`background-color:#${model.fill}`)
-  tableStyles.push(...tableBordersCss((model.borders as TableBordersAttr | undefined) ?? null))
+  // a borderless nested table must not inherit the host table's --doc-b-* lines
+  tableStyles.push(
+    ...tableBordersCss(
+      (model.borders as TableBordersAttr | undefined) ?? (nested ? ({} as TableBordersAttr) : null),
+    ),
+  )
   tableStyles.push(
     ...tableRowEatCss(
       (model.borders as TableBordersAttr | undefined) ?? null,

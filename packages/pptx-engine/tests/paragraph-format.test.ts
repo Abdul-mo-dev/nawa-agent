@@ -4,6 +4,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import { parseSlide } from '../src/parse'
+import { generateParagraphXml } from '../src/generate'
 import { patchedElementXml, setElementParagraphFormat } from '../src/index'
 import { parseMasterTextStyles } from '../src/placeholder'
 import type { TextElement } from '../src/types'
@@ -285,6 +286,16 @@ describe('paragraph direction rtl', () => {
 })
 
 describe('multi-level indentation indentDelta', () => {
+  it('bounds imported paragraph levels before numbering layout', () => {
+    const { el } = parseOne(
+      '<a:bodyPr/>' +
+        '<a:p><a:pPr lvl="20000000"><a:buAutoNum type="arabicPeriod"/></a:pPr><a:r><a:t>huge</a:t></a:r></a:p>' +
+        '<a:p><a:pPr lvl="-4"/><a:r><a:t>negative</a:t></a:r></a:p>' +
+        '<a:p><a:r><a:t>normal</a:t></a:r></a:p>',
+    )
+    expect(el.text!.paragraphs.map((p) => p.level)).toEqual([8, 0, undefined])
+  })
+
   it('increasing level writes lvl, own bullet hanging indent grows with the level', () => {
     const { slide, el } = parseOne('<a:bodyPr/><a:p><a:r><a:t>x</a:t></a:r></a:p>')
     setElementParagraphFormat(slide, el.id, { bullet: 'char' })
@@ -378,5 +389,25 @@ describe('empty paragraph endParaRPr', () => {
     const p = el.text!.paragraphs[0]!
     expect(p.runs[0]!.text).toBe('Hello')
     expect(p.runs[0]!.fontSize).toBe(20)
+  })
+})
+
+describe('East Asian wrap flags', () => {
+  it('eaLnBrk/latinLnBrk/hangingPunct parse from pPr and are written back by the generator', () => {
+    const { el } = parseOne(
+      '<a:bodyPr/><a:p><a:pPr eaLnBrk="0" latinLnBrk="1" hangingPunct="0"/><a:r><a:t>Hi</a:t></a:r></a:p>',
+    )
+    const p = el.text!.paragraphs[0]!
+    expect(p.eaLnBrk).toBe(false)
+    expect(p.latinLnBrk).toBe(true)
+    expect(p.hangingPunct).toBe(false)
+    const out = generateParagraphXml(p)
+    expect(out).toContain('eaLnBrk="0"')
+    expect(out).toContain('latinLnBrk="1"')
+    expect(out).toContain('hangingPunct="0"')
+    // defaults stay implicit
+    expect(generateParagraphXml({ runs: [{ text: 'a' }] })).not.toMatch(
+      /eaLnBrk|latinLnBrk|hangingPunct/,
+    )
   })
 })

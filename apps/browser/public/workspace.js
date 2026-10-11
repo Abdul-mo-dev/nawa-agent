@@ -45,11 +45,14 @@ let csrf = '',
   tabs = [],
   active = null,
   modalResolve = null
+let folderLoadVersion = 0
 const kinds = {
   docx: 'docs',
   xlsx: 'sheets',
   xlsm: 'sheets',
+  xls: 'sheets',
   csv: 'sheets',
+  tsv: 'sheets',
   pptx: 'slides',
   pdf: 'pdf',
   md: 'markdown',
@@ -192,7 +195,7 @@ async function connect() {
   $('mode-note').textContent =
     status.mode === 'source-only'
       ? 'Source-editor mode. Run setup-windows.cmd and Start Nawa.cmd to use the original office editors.'
-      : 'Original Nawa editors · Local Windows service'
+      : 'Office editing and local saves. AI, export, and desktop integrations are available in Nawa desktop.'
   await refreshMounts()
 }
 async function refreshMounts() {
@@ -271,12 +274,19 @@ async function mountFolder() {
   }
 }
 async function loadFolder() {
-  if (!currentMount) {
-    entries = []
-    renderFiles()
-    return
-  }
-  entries = await api('/api/tree' + query(currentMount, currentFolder))
+  const version = ++folderLoadVersion
+  const mount = currentMount
+  const folder = currentFolder
+  // A stale row must not stay clickable while actions already target the new
+  // mount. Publish the new location immediately, then fill its own listing.
+  entries = []
+  renderFiles()
+  if (!mount) return
+  const listing = await api('/api/tree' + query(mount, folder))
+  // Navigation may finish out of order. A previous folder must never publish
+  // entries under the newly selected mount's actions and breadcrumbs.
+  if (version !== folderLoadVersion || mount !== currentMount || folder !== currentFolder) return
+  entries = listing
   renderFiles()
 }
 function renderFiles() {
@@ -442,11 +452,12 @@ function updateDirty(tab, dirty) {
   renderTabs()
   updateToolbar()
 }
-async function openFile(relative, forceSource = false) {
+async function openFile(relative, forceSource = false, mount = currentMount) {
   notify()
+  if (!mount) throw new Error('Mount a folder before opening a file.')
   const existing = tabs.find(
     (t) =>
-      t.mount === currentMount &&
+      t.mount === mount &&
       t.path === relative &&
       t.source === (forceSource || !status.editors?.includes(kinds[extension(relative)])),
   )
@@ -457,12 +468,11 @@ async function openFile(relative, forceSource = false) {
   const kind = kinds[extension(relative)]
   const native = !forceSource && status.editors?.includes(kind)
   let info, text
-  if (native)
-    info = await api('/api/tabs', { method: 'POST', data: { mount: currentMount, path: relative } })
-  else text = await api('/api/text' + query(currentMount, relative))
+  if (native) info = await api('/api/tabs', { method: 'POST', data: { mount, path: relative } })
+  else text = await api('/api/text' + query(mount, relative))
   const tab = {
     id: info?.id ?? crypto.randomUUID(),
-    mount: currentMount,
+    mount,
     path: relative,
     source: !native,
     dirty: false,
@@ -579,7 +589,7 @@ async function reloadTab() {
   const { mount, path, source } = tab
   await closeTab(tab, true)
   currentMount = mount
-  await openFile(path, source)
+  await openFile(path, source, mount)
 }
 async function downloadTab() {
   const tab = tabs.find((t) => t.id === active)

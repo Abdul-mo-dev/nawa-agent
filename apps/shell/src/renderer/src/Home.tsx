@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { DragEvent as ReactDragEvent, ReactElement } from 'react'
 import logoLockup from './assets/nawa-logo.svg'
+import { KbAskPanel } from './KbAskPanel'
 import iconDocx from './assets/file-docx.svg'
 import iconXlsx from './assets/file-xlsx.svg'
 import iconPptx from './assets/file-pptx.svg'
@@ -15,16 +16,22 @@ import type {
   HomeApi,
   MoveConflictPolicy,
   RecentEntry,
+  FileSearchHit,
+  FileSearchPage,
+  FileSearchRerank,
 } from '../../shared/home-api'
 import type { IntegrationsApi } from '../../shared/integrations-api'
+import { markText } from '../../shared/text-marks'
 import { useDismissablePopover } from '@genoffice/ui'
-import { fileCountKey, visiblePageCount } from './counts'
+import { fileCountLabel, visiblePageCount } from './counts'
 import { useI18n } from './locale'
 import type { I18n, StringKey } from './locale'
 import { SettingsModal } from './SettingsModal'
 import { WorkspaceChat } from './WorkspaceChat'
 import './workspace.css'
+import type { SettingsTarget } from './SettingsModal'
 import { skillUpdateDue } from './IntegrationsPane'
+import { onFilesChanged } from './file-events'
 
 declare global {
   interface Window {
@@ -61,7 +68,8 @@ const FILE_ICONS: Record<string, string> = {
 /* Formats the open-local card advertises. Too long for the card at any window
    width, so it ellipsizes and a hover ScreenTip carries the full list. Keep in
    sync with the main-process open-dialog filter (OPEN_DIALOG_EXTENSIONS). */
-const OPEN_LOCAL_EXTENSIONS = '.docx / .xlsx / .xlsm / .xls / .csv / .pptx / .pdf / .md / .html'
+const OPEN_LOCAL_EXTENSIONS =
+  '.docx / .xlsx / .xlsm / .xls / .csv / .tsv / .pptx / .pdf / .md / .html'
 
 /** drag payload of home file/folder rows (JSON array of absolute paths) */
 const DRAG_PATHS_MIME = 'application/x-genoffice-paths'
@@ -217,10 +225,20 @@ function baseName(entry: RecentEntry): string {
   return entry.ext ? entry.name.slice(0, -(entry.ext.length + 1)) : entry.name
 }
 
-/** "Clients / Contracts" for a file under the root; the parent folder name elsewhere */
-function locationLabel(path: string, root: FolderRoot | null): string {
+/** the root that holds `path`; the deepest one when roots nest */
+function rootOf(path: string, roots: readonly FolderRoot[]): FolderRoot | null {
+  let best: FolderRoot | null = null
+  for (const root of roots) {
+    if (isUnder(root.path, path) && (!best || root.path.length > best.path.length)) best = root
+  }
+  return best
+}
+
+/** "Clients / Contracts" for a file under a root; the parent folder name elsewhere */
+function locationLabel(path: string, roots: readonly FolderRoot[]): string {
   const dir = dirOf(path)
-  if (root && isUnder(root.path, dir)) {
+  const root = rootOf(dir, roots)
+  if (root) {
     if (dir === root.path) return root.name
     return splitPath(dir.slice(root.path.length)).join(' / ')
   }
@@ -253,15 +271,30 @@ const FILTERS: { key: string; label: StringKey }[] = [
 /** sidebar filter keys that stand for a family of extensions (mirrors recent-files.ts) */
 const FILTER_FAMILY: Record<string, readonly string[]> = {
   docx: ['docx', 'doc'],
-  xlsx: ['xlsx', 'xlsm', 'xls', 'csv'],
+  xlsx: ['xlsx', 'xlsm', 'xls', 'csv', 'tsv'],
   pptx: ['pptx', 'ppt'],
-  md: ['md', 'markdown'],
+  md: ['md', 'markdown', 'txt', 'json'],
   html: ['html', 'htm'],
 }
 
 function matchesFilter(entry: RecentEntry, filter: string): boolean {
   if (filter === 'all') return true
   return (FILTER_FAMILY[filter] ?? [filter]).includes(entry.ext)
+}
+
+/** wrap every matched fragment of a name or folder label in the shared search-hit mark */
+function highlightText(text: string, needles: readonly string[]): ReactElement[] | string {
+  const marks = markText(text, needles)
+  if (!marks.some((m) => m.hit)) return text
+  return marks.map((m, i) =>
+    m.hit ? (
+      <mark key={i} className="search-hit">
+        {m.text}
+      </mark>
+    ) : (
+      <span key={i}>{m.text}</span>
+    ),
+  )
 }
 
 /** Check glyph marking the selected sort option; invisible on the others so labels stay aligned */
@@ -392,7 +425,7 @@ function useFolderListings(workspace = false) {
 // ── Move-to-folder picker ────────────────────────────────
 
 interface FolderPickerProps {
-  root: FolderRoot
+  roots: readonly FolderRoot[]
   /** folders the moved items already live in (greyed, not selectable) */
   currentDirs: ReadonlySet<string>
   /** folders being moved: they and their descendants cannot be targets */
@@ -403,7 +436,7 @@ interface FolderPickerProps {
 }
 
 function FolderPicker({
-  root,
+  roots,
   currentDirs,
   movingDirs,
   count,
@@ -412,7 +445,9 @@ function FolderPicker({
 }: FolderPickerProps) {
   const { t } = useI18n()
   const { listings, load } = useFolderListings()
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set([root.path]))
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(
+    () => new Set(roots.map((r) => r.path)),
+  )
   const [picked, setPicked] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [creatingIn, setCreatingIn] = useState<string | null>(null)
@@ -431,7 +466,9 @@ function FolderPicker({
   }, [onCancel])
 
   const disabledDir = (dir: string) =>
-    currentDirs.has(dir) || movingDirs.some((m) => isUnder(m, dir))
+    currentDirs.has(dir) ||
+    movingDirs.some((m) => isUnder(m, dir)) ||
+    rootOf(dir, roots)?.usable === false
 
   // Enter or blur commits, Escape cancels; the blur an unmount may fire reads
   // the edit from a ref mirrored during render, so a finished edit is a no-op
@@ -539,7 +576,7 @@ function FolderPicker({
     for (const listing of listings.values()) {
       for (const f of listing.folders) {
         if (f.name.toLowerCase().includes(needle)) {
-          hits.push({ path: f.path, name: f.name, rel: locationLabel(f.path + '/x', root) })
+          hits.push({ path: f.path, name: f.name, rel: locationLabel(f.path + '/x', roots) })
         }
         if (!listings.has(f.path)) load(f.path)
       }
@@ -593,13 +630,18 @@ function FolderPicker({
           onChange={(e) => setQuery(e.target.value)}
         />
         <div className="picker-tree">
-          {needle ? renderSearch() : <ul role="tree">{renderNode(root, 0)}</ul>}
+          {needle ? (
+            renderSearch()
+          ) : (
+            <ul role="tree">{roots.map((root) => renderNode(root, 0))}</ul>
+          )}
         </div>
         <div className="modal-buttons picker-buttons">
           <button
             className="btn btn-secondary picker-new"
             onClick={() => {
-              const parent = picked ?? root.path
+              const parent = picked ?? roots.find((r) => r.usable)?.path
+              if (!parent) return
               setExpanded((prev) => new Set([...prev, parent]))
               setCreatingIn(parent)
               setNewName('')
@@ -681,6 +723,102 @@ function ConflictPrompt({ names, onChoose }: ConflictPromptProps) {
   )
 }
 
+// ── Starred-group picker ─────────────────────────────────
+
+interface GroupPickerProps {
+  /** existing group names (a group exists while it has at least one file) */
+  groups: readonly string[]
+  count: number
+  onCancel: () => void
+  /** put the files into an existing group */
+  onPick: (group: string) => void
+  /** create a group named `name` and put the files into it */
+  onCreate: (name: string) => void
+  /** take the files out of their group (back to the unfiltered list) */
+  onRemove: () => void
+}
+
+/** Modal moving starred files into a named group. Deliberately minimal: no
+ *  group rename/delete — a group is just a label its entries carry, and it
+ *  vanishes when its last member leaves (via this dialog's remove action,
+ *  an unstar, or a deleted file). */
+function GroupPicker({ groups, count, onCancel, onPick, onCreate, onRemove }: GroupPickerProps) {
+  const { t } = useI18n()
+  const [name, setName] = useState('')
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCancel()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onCancel])
+
+  const create = () => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    setName('')
+    onCreate(trimmed)
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('moveToGroupTitle')}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3>{t('moveToGroupTitle')}</h3>
+        <p>{t('selectedCount', { n: count })}</p>
+        {groups.length > 0 && (
+          <ul className="group-picker-list">
+            {groups.map((group) => (
+              <li key={group}>
+                <button
+                  className="group-picker-row"
+                  onClick={() => {
+                    setName('')
+                    onPick(group)
+                  }}
+                >
+                  <FolderIcon size={16} />
+                  <span className="group-picker-name">{group}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="group-picker-new">
+          <input
+            className="folder-rename-input"
+            placeholder={t('groupNamePlaceholder')}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              e.stopPropagation()
+              if (e.nativeEvent.isComposing) return
+              if (e.key === 'Enter') create()
+            }}
+          />
+          <button className="btn btn-secondary" disabled={!name.trim()} onClick={create}>
+            {t('newGroup')}
+          </button>
+        </div>
+        <div className="modal-buttons">
+          <button className="btn btn-secondary" onClick={onRemove}>
+            {t('removeFromGroup')}
+          </button>
+          <button className="btn btn-secondary" autoFocus onClick={onCancel}>
+            {t('cancel')}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Account entry (bottom-left) ──────────────────────────
 // Currently the Genspark (gsk) login entry; to be upgraded to a signup/account system later.
 // Clicking it opens the settings modal directly (SettingsModal.tsx), which hosts
@@ -692,8 +830,13 @@ const LOGIN_MAX_WAIT_MS = 300_000
 
 function AccountEntry({
   onStatusChange,
+  onFileSearchSettingsChange,
+  openRequest,
 }: {
   onStatusChange?: (status: AccountStatus | null) => void
+  onFileSearchSettingsChange?: () => void
+  /** a fresh object per request: the home list asks to open the modal on a given block */
+  openRequest?: SettingsTarget | null
 }) {
   const { t } = useI18n()
   const [status, setStatus] = useState<AccountStatus | null>(null)
@@ -834,15 +977,21 @@ function AccountEntry({
     })
   }
 
-  const handleClick = () => {
+  const [target, setTarget] = useState<SettingsTarget | null>(null)
+  const openSettings = useCallback((to: SettingsTarget | null) => {
     // refresh the login state / credit balance; drop the response
     // when a logout happened while it was in flight
     const seq = statusSeq.current
     void window.aiOffice.accountStatus?.().then((s) => {
       if (seq === statusSeq.current) setStatus(s)
     })
+    setTarget(to)
     setSettingsOpen(true)
-  }
+  }, [])
+  const handleClick = () => openSettings(null)
+  useEffect(() => {
+    if (openRequest) openSettings(openRequest)
+  }, [openRequest, openSettings])
 
   return (
     <div className="account-entry">
@@ -856,6 +1005,7 @@ function AccountEntry({
           onOpenLoginUrl={openLoginUrl}
           onCopyLoginUrl={copyLoginUrl}
           onClose={() => setSettingsOpen(false)}
+          onFileSearchChange={onFileSearchSettingsChange}
           onLogin={() => {
             setSettingsOpen(false)
             startLogin()
@@ -863,6 +1013,7 @@ function AccountEntry({
           onLogout={doLogout}
           skillUpdateDue={skillUpdate}
           onSkillUpdateDue={setSkillUpdate}
+          target={target}
         />
       )}
       {!settingsOpen && waiting && authUrl && (
@@ -1065,7 +1216,12 @@ function DropToOpenOverlay(): ReactElement | null {
 
 // ── Main component ──────────────────────────────────────
 
-export function Home() {
+export interface HomeTarget {
+  mode?: 'search' | 'ask'
+  query?: string
+}
+
+export function Home({ initialTarget }: { initialTarget?: HomeTarget } = {}) {
   const i18n = useI18n()
   const { t, lang } = i18n
   // ── Paged list state (rows loaded for the current view + filter) ──
@@ -1076,7 +1232,40 @@ export function Home() {
   const [navCounts, setNavCounts] = useState({ recent: 0, starred: 0 })
   const [loadingMore, setLoadingMore] = useState(false)
   const [view, setView] = useState<'recent' | 'starred'>('recent')
+  // Genspark web projects take over the content area (like a selected folder)
+  const [cloudMode, setCloudMode] = useState(false)
+  // the knowledge-base ask panel takes over the content area the same way
+  const [askMode, setAskMode] = useState(initialTarget?.mode === 'ask')
   const [filter, setFilter] = useState('all')
+  // ── Starred groups (named buckets the Starred view can filter on) ──
+  // groups that currently have at least one starred file (drives the pills)
+  const [starredGroups, setStarredGroups] = useState<string[]>([])
+  // the group pill filtering the Starred list; null shows every group
+  const [groupFilter, setGroupFilter] = useState<string | null>(null)
+  // starred rows being moved to a group (GroupPicker modal)
+  const [groupPicker, setGroupPicker] = useState<string[] | null>(null)
+  // ── File search (names + indexed content); active while the box has text ──
+  const [searchQuery, setSearchQuery] = useState(initialTarget?.query ?? '')
+  const [searchPage, setSearchPage] = useState<FileSearchPage | null>(null)
+  const [rerank, setRerank] = useState<{ key: string; result: FileSearchRerank } | null>(null)
+  // bumped when the Jev settings change so the current results are judged again (or the order dropped)
+  const [rerankSettingsTick, setRerankSettingsTick] = useState(0)
+  const [settingsRequest, setSettingsRequest] = useState<SettingsTarget | null>(null)
+  useEffect(
+    () =>
+      window.aiOffice.onOpenSettings?.((target) =>
+        setSettingsRequest({ section: target.section as SettingsTarget['section'] }),
+      ),
+    [],
+  )
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (initialTarget?.mode === 'search') searchInputRef.current?.focus()
+  }, [initialTarget?.mode])
+  // IME composition: wait for the committed text instead of searching each keystroke
+  const composingRef = useRef(false)
+  const searchSeq = useRef(0)
+  const searchActive = searchQuery.trim().length > 0
   // modified-column sort (WPS-style header popover), shared by the global and folder tables
   const [fileSort, setFileSort] = useState<'recent' | 'oldest'>('recent')
   const [fileSortMenuOpen, setFileSortMenuOpen] = useState(false)
@@ -1105,11 +1294,16 @@ export function Home() {
   // ── Sidebar-owned, independent folder workspaces ──
   const [treeState] = useState(readTreeState)
   const [workspaceRoots, setWorkspaceRoots] = useState<FolderRoot[]>([])
+  const roots = workspaceRoots
+  const canMove = roots.some((entry) => entry.usable)
+  const editableAt = (path: string) => rootOf(path, roots)?.usable !== false
   const [workspaceLoading, setWorkspaceLoading] = useState(true)
   const [workspaceChanging, setWorkspaceChanging] = useState(false)
   const [workspaceError, setWorkspaceError] = useState<string | null>(null)
   const [activeRootPath, setActiveRootPath] = useState<string | null>(treeState.root)
-  const [selectedFolder, setSelectedFolder] = useState<string | null>(treeState.selected ?? null)
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(
+    initialTarget?.mode ? null : (treeState.selected ?? null),
+  )
   const root =
     workspaceRoots.find(
       (entry) =>
@@ -1345,10 +1539,13 @@ export function Home() {
   const reload = (keepCount: boolean) => {
     const seq = ++requestSeq.current
     const ext = filter === 'all' ? undefined : filter
+    // the group pills only scope the Starred view's own list; the sidebar
+    // counters and the other view stay group-agnostic
+    const group = view === 'starred' && groupFilter ? groupFilter : undefined
     const limit = keepCount ? Math.max(entriesLen.current, PAGE_SIZE) : PAGE_SIZE
     const primary = view === 'recent' ? window.aiOffice.recents : window.aiOffice.starred
     const secondary = view === 'recent' ? window.aiOffice.starred : window.aiOffice.recents
-    void primary({ offset: 0, limit, ext }).then((page) => {
+    void primary({ offset: 0, limit, ext, group }).then((page) => {
       if (seq !== requestSeq.current) return
       setEntries(page.entries)
       setListTotal(page.total)
@@ -1367,6 +1564,14 @@ export function Home() {
           : { ...prev, recent: visiblePageCount(page) },
       )
     })
+    // the group pills live on the renderer, so their list rides along with
+    // every reload; a vanished group (last file unstarred/ungrouped) clears
+    // the filter instead of showing a silently empty list
+    void window.aiOffice.starredGroups().then((groups) => {
+      if (seq !== requestSeq.current) return
+      setStarredGroups(groups)
+      setGroupFilter((cur) => (cur && !groups.includes(cur) ? null : cur))
+    })
   }
   const reloadRef = useRef(reload)
   reloadRef.current = reload
@@ -1382,13 +1587,75 @@ export function Home() {
 
   useEffect(() => {
     reloadRef.current(false)
-  }, [view, filter])
+  }, [view, filter, groupFilter])
+
+  const q = searchQuery.trim()
+  useEffect(() => {
+    if (!q) {
+      searchSeq.current++
+      setSearchPage(null)
+      return
+    }
+    let timer = 0
+    const run = () => {
+      if (composingRef.current) {
+        timer = window.setTimeout(run, 150)
+        return
+      }
+      const seq = ++searchSeq.current
+      const ext = filter === 'all' ? undefined : filter
+      void window.aiOffice.searchFiles({ q, ext, limit: 100 }).then((page) => {
+        if (seq !== searchSeq.current) return
+        setSearchPage(page)
+        // results grow while the background index catches up
+        if (page.index.pending > 0 || page.index.scanning) timer = window.setTimeout(run, 1500)
+      })
+    }
+    timer = window.setTimeout(run, 150)
+    return () => window.clearTimeout(timer)
+  }, [q, filter])
+
+  // Jev judges the top local hits once they settle; the main process answers null when reranking is off.
+  // The key changes only with the query, filter or candidate set, so index polls do not restart the timer.
+  const rerankKey =
+    q && searchPage && searchPage.hits.length >= 2
+      ? [q, filter, ...searchPage.hits.slice(0, 20).map((h) => h.path)].join('\n')
+      : ''
+  useEffect(() => {
+    if (!rerankKey) return
+    const key = rerankKey
+    const paths = key.split('\n').slice(2)
+    const timer = window.setTimeout(() => {
+      void window.aiOffice.rerankSearch({ q, paths }).then((result) => {
+        if (result) setRerank({ key, result })
+        else setRerank((cur) => (cur && cur.key === key ? null : cur))
+      })
+    }, 600)
+    return () => window.clearTimeout(timer)
+  }, [q, filter, rerankKey, rerankSettingsTick])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return
+      if (event.key !== 'f' && event.key !== 'p') return
+      const input = searchInputRef.current
+      if (!input) return
+      event.preventDefault()
+      input.focus()
+      input.select()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
 
   useEffect(() => {
     const onFocus = () => refreshRef.current()
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
   }, [])
+
+  // a rename from the tab strip happens while this renderer already has focus
+  useEffect(() => onFilesChanged(() => refreshRef.current()), [])
 
   const hasMore = entries.length < listTotal
 
@@ -1556,12 +1823,21 @@ export function Home() {
   const changeView = (next: 'recent' | 'starred') => {
     setView(next)
     setSelectedFolder(null)
+    setCloudMode(false)
+    setAskMode(false)
     setSelected(new Set())
     setRowMenu(null)
+    setGroupFilter(null)
   }
 
   const changeFilter = (key: string) => {
     setFilter(key)
+    setSelected(new Set())
+    setRowMenu(null)
+  }
+
+  const changeGroupFilter = (group: string | null) => {
+    setGroupFilter(group)
     setSelected(new Set())
     setRowMenu(null)
   }
@@ -1663,10 +1939,11 @@ export function Home() {
   }
 
   const expandTo = (dir: string) => {
-    if (!root) return
+    const owner = rootOf(dir, roots)
+    if (!owner) return
     setExpanded((prev) => {
       const next = new Set(prev)
-      for (const crumb of crumbsOf(root, dir)) next.add(crumb.path)
+      for (const crumb of crumbsOf(owner, dir)) next.add(crumb.path)
       return next
     })
   }
@@ -1696,6 +1973,21 @@ export function Home() {
     setRowMenu(null)
     setSelected(new Set())
     void window.aiOffice.removeRecent(paths).then(refresh)
+  }
+
+  /** the Starred view's bulk action: drop the stars, keep the recents entries */
+  const unstarSelected = (paths: string[]) => {
+    setRowMenu(null)
+    setSelected(new Set())
+    void window.aiOffice.unstarPaths(paths).then(refresh)
+  }
+
+  /** put rows into a group (null = out of their group); the pills list and
+   *  the filtered list come back with the refresh */
+  const assignGroup = (paths: string[], group: string | null) => {
+    setGroupPicker(null)
+    setRowMenu(null)
+    void window.aiOffice.setStarredGroup(paths, group).then(refresh)
   }
 
   const deleteFiles = (paths: string[]) => {
@@ -1858,6 +2150,7 @@ export function Home() {
 
   const folderDropProps = (dir: string, { autoExpand }: { autoExpand: boolean }) => ({
     onDragOver: (event: ReactDragEvent) => {
+      if (rootOf(dir, roots)?.usable === false) return
       if (!event.dataTransfer.types.includes(DRAG_PATHS_MIME)) return
       event.preventDefault()
       event.dataTransfer.dropEffect = 'move'
@@ -1887,7 +2180,9 @@ export function Home() {
 
   // ── New file (lands in the selected folder) ──
   const newFileOpts =
-    selectedFolder && root && selectedFolder !== root.path ? { dir: selectedFolder } : undefined
+    selectedFolder && root && selectedFolder !== root.path && rootOf(selectedFolder, roots)?.usable
+      ? { dir: selectedFolder }
+      : undefined
 
   const NEW_ITEMS = [
     {
@@ -1964,7 +2259,15 @@ export function Home() {
 
   // ── Sidebar folder tree ──
 
-  const renderFolderMenu = (entry: { path: string; name: string }, isRoot: boolean) => (
+  /** the folder leaves the list only; whatever it held on disk stays where it is */
+  const removeFolderRoot = (path: string) => {
+    setFolderMenu(null)
+    if (selectedFolder && isUnder(path, selectedFolder)) setSelectedFolder(null)
+    setExpanded((prev) => new Set([...prev].filter((dir) => !isUnder(path, dir))))
+    void window.aiOffice.removeFolderRoot(path).then(loadRoot)
+  }
+
+  const renderFolderMenu = (entry: { path: string; name: string }, rootEntry?: FolderRoot) => (
     <div
       className="folder-menu-wrap"
       ref={menuOpenAt('tree', entry.path) ? folderMenuWrapRef : undefined}
@@ -1996,29 +2299,33 @@ export function Home() {
           role="menu"
           style={{ top: folderMenu.top, right: folderMenu.right }}
         >
-          <button role="menuitem" onClick={() => startCreateFolder(entry.path)}>
-            {t('newSubfolder')}
-          </button>
-          {!isRoot && (
+          {editableAt(entry.path) && (
+            <button role="menuitem" onClick={() => startCreateFolder(entry.path)}>
+              {t('newSubfolder')}
+            </button>
+          )}
+          {!rootEntry && editableAt(entry.path) && (
             <button role="menuitem" onClick={() => startRenameFolder(entry, 'tree')}>
               {t('rename')}
             </button>
           )}
-          {!isRoot && (
+          {!rootEntry && editableAt(entry.path) && (
             <button role="menuitem" onClick={() => startMove([entry.path])}>
               {t('moveToFolder')}
             </button>
           )}
-          <button
-            role="menuitem"
-            onClick={() => {
-              setFolderMenu(null)
-              void window.aiOffice.revealPath(entry.path)
-            }}
-          >
-            {t('revealInFolder')}
-          </button>
-          {!isRoot && (
+          {(rootEntry?.readable ?? true) && (
+            <button
+              role="menuitem"
+              onClick={() => {
+                setFolderMenu(null)
+                void window.aiOffice.revealPath(entry.path)
+              }}
+            >
+              {t('revealInFolder')}
+            </button>
+          )}
+          {!rootEntry && editableAt(entry.path) && (
             <>
               <div className="row-menu-divider" />
               <button
@@ -2030,6 +2337,14 @@ export function Home() {
                 }}
               >
                 {t('deleteFolder')}
+              </button>
+            </>
+          )}
+          {rootEntry?.removable && (
+            <>
+              <div className="row-menu-divider" />
+              <button role="menuitem" onClick={() => removeFolderRoot(entry.path)}>
+                {t('removeFolderRoot')}
               </button>
             </>
           )}
@@ -2144,7 +2459,7 @@ export function Home() {
                   >
                     −
                   </button>
-                  {renderFolderMenu({ path: root.path, name: root.name }, true)}
+                  {renderFolderMenu({ path: root.path, name: root.name }, root)}
                 </div>
               </li>
             </ul>
@@ -2160,6 +2475,7 @@ export function Home() {
   function renderFileRow(entry: RecentEntry, context: 'global' | 'folder', depth = 0) {
     const isRenaming = renaming?.path === entry.path
     const explorer = context === 'folder'
+    const editable = editableAt(entry.path)
     const canDelete =
       context === 'folder' ? folderSelectedPaths.length === 0 : selectedPaths.length === 0
     const openFile = () => {
@@ -2239,7 +2555,7 @@ export function Home() {
             </span>
           ) : (
             <span className="recent-path" title={dirOf(entry.path)}>
-              {locationLabel(entry.path, root)}
+              {locationLabel(entry.path, roots)}
             </span>
           )}
           <span className="recent-time">
@@ -2310,7 +2626,7 @@ export function Home() {
                 >
                   {t('copyPath')}
                 </button>
-                {root?.usable && !entry.missing && (
+                {canMove && editable && !entry.missing && (
                   <>
                     <div className="row-menu-divider" />
                     <button role="menuitem" onClick={() => startMove([entry.path])}>
@@ -2318,28 +2634,55 @@ export function Home() {
                     </button>
                   </>
                 )}
-                <div className="row-menu-divider" />
-                <button role="menuitem" onClick={() => startRename(entry)}>
-                  {t('rename')}
-                </button>
-                <button role="menuitem" onClick={() => duplicateFile(entry.path)}>
-                  {t('duplicate')}
-                </button>
-                {canDelete && (
+                {editable && (
                   <>
                     <div className="row-menu-divider" />
-                    {context === 'global' && (
-                      <button role="menuitem" onClick={() => removeRecent([entry.path])}>
-                        {t('removeFromList')}
-                      </button>
-                    )}
+                    <button role="menuitem" onClick={() => startRename(entry)}>
+                      {t('rename')}
+                    </button>
+                    <button role="menuitem" onClick={() => duplicateFile(entry.path)}>
+                      {t('duplicate')}
+                    </button>
+                  </>
+                )}
+                {entry.starred && (
+                  <>
+                    <div className="row-menu-divider" />
                     <button
                       role="menuitem"
-                      className="danger"
-                      onClick={() => deleteFiles([entry.path])}
+                      onClick={() => {
+                        setRowMenu(null)
+                        setGroupPicker([entry.path])
+                      }}
                     >
-                      {t('deleteFiles')}
+                      {t('moveToGroup')}
                     </button>
+                  </>
+                )}
+                {canDelete && (context === 'global' || editable) && (
+                  <>
+                    <div className="row-menu-divider" />
+                    {context === 'global' &&
+                      // same root cause as the selection bar: in the Starred
+                      // view "remove from list" must unstar, not drop recents
+                      (view === 'starred' ? (
+                        <button role="menuitem" onClick={() => unstarSelected([entry.path])}>
+                          {t('unstar')}
+                        </button>
+                      ) : (
+                        <button role="menuitem" onClick={() => removeRecent([entry.path])}>
+                          {t('removeFromList')}
+                        </button>
+                      ))}
+                    {editable && (
+                      <button
+                        role="menuitem"
+                        className="danger"
+                        onClick={() => deleteFiles([entry.path])}
+                      >
+                        {t('deleteFiles')}
+                      </button>
+                    )}
                   </>
                 )}
               </div>
@@ -2355,6 +2698,7 @@ export function Home() {
     const isRenaming = folderRenaming?.where === 'table' && folderRenaming.path === entry.path
     const isOpen = expanded.has(entry.path)
     const isChatFolder = selectedFolder === entry.path
+    const editable = editableAt(entry.path)
     return (
       <li className="recent-row" key={entry.path}>
         <div
@@ -2483,12 +2827,16 @@ export function Home() {
                 >
                   {t('open')}
                 </button>
-                <button role="menuitem" onClick={() => startRenameFolder(entry, 'table')}>
-                  {t('rename')}
-                </button>
-                <button role="menuitem" onClick={() => startMove([entry.path])}>
-                  {t('moveToFolder')}
-                </button>
+                {editable && (
+                  <>
+                    <button role="menuitem" onClick={() => startRenameFolder(entry, 'table')}>
+                      {t('rename')}
+                    </button>
+                    <button role="menuitem" onClick={() => startMove([entry.path])}>
+                      {t('moveToFolder')}
+                    </button>
+                  </>
+                )}
                 <button
                   role="menuitem"
                   onClick={() => {
@@ -2498,17 +2846,21 @@ export function Home() {
                 >
                   {t('revealInFolder')}
                 </button>
-                <div className="row-menu-divider" />
-                <button
-                  role="menuitem"
-                  className="danger"
-                  onClick={() => {
-                    setFolderMenu(null)
-                    setConfirmDeleteFolder(entry.path)
-                  }}
-                >
-                  {t('deleteFolder')}
-                </button>
+                {editable && (
+                  <>
+                    <div className="row-menu-divider" />
+                    <button
+                      role="menuitem"
+                      className="danger"
+                      onClick={() => {
+                        setFolderMenu(null)
+                        setConfirmDeleteFolder(entry.path)
+                      }}
+                    >
+                      {t('deleteFolder')}
+                    </button>
+                  </>
+                )}
               </div>
             )}
           </span>
@@ -2619,8 +2971,164 @@ export function Home() {
 
   // ── Folder view ────────────────────────────────────────
 
+  const clearSearch = () => {
+    setSearchQuery('')
+    searchInputRef.current?.focus()
+  }
+
+  const renderSearchSettingsButton = () => (
+    <button
+      className="file-search-settings"
+      title={t('searchJevSettings')}
+      aria-label={t('searchJevSettings')}
+      onClick={() => setSettingsRequest({ section: 'aiMedia', block: 'rerank' })}
+    >
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M12 20V4M12 4l-4 4M12 4l4 4" />
+        <path d="M3 12h6M3 16h5M3 20h4" />
+      </svg>
+    </button>
+  )
+
+  const renderSearchBox = () => (
+    <div className={`file-search${searchActive ? ' active' : ''}`}>
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
+        <path d="M20 20l-3.5-3.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      </svg>
+      <input
+        ref={searchInputRef}
+        type="search"
+        value={searchQuery}
+        placeholder={t('searchFilesPlaceholder')}
+        aria-label={t('searchFilesPlaceholder')}
+        spellCheck={false}
+        onChange={(e) => setSearchQuery(e.target.value)}
+        onCompositionStart={() => {
+          composingRef.current = true
+        }}
+        onCompositionEnd={(e) => {
+          composingRef.current = false
+          setSearchQuery(e.currentTarget.value)
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape' && searchQuery) {
+            e.stopPropagation()
+            clearSearch()
+          }
+        }}
+      />
+      {searchQuery && (
+        <button className="file-search-clear" aria-label={t('searchClear')} onClick={clearSearch}>
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+            <path
+              d="M2 2l8 8M10 2l-8 8"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+            />
+          </svg>
+        </button>
+      )}
+    </div>
+  )
+
+  const renderSearchRow = (hit: FileSearchHit) => (
+    <li
+      key={hit.path}
+      className="search-row"
+      role="button"
+      tabIndex={0}
+      onClick={() => void window.aiOffice.openPath(hit.path)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') void window.aiOffice.openPath(hit.path)
+      }}
+    >
+      <span className="recent-icon">
+        <FileBadge ext={hit.ext} size={24} />
+      </span>
+      <div className="search-main">
+        <div className="search-head">
+          <span className="search-name">{highlightText(hit.name, hit.needles)}</span>
+          <span className="search-path" title={dirOf(hit.path)}>
+            {highlightText(locationLabel(hit.path, roots), hit.needles)}
+          </span>
+        </div>
+        {hit.snippet && (
+          <p className="search-snippet">
+            {hit.snippet.map((part, i) =>
+              part.hit ? (
+                <mark key={i} className="search-hit">
+                  {part.text}
+                </mark>
+              ) : (
+                <span key={i}>{part.text}</span>
+              ),
+            )}
+          </p>
+        )}
+      </div>
+      <span className="search-time">{formatModified(hit.mtimeMs, i18n)}</span>
+    </li>
+  )
+
+  const renderSearchResults = () => {
+    const page = searchPage
+    const busy = !!page && (page.index.pending > 0 || page.index.scanning)
+    return (
+      <div className="search-results" aria-live="polite">
+        {busy && (
+          <div className="search-status">
+            <span className="load-more-spinner" />
+            {t('searchIndexing', { n: page.index.pending })}
+          </div>
+        )}
+        {page && page.hits.length === 0 && !busy
+          ? renderEmpty(t('searchNoResults', { q }))
+          : page && (
+              <ul className="search-list">{orderedSearchHits(page.hits).map(renderSearchRow)}</ul>
+            )}
+      </div>
+    )
+  }
+
+  const rerankApplied = rerank && rerank.key === rerankKey ? rerank.result : null
+
+  /** judged hits in Jev's order, then the rest in local order */
+  const orderedSearchHits = (hits: readonly FileSearchHit[]): FileSearchHit[] => {
+    if (!rerankApplied) return [...hits]
+    const rank = new Map(rerankApplied.order.map((path, i) => [path, i]))
+    return [...hits].sort((a, b) => (rank.get(a.path) ?? Infinity) - (rank.get(b.path) ?? Infinity))
+  }
+
+  const renderSearchHeading = () => {
+    const total = searchPage?.total ?? 0
+    return (
+      <div className="recents-heading">
+        {rerankApplied && (
+          <span className="search-rerank-badge" title={t('searchRerankedBy')}>
+            Jev
+          </span>
+        )}
+        <span className="file-count">
+          {t(total === 1 ? 'searchResultCountOne' : 'searchResultCount', { n: total })}
+        </span>
+      </div>
+    )
+  }
+
   function renderFolderContent() {
-    if (!root) return null
+    if (roots.length === 0) return null
     const total = folderSubfolders.length + folderFiles.length
     return (
       <main className="content">
@@ -2724,7 +3232,20 @@ export function Home() {
               >
                 {wsChatOpen ? 'Hide chat' : 'Chat'}
               </button>
+              <div className="file-search-group">
+                {renderSearchBox()}
+                {renderSearchSettingsButton()}
+              </div>
             </div>
+            {searchActive ? (
+              renderSearchHeading()
+            ) : (
+              <div className="recents-heading folder-heading">
+                <span className="file-count">
+                  {t(total === 1 ? 'itemCountOne' : 'itemCount', { n: total })}
+                </span>
+              </div>
+            )}
           </div>
           {selectedFolder && (
             <nav className="explorer-crumbs" aria-label="Folder path">
@@ -2749,7 +3270,9 @@ export function Home() {
             </nav>
           )}
 
-          {total === 0 ? (
+          {searchActive ? (
+            renderSearchResults()
+          ) : total === 0 ? (
             renderEmpty(filter === 'all' ? t('emptyFolder') : t('emptyFiltered'))
           ) : (
             <div
@@ -2820,14 +3343,26 @@ export function Home() {
                 <span className="selection-count">
                   {t('selectedCount', { n: selectedPaths.length })}
                 </span>
-                {root?.usable && (
+                {canMove && (
                   <button className="selection-action" onClick={() => startMove(selectedPaths)}>
                     {t('moveToFolder')}
                   </button>
                 )}
-                <button className="selection-action" onClick={() => removeRecent(selectedPaths)}>
-                  {t('removeFromList')}
-                </button>
+                {view === 'starred' ? (
+                  // every Starred-view row is a favorite, so the selection
+                  // action unstars; removeRecent there kept the stars and the
+                  // rows came straight back on refresh
+                  <button
+                    className="selection-action"
+                    onClick={() => unstarSelected(selectedPaths)}
+                  >
+                    {t('unstar')}
+                  </button>
+                ) : (
+                  <button className="selection-action" onClick={() => removeRecent(selectedPaths)}>
+                    {t('removeFromList')}
+                  </button>
+                )}
                 <button
                   className="selection-action danger"
                   onClick={() => deleteFiles(selectedPaths)}
@@ -2839,27 +3374,60 @@ export function Home() {
                 </button>
               </div>
             ) : (
-              <div className="filter-pills" role="tablist" aria-label={t('filterAria')}>
-                {FILTERS.map((f) => (
-                  <button
-                    key={f.key}
-                    className={`filter-pill${filter === f.key ? ' active' : ''}`}
-                    onClick={() => changeFilter(f.key)}
-                  >
-                    {t(f.label)}
-                  </button>
-                ))}
+              <div className="toolbar-filters">
+                <div className="filter-pills" role="tablist" aria-label={t('filterAria')}>
+                  {FILTERS.map((f) => (
+                    <button
+                      key={f.key}
+                      className={`filter-pill${filter === f.key ? ' active' : ''}`}
+                      onClick={() => changeFilter(f.key)}
+                    >
+                      {t(f.label)}
+                    </button>
+                  ))}
+                </div>
+                {view === 'starred' && starredGroups.length > 0 && (
+                  // the group pills refine the Starred view further; the type
+                  // pills above them keep working on the group-scoped list
+                  <div className="filter-pills" role="tablist" aria-label={t('groupFilterAria')}>
+                    <button
+                      className={`filter-pill${groupFilter === null ? ' active' : ''}`}
+                      onClick={() => changeGroupFilter(null)}
+                    >
+                      {t('filterAll')}
+                    </button>
+                    {starredGroups.map((g) => (
+                      <button
+                        key={g}
+                        className={`filter-pill${groupFilter === g ? ' active' : ''}`}
+                        onClick={() => changeGroupFilter(g)}
+                      >
+                        {g}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
-            <div className="recents-heading">
-              <span className="section-label">
-                {view === 'recent' ? t('secRecent') : t('secStarred')}
-              </span>
-              <span className="file-count">{t(fileCountKey(listTotal), { n: listTotal })}</span>
+            <div className="file-search-group">
+              {renderSearchBox()}
+              {renderSearchSettingsButton()}
             </div>
+            {searchActive ? (
+              renderSearchHeading()
+            ) : (
+              <div className="recents-heading">
+                <span className="section-label">
+                  {view === 'recent' ? t('secRecent') : t('secStarred')}
+                </span>
+                <span className="file-count">{fileCountLabel(listTotal, lang, t)}</span>
+              </div>
+            )}
           </div>
 
-          {entries.length === 0 ? (
+          {searchActive ? (
+            renderSearchResults()
+          ) : entries.length === 0 ? (
             renderEmpty(
               view === 'starred'
                 ? t('emptyStarred')
@@ -2948,10 +3516,53 @@ export function Home() {
             <span className="nav-label">{t('navStarred')}</span>
             <span className="nav-count">{navCounts.starred}</span>
           </button>
+          <button className="nav-item" onClick={() => void window.aiOffice.openHelp()}>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path
+                d="M6.05 6.4a2.06 2.06 0 1 1 2.9 1.88c-.58.29-.95.89-.95 1.54v.28"
+                stroke="currentColor"
+                strokeWidth="1.3"
+                strokeLinecap="round"
+              />
+              <circle cx="8" cy="12.6" r="0.85" fill="currentColor" />
+              <circle cx="8" cy="8" r="6.6" stroke="currentColor" strokeWidth="1.2" />
+            </svg>
+            <span className="nav-label">{t('navUserGuide')}</span>
+          </button>
+          <button
+            className={`nav-item${askMode && !selectedFolder && !cloudMode ? ' active' : ''}`}
+            onClick={() => {
+              setAskMode(true)
+              setSelectedFolder(null)
+              setCloudMode(false)
+              setSelected(new Set())
+              setRowMenu(null)
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path
+                d="M14 10.5c0 .9-.7 1.6-1.6 1.6H5.4L2 14.5V3.6C2 2.7 2.7 2 3.6 2h8.8c.9 0 1.6.7 1.6 1.6z"
+                stroke="currentColor"
+                strokeWidth="1.3"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M5 6.2h6M5 8.6h4"
+                stroke="currentColor"
+                strokeWidth="1.3"
+                strokeLinecap="round"
+              />
+            </svg>
+            <span className="nav-label">{t('navAsk')}</span>
+          </button>
         </nav>
         <div className="sidebar-divider" />
         {renderFolderPanel()}
-        <AccountEntry onStatusChange={handleAccountStatus} />
+        <AccountEntry
+          onStatusChange={handleAccountStatus}
+          onFileSearchSettingsChange={() => setRerankSettingsTick((n) => n + 1)}
+          openRequest={settingsRequest}
+        />
       </aside>
       {selectedFolder && root ? (
         <div className="workspace-split" ref={splitRef}>
@@ -2995,6 +3606,8 @@ export function Home() {
             </main>
           )}
         </div>
+      ) : askMode ? (
+        <KbAskPanel onOpenPath={(path) => void window.aiOffice.openPath(path)} />
       ) : (
         renderGlobalContent()
       )}
@@ -3100,14 +3713,25 @@ export function Home() {
         </div>
       )}
 
-      {movePicker && root?.usable && (
+      {movePicker && canMove && (
         <FolderPicker
-          root={root}
+          roots={roots}
           currentDirs={new Set(movePicker.map(dirOf))}
           movingDirs={movingDirs(movePicker)}
           count={movePicker.length}
           onCancel={() => setMovePicker(null)}
           onPick={(dir) => void doMove(movePicker, dir, 'ask')}
+        />
+      )}
+
+      {groupPicker && (
+        <GroupPicker
+          groups={starredGroups}
+          count={groupPicker.length}
+          onCancel={() => setGroupPicker(null)}
+          onPick={(group) => assignGroup(groupPicker, group)}
+          onCreate={(name) => assignGroup(groupPicker, name)}
+          onRemove={() => assignGroup(groupPicker, null)}
         />
       )}
 

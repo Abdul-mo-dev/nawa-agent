@@ -26,7 +26,7 @@ try {
   for (const relative of [
     'apps/shell/src/renderer/src/explorer/ExplorerHome.tsx',
     'apps/shell/src/renderer/src/explorer/WorkspaceControlPanel.tsx',
-    'apps/shell/src/renderer/src/explorer/RagAnalyticsPanel.tsx',
+    'apps/shell/src/renderer/src/explorer/IndexSelectedButton.tsx',
     'apps/shell/src/renderer/src/explorer/model.ts',
     'apps/shell/src/renderer/src/rag/RagToolbar.tsx',
     'apps/shell/src/renderer/src/analytics/AnalyticsToolbar.tsx',

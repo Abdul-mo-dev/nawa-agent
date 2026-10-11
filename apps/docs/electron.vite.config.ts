@@ -76,6 +76,10 @@ const mainAlias = {
     __dirname,
     '../../packages/ai-provider/src/codex-app-server.ts',
   ),
+  '@genoffice/ai-provider/custom-models': resolve(
+    __dirname,
+    '../../packages/ai-provider/src/custom-models.ts',
+  ),
   '@genoffice/ai-provider/browser': resolve(__dirname, '../../packages/ai-provider/src/browser.ts'),
 
   ...localAlias,

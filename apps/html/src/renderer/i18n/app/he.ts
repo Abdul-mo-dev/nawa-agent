@@ -1,12 +1,23 @@
 import type { zh } from './zh'
 
 export const he = {
+  redactMenuLabel: 'הסתרת הבחירה מהמודל',
+  redactDialogDesc:
+    'המילים נשארות במסמך ובקובץ; המודל רואה רק את הסימון. תן לו שם כדי שיהיה ברור מה הוא מייצג.',
+  redactDialogScope:
+    'ההסתרה חלה רק על המודל באפליקציה הזו. CLI, כלי MCP וייצוא ללא ממשק קוראים את הקובץ ישירות ועדיין רואים את המילות האלה.',
+  redactDialogPlaceholder: 'שם הסימון, לדוגמה: טלפון הלקוח',
+  redactCancel: 'ביטול',
+  redactInsert: 'הסתר',
+
   loading: 'טוען…',
   loadFailed: 'לא ניתן לפתוח את הקובץ',
   untitled: 'ללא שם',
   saveFailed: 'השמירה נכשלה: {error}',
   saveFailedStatus: 'השמירה נכשלה',
   exportFailed: 'הייצוא נכשל',
+  printFailed: 'הדפסה נכשלה: {error}',
+  exportHtmlSkipped: 'יוצא, אך לא ניתן היה להטמיע {count} משאבים (למשל {first})',
   viewPreview: 'תצוגה מקדימה',
   viewSplit: 'מפוצל',
   viewSource: 'מקור',
@@ -51,7 +62,6 @@ export const he = {
   save: 'שמירה (⌘S)',
   saveAs: 'שמירה בשם…',
   ribbonCollapse: 'כווץ את רצועת הכלים',
-  ribbonPin: 'הצמד את רצועת הכלים',
   ribbonExpand: 'הרחב את רצועת הכלים',
   ribbonGroupInsert: 'הוספה',
   editText: 'עריכת טקסט',
@@ -117,6 +127,7 @@ export const he = {
   insertImageUrl: 'תמונה מכתובת URL…',
   insertConfirm: 'הוספה',
   insertMore: 'עוד',
+  insertSkeleton: 'הוספת שלד',
   insertTableSize: 'טבלה {r}×{c}',
   insertTablePickSize: 'בחר גודל טבלה',
   insertPlaceholderTableHeader: 'כותרת {n}',

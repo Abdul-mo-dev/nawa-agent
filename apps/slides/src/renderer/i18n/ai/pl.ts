@@ -134,6 +134,7 @@ export const pl = {
   aiClarifyOther: 'Inne (wpisz)',
   aiClarifySkip: 'Pomiń ankietę',
   aiClarifyNext: 'Dalej',
+  aiClarifyPrev: 'Wstecz',
   aiClarifySubmit: 'Generuj',
   aiSumReadAttachment: 'Odczyt załącznika',
   aiSumReadAttachmentName: 'Odczyt załącznika {name}',
@@ -222,4 +223,5 @@ export const pl = {
   aiSumSaveTemplate: 'Zapisano szablon stylu „{name}”',
   aiSumTemplatesEmpty: 'Szablony stylu (pusto)',
   aiSumListTemplates: 'Wyświetlono szablony stylu: {count}',
+  aiPageCloudToLocal: 'Chmura niedostępna — wygenerowano lokalnie',
 } satisfies Record<keyof typeof zh, string>

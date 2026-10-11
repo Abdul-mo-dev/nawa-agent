@@ -2,12 +2,19 @@
  * editor-local image drop handlers still work; opening documents goes through
  * the workspace's mounted-folder picker instead of Electron File.path. */
 export function installDropOpenBridge(): void {
-  window.addEventListener('dragover', event => {
+  window.addEventListener('dragover', (event) => {
     if (event.dataTransfer?.types.includes('Files')) event.preventDefault()
   })
-  window.addEventListener('drop', event => {
+  window.addEventListener('drop', (event) => {
     if (event.defaultPrevented || !event.dataTransfer?.files.length) return
     event.preventDefault()
-    ;(parent as any).genofficeWorkspace?.notify('To open a document, mount its folder and choose it in Files. Browser drops do not grant access to local paths.', true)
+    ;(parent as any).genofficeWorkspace?.notify(
+      'To open a document, mount its folder and choose it in Files. Browser drops do not grant access to local paths.',
+      true,
+    )
   })
 }
+
+/** Directory staging belongs to the Electron workspace. The mounted browser
+ * service never exposes its desktop automation bridge to an editor iframe. */
+export function installDirectoryEditorBridge(): void {}

@@ -1,12 +1,24 @@
 import type { zh } from './zh'
 
 export const ja = {
+  redactMenuLabel: '選択範囲をAIから隠す',
+  redactDialogDesc:
+    '文章はドキュメントとファイルに残り、AI には下のマーカーしか見えません。名前をつけると、何を表すかAIが理解できます。',
+  redactDialogScope:
+    'これはこのアプリの AI に限られます。CLI、MCP ツール、GUI なしのエクスポートはファイルを直接読み込むため、これらの文字はまだ見えています。',
+  redactDialogPlaceholder: 'プレースホルダー名（例：顧客電話）',
+  redactCancel: 'キャンセル',
+  redactInsert: '隠す',
+
   loading: '読み込み中…',
   loadFailed: 'ファイルを開けませんでした',
   untitled: '無題',
   saveFailed: '保存に失敗しました: {error}',
   saveFailedStatus: '保存に失敗しました',
   exportFailed: 'エクスポートに失敗しました',
+  printFailed: '印刷に失敗しました: {error}',
+  exportHtmlSkipped:
+    'エクスポートしましたが、{count} 個のアセットを埋め込めませんでした（例: {first}）',
   viewPreview: 'プレビュー',
   viewSplit: '分割',
   viewSource: 'ソース',
@@ -53,7 +65,6 @@ export const ja = {
   save: '上書き保存 (⌘S)',
   saveAs: '名前を付けて保存…',
   ribbonCollapse: 'リボンを折りたたむ',
-  ribbonPin: 'リボンの固定',
   ribbonExpand: 'リボンを展開する',
   ribbonGroupInsert: '挿入',
   editText: 'テキスト編集',
@@ -119,6 +130,7 @@ export const ja = {
   insertImageUrl: 'URL から画像…',
   insertConfirm: '挿入',
   insertMore: 'その他',
+  insertSkeleton: '骨格を挿入',
   insertTableSize: '{r}×{c} の表',
   insertTablePickSize: '表のサイズを選択',
   insertPlaceholderTableHeader: '見出し {n}',

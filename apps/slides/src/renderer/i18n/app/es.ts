@@ -1,6 +1,16 @@
 import type { zh } from './zh'
 
 export const es = {
+  redactMenuLabel: 'Ocultar la selección a la IA',
+  redactDialogDesc:
+    'Lo seleccionado sigue en el documento y en el archivo; el modelo solo ve el marcador. Ponle un nombre para que sepa qué representa.',
+  redactDialogScope:
+    'Ocultar solo se aplica a la IA de esta aplicación. La CLI, las herramientas MCP y la exportación headless leen el archivo directamente y siguen viendo estas palabras.',
+  redactDialogPlaceholder: 'Nombre del marcador, p. ej.: teléfono del cliente',
+  redactCancel: 'Cancelar',
+  redactInsert: 'Ocultar',
+  redactEnable: 'Clic derecho en una selección para ocultarla al modelo.',
+
   appPhPromptTitle: 'Haga clic para agregar título',
   appPhPromptSubtitle: 'Haga clic para agregar subtítulo',
   appPhPromptBody: 'Haga clic para agregar texto',
@@ -121,6 +131,7 @@ export const es = {
   appPasteOptSource: 'Mantener formato de origen',
   appPasteOptTheme: 'Usar tema de destino',
   appStatusPasteOptionsExpired: 'Las opciones de pegado ya no están disponibles',
+  appStatusPasteTruncated: 'El texto pegado era demasiado largo y se ha truncado',
   appCtxHideSlide: 'Ocultar diapositiva',
   appCtxUnhideSlide: 'Mostrar diapositiva',
   appCtxAddSectionBefore: 'Agregar sección (antes de esta diapositiva)',

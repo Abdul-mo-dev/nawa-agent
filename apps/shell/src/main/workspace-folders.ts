@@ -38,6 +38,9 @@ const OFFICE_EXTENSIONS = new Set([
   'markdown',
   'html',
   'htm',
+  'txt',
+  'json',
+  'tsv',
 ])
 
 function validPath(value: unknown): value is string {
@@ -189,13 +192,23 @@ export class WorkspaceFolderStore {
 
   private async describe(path: string): Promise<FolderRoot> {
     let usable = false
+    let readable = false
     try {
       // A root replaced by a symlink is not silently granted access to its new destination.
-      usable = samePath(await this.canonicalDirectory(path), path)
+      readable = samePath(await this.canonicalDirectory(path), path)
+      if (readable) {
+        await access(path, constants.W_OK)
+        usable = true
+      }
     } catch {
       /* Keep disconnected/missing roots visible so the user can detach them. */
     }
-    return { path, name: basename(path) || path, usable }
+    return { path, name: basename(path) || path, usable, readable, removable: true }
+  }
+
+  /** Main-process view of roots already loaded from the persisted workspace list. */
+  registeredRoots(): readonly string[] {
+    return [...this.roots]
   }
 
   async list(): Promise<FolderRoot[]> {

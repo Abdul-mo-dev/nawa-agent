@@ -179,7 +179,9 @@ export async function prepareModelRequest(
   }
   let promptTokens = await count()
   while (promptTokens > inputLimit) {
-    const nextUser = bounded.findIndex((m, index) => index > 0 && m.role === 'user')
+    const nextUser = bounded.findIndex(
+      (m, index) => index > 0 && m.role === 'user' && !m.continuation,
+    )
     if (nextUser < 0) break
     // Drop whole completed exchanges; never separate an active signed tool chain.
     bounded = bounded.slice(nextUser)

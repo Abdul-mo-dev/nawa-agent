@@ -31,6 +31,7 @@ interface FakeWebContents {
   once: ReturnType<typeof vi.fn>
   close: ReturnType<typeof vi.fn>
   reload: ReturnType<typeof vi.fn>
+  focus: ReturnType<typeof vi.fn>
   isDestroyed: ReturnType<typeof vi.fn>
   listeners: Map<string, () => void>
 }
@@ -55,6 +56,7 @@ function makeFakeView(): FakeView {
       once: vi.fn(),
       close: vi.fn(),
       reload: vi.fn(),
+      focus: vi.fn(),
       isDestroyed: vi.fn(() => false),
     },
     setVisible: vi.fn(),
@@ -65,6 +67,26 @@ function makeFakeView(): FakeView {
 vi.mock('electron', () => ({
   BrowserWindow: class {},
   ipcMain: { on: vi.fn(), removeListener: vi.fn() },
+  // the manual's view is constructed inline in tab-manager (createHelpView),
+  // unlike the editor views which arrive through mocked module factories, so
+  // the electron mock itself must construct one. Self-contained: no outside
+  // references (vi.mock factories run before the module body). The large id
+  // stays clear of makeFakeView's counter.
+  WebContentsView: class {
+    webContents = {
+      id: 900001,
+      setWindowOpenHandler: () => ({ action: 'deny' as const }),
+      loadURL: () => Promise.resolve(),
+      focus: () => {},
+      on: () => {},
+      once: () => {},
+      close: () => {},
+      reload: () => {},
+      isDestroyed: () => false,
+    }
+    setBounds = () => {}
+    setVisible = () => {}
+  },
 }))
 
 const createDocsView = vi.fn(() => makeFakeView())
@@ -125,7 +147,30 @@ vi.mock('../../slides/src/main/slides-main', () => ({
   slidesIsDirty: (...args: unknown[]) => slidesIsDirty(...(args as [])),
 }))
 
+const createMarkdownView = vi.fn(() => makeFakeView())
+const markdownIsDirty = vi.fn(() => false)
+const requestMarkdownClose = vi.fn(() => Promise.resolve(true))
+
+vi.mock('../../markdown/src/main/markdown-main', () => ({
+  createMarkdownView: (...args: unknown[]) => createMarkdownView(...(args as [])),
+  markdownIsDirty: (...args: unknown[]) => markdownIsDirty(...(args as [])),
+  requestMarkdownClose: (...args: unknown[]) => requestMarkdownClose(...(args as [])),
+}))
+
+const createHtmlView = vi.fn(() => makeFakeView())
+const createHtmlPresentView = vi.fn(() => makeFakeView())
+const htmlIsDirty = vi.fn(() => false)
+const requestHtmlClose = vi.fn(() => Promise.resolve(true))
+
+vi.mock('../../html/src/main/html-main', () => ({
+  createHtmlView: (...args: unknown[]) => createHtmlView(...(args as [])),
+  createHtmlPresentView: (...args: unknown[]) => createHtmlPresentView(...(args as [])),
+  htmlIsDirty: (...args: unknown[]) => htmlIsDirty(...(args as [])),
+  requestHtmlClose: (...args: unknown[]) => requestHtmlClose(...(args as [])),
+}))
+
 import { TabManager } from '../src/main/tab-manager'
+import type { TabKind } from '../src/shared/tabs-api'
 
 const TAB_STRIP_HEIGHT = 40
 const WINDOW_WIDTH = 800
@@ -134,8 +179,13 @@ const WINDOW_HEIGHT = 600
 interface FakeShellWindow {
   on: ReturnType<typeof vi.fn>
   once: ReturnType<typeof vi.fn>
-  webContents: { on: ReturnType<typeof vi.fn>; once: ReturnType<typeof vi.fn> }
+  webContents: {
+    on: ReturnType<typeof vi.fn>
+    once: ReturnType<typeof vi.fn>
+    focus: ReturnType<typeof vi.fn>
+  }
   isDestroyed: ReturnType<typeof vi.fn>
+  isFocused: ReturnType<typeof vi.fn>
   getContentBounds: () => { x: number; y: number; width: number; height: number }
   contentView: {
     addChildView: ReturnType<typeof vi.fn>
@@ -147,8 +197,9 @@ function makeShellWindow(): FakeShellWindow {
   return {
     on: vi.fn(),
     once: vi.fn(),
-    webContents: { on: vi.fn(), once: vi.fn() },
+    webContents: { on: vi.fn(), once: vi.fn(), focus: vi.fn() },
     isDestroyed: vi.fn(() => false),
+    isFocused: vi.fn(() => true),
     getContentBounds: () => ({ x: 0, y: 0, width: WINDOW_WIDTH, height: WINDOW_HEIGHT }),
     contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
   }
@@ -190,6 +241,36 @@ describe('initial state', () => {
 })
 
 describe('opening tabs', () => {
+  it('focuses the help tab already open instead of opening a second one', () => {
+    // F1 is a toggle-shaped key in practice: press it, read something, press it
+    // again. The help tab is closable (only Home is not), so a second copy is
+    // never what the reader meant.
+    const first = manager.openHelpTab()
+    expect(manager.list()).toHaveLength(2)
+    const second = manager.openHelpTab()
+    expect(second).toBe(first)
+    expect(manager.list()).toHaveLength(2)
+    expect(manager.list()[1]).toMatchObject({ id: first, kind: 'help', active: true })
+    expect(shellWindow.contentView.addChildView).toHaveBeenCalledTimes(1)
+  })
+
+  it('reactivates the help tab when another tab took over', () => {
+    const helpId = manager.openHelpTab()
+    const docsId = manager.openDocsTab()
+    expect(manager.list().find((t) => t.id === docsId)?.active).toBe(true)
+    manager.openHelpTab()
+    expect(manager.list().find((t) => t.id === helpId)?.active).toBe(true)
+    expect(manager.list().find((t) => t.id === docsId)?.active).toBe(false)
+  })
+
+  it('opens a fresh help tab once the previous one was closed', () => {
+    const first = manager.openHelpTab()
+    manager.closeTabWithoutPrompt(first)
+    const second = manager.openHelpTab()
+    expect(second).not.toBe(first)
+    expect(manager.list().filter((t) => t.kind === 'help')).toHaveLength(1)
+  })
+
   it('opens a docs tab, activates it, and attaches its view to the window', () => {
     const id = manager.openDocsTab()
     const tabs = manager.list()
@@ -244,40 +325,47 @@ describe('opening tabs', () => {
 })
 
 describe('spare sheets view', () => {
-  function homeLoaded(): void {
-    const call = shellWindow.webContents.once.mock.calls.find(
-      ([event]) => event === 'did-finish-load',
-    )
-    ;(call![1] as () => void)()
-  }
-
-  it('warms a hidden sheets view after the home page loads and hands it to the next open', () => {
+  it('does not warm Sheets during Home or Docs sessions', () => {
     vi.useFakeTimers()
     try {
-      homeLoaded()
+      const homeLoaded = shellWindow.webContents.once.mock.calls.find(
+        ([event]) => event === 'did-finish-load',
+      )
+      ;(homeLoaded?.[1] as (() => void) | undefined)?.()
+      vi.advanceTimersByTime(5000)
+      manager.openDocsTab('/tmp/report.docx')
+      vi.advanceTimersByTime(5000)
       expect(createSheetsView).not.toHaveBeenCalled()
-      vi.advanceTimersByTime(1500)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('warms a spare while Sheets is active and hands it to the next open', () => {
+    vi.useFakeTimers()
+    try {
+      manager.openSheetsTab('/tmp/first.xlsx')
       expect(createSheetsView).toHaveBeenCalledTimes(1)
+      vi.advanceTimersByTime(3000)
+      expect(createSheetsView).toHaveBeenCalledTimes(2)
       const spare = lastCreatedView(createSheetsView)
-      expect(setActiveSheetsWebContents).toHaveBeenLastCalledWith(null)
       expect(shellWindow.contentView.addChildView).toHaveBeenCalledWith(spare)
       expect(spare.setVisible).toHaveBeenLastCalledWith(false)
-      expect(manager.list()).toHaveLength(1)
+      expect(manager.list()).toHaveLength(2)
 
       manager.openSheetsTab('/tmp/budget.xlsx')
-      expect(createSheetsView).toHaveBeenCalledTimes(1)
-      expect(shellWindow.contentView.addChildView).toHaveBeenCalledTimes(1)
+      expect(createSheetsView).toHaveBeenCalledTimes(2)
       expect(queueWorkbookForView).toHaveBeenCalledWith(spare.webContents, '/tmp/budget.xlsx')
       expect(nudgeQueuedWorkbook).toHaveBeenCalledWith(spare.webContents)
       expect(spare.setVisible).toHaveBeenLastCalledWith(true)
-      expect(manager.list()[1]).toMatchObject({
+      expect(manager.list()[2]).toMatchObject({
         kind: 'sheets',
         title: 'budget.xlsx',
         active: true,
       })
 
       vi.advanceTimersByTime(3000)
-      expect(createSheetsView).toHaveBeenCalledTimes(2)
+      expect(createSheetsView).toHaveBeenCalledTimes(3)
       expect(lastCreatedView(createSheetsView)).not.toBe(spare)
       expect(setActiveSheetsWebContents).toHaveBeenLastCalledWith(spare.webContents)
     } finally {
@@ -288,14 +376,26 @@ describe('spare sheets view', () => {
   it('creates a fresh view when no spare is ready and does not nudge it', () => {
     manager.openSheetsTab('/tmp/budget.xlsx')
     expect(createSheetsView).toHaveBeenCalledTimes(1)
+    expect(createSheetsView).toHaveBeenCalledWith({
+      includeAiHandlers: false,
+      openingWorkbook: true,
+    })
     expect(nudgeQueuedWorkbook).not.toHaveBeenCalled()
+  })
+
+  it('starts a new blank view without the opening state', () => {
+    manager.openSheetsTab()
+    expect(createSheetsView).toHaveBeenCalledWith({
+      includeAiHandlers: false,
+      openingWorkbook: false,
+    })
   })
 
   it('drops a spare whose renderer died instead of handing it out', () => {
     vi.useFakeTimers()
     try {
-      homeLoaded()
-      vi.advanceTimersByTime(1500)
+      manager.openSheetsTab()
+      vi.advanceTimersByTime(3000)
       const spare = lastCreatedView(createSheetsView)
       const gone = spare.webContents.once.mock.calls.find(
         ([event]) => event === 'render-process-gone',
@@ -303,7 +403,27 @@ describe('spare sheets view', () => {
       ;(gone![1] as () => void)()
       expect(spare.webContents.close).toHaveBeenCalledTimes(1)
       manager.openSheetsTab()
+      expect(createSheetsView).toHaveBeenCalledTimes(3)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('cancels a pending spare and closes an existing spare on leaving Sheets', () => {
+    vi.useFakeTimers()
+    try {
+      const sheetsId = manager.openSheetsTab()
+      manager.openDocsTab()
+      vi.advanceTimersByTime(3000)
+      expect(createSheetsView).toHaveBeenCalledTimes(1)
+
+      manager.activateTab(sheetsId)
+      vi.advanceTimersByTime(3000)
       expect(createSheetsView).toHaveBeenCalledTimes(2)
+      const spare = lastCreatedView(createSheetsView)
+      manager.activateTab('home')
+      expect(shellWindow.contentView.removeChildView).toHaveBeenCalledWith(spare)
+      expect(spare.webContents.close).toHaveBeenCalledTimes(1)
     } finally {
       vi.useRealTimers()
     }
@@ -313,9 +433,9 @@ describe('spare sheets view', () => {
     vi.stubEnv('GENOFFICE_NO_SPARE_VIEW', '1')
     vi.useFakeTimers()
     try {
-      homeLoaded()
+      manager.openSheetsTab()
       vi.advanceTimersByTime(5000)
-      expect(createSheetsView).not.toHaveBeenCalled()
+      expect(createSheetsView).toHaveBeenCalledTimes(1)
     } finally {
       vi.useRealTimers()
       vi.unstubAllEnvs()
@@ -340,6 +460,30 @@ describe('activation', () => {
       height: WINDOW_HEIGHT - TAB_STRIP_HEIGHT,
     })
     expect(manager.list().find((t) => t.id === docsId)?.active).toBe(true)
+  })
+
+  it('hands keyboard focus to the activated view so typing works right after open/switch', () => {
+    const docsId = manager.openDocsTab()
+    const docsView = lastCreatedView(createDocsView)
+    expect(docsView.webContents.focus).toHaveBeenCalled()
+
+    docsView.webContents.focus.mockClear()
+    manager.activateTab('home')
+    expect(shellWindow.webContents.focus).toHaveBeenCalled()
+    manager.activateTab(docsId)
+    expect(docsView.webContents.focus).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not steal OS focus for a background open (window unfocused)', () => {
+    shellWindow.isFocused.mockReturnValue(false)
+    manager.openDocsTab()
+    const docsView = lastCreatedView(createDocsView)
+    expect(docsView.webContents.focus).not.toHaveBeenCalled()
+
+    // the window `focus` handler runs it once the user comes back
+    shellWindow.isFocused.mockReturnValue(true)
+    manager.focusActiveView()
+    expect(docsView.webContents.focus).toHaveBeenCalledTimes(1)
   })
 
   it('ignores activation of unknown tab ids', () => {
@@ -569,6 +713,125 @@ describe('file path bookkeeping', () => {
     expect(onChanged).not.toHaveBeenCalled()
   })
 
+  /**
+   * One case per TabKind a file can live in. The shell dispatches a rename to a
+   * per-app hook on the kind renameTabFile reports, so a kind with no case here
+   * is a kind whose editor would silently keep saving to the old path. `home`
+   * carries no file, so it gets the negative case below instead of a positive
+   * one.
+   */
+  const RENAMABLE: {
+    kind: Exclude<TabKind, 'home'>
+    file: string
+    renamed: string
+    open: () => FakeView
+  }[] = [
+    {
+      kind: 'docs',
+      file: '/tmp/one.docx',
+      renamed: '/tmp/two.docx',
+      open: () => {
+        manager.openDocsTab('/tmp/one.docx')
+        return lastCreatedView(createDocsView)
+      },
+    },
+    {
+      kind: 'sheets',
+      file: '/tmp/one.xlsx',
+      renamed: '/tmp/two.xlsx',
+      open: () => {
+        manager.openSheetsTab('/tmp/one.xlsx')
+        return lastCreatedView(createSheetsView)
+      },
+    },
+    {
+      kind: 'slides',
+      file: '/tmp/one.pptx',
+      renamed: '/tmp/two.pptx',
+      open: () => {
+        manager.openSlidesTab('/tmp/one.pptx')
+        return lastCreatedView(createSlidesView)
+      },
+    },
+    {
+      kind: 'pdf',
+      file: '/tmp/one.pdf',
+      renamed: '/tmp/two.pdf',
+      open: () => {
+        manager.openPdfTab('/tmp/one.pdf')
+        return lastCreatedView(createPdfView)
+      },
+    },
+    {
+      kind: 'markdown',
+      file: '/tmp/one.md',
+      renamed: '/tmp/two.md',
+      open: () => {
+        manager.openMarkdownTab('/tmp/one.md')
+        return lastCreatedView(createMarkdownView)
+      },
+    },
+    {
+      kind: 'html',
+      file: '/tmp/one.html',
+      renamed: '/tmp/two.html',
+      open: () => {
+        manager.openHtmlTab('/tmp/one.html')
+        return lastCreatedView(createHtmlView)
+      },
+    },
+  ]
+
+  it.each(RENAMABLE)('a rename reports the $kind view', (c) => {
+    const view = c.open()
+    expect(manager.renameTabFile(c.file, c.renamed)).toEqual([
+      { kind: c.kind, webContents: view.webContents },
+    ])
+  })
+
+  it.each(RENAMABLE)('a rename retitles and repaths the $kind tab', (c) => {
+    c.open()
+    manager.renameTabFile(c.file, c.renamed)
+    const tab = manager.list().find((t) => t.id === 't1')
+    expect(tab?.filePath).toBe(c.renamed)
+    expect(tab?.title).toBe('two' + c.file.slice(c.file.lastIndexOf('.')))
+  })
+
+  it('never claims the home tab, which has no file on disk', () => {
+    const before = manager.list().map((t) => ({ id: t.id, title: t.title, filePath: t.filePath }))
+    expect(before.some((t) => t.id === 'home')).toBe(true)
+    expect(manager.renameTabFile('/tmp/one.docx', '/tmp/two.docx')).toEqual([])
+    expect(manager.list().map((t) => ({ id: t.id, title: t.title, filePath: t.filePath }))).toEqual(
+      before,
+    )
+  })
+
+  it('covers every kind the manager can open', () => {
+    // The table is checked against what the manager can actually produce rather
+    // than a hand-written list, so a new open*Tab method cannot ship without a
+    // rename case. A Record<TabKind, true> would read better, but apps/shell
+    // tsconfig includes src/** only, so nothing under tests/ ever reaches the
+    // typecheck CI runs.
+    const openers = Object.getOwnPropertyNames(TabManager.prototype).filter((name) =>
+      /^open[A-Z]\w*Tab$/.test(name),
+    )
+    expect(openers.length).toBeGreaterThanOrEqual(7)
+    const opened: string[] = []
+    for (const name of openers) {
+      const before = manager.list().length
+      const opener = (manager as unknown as Record<string, (arg?: unknown) => unknown>)[name]
+      opener?.call(manager, '/tmp/probe.probe')
+      const after = manager.list()
+      if (after.length > before) opened.push(after[after.length - 1]!.kind)
+    }
+    // file-less tabs (the in-app manual) have no path to rename, so they are
+    // opened by the enumeration but must not demand a RENAMABLE case
+    const fileless = new Set(['help'])
+    expect([...new Set(opened.filter((k) => !fileless.has(k)))].sort()).toEqual(
+      RENAMABLE.map((c) => c.kind).sort(),
+    )
+  })
+
   it('finds tabs by kind and path', () => {
     manager.openSheetsTab('/tmp/a.xlsx')
     manager.openSlidesTab('/tmp/b.pptx')
@@ -658,5 +921,127 @@ describe('dirty-tab queries (shell close guard)', () => {
     manager.openSheetsTab()
     manager.openDocsTab('/tmp/a.docx')
     expect(manager.docsTabs().map((t) => t.id)).toEqual(['t1', 't3'])
+  })
+})
+
+describe('detach / attach (Open in New Window, tear-off, dock)', () => {
+  it('lifts a tab out without closing its renderer and hands the live view back', () => {
+    manager.openDocsTab('/tmp/a.docx')
+    const id = manager.openPdfTab('/tmp/scan.pdf')
+    const view = lastCreatedView(createPdfView)
+    const record = manager.detachTab(id)
+    expect(record).toMatchObject({ kind: 'pdf', title: 'scan.pdf', filePath: '/tmp/scan.pdf' })
+    expect(record!.view).toBe(view)
+    expect(shellWindow.contentView.removeChildView).toHaveBeenCalledWith(view)
+    expect(view.webContents.close).not.toHaveBeenCalled()
+    expect(manager.list().map((t) => t.id)).toEqual(['home', 't1'])
+    expect(manager.list()[1].active).toBe(true)
+  })
+
+  it('every document kind can be detached; Home and Present tabs cannot', () => {
+    const docs = manager.openDocsTab()
+    const sheets = manager.openSheetsTab()
+    const slides = manager.openSlidesTab()
+    const pdf = manager.openPdfTab('/tmp/scan.pdf')
+    const markdown = manager.openMarkdownTab()
+    const html = manager.openHtmlTab()
+    const present = manager.openHtmlPresentTab({ id: 999 } as never, 'Preview')
+    for (const id of [docs, sheets, slides, pdf, markdown, html])
+      expect(manager.canDetachTab(id)).toBe(true)
+    expect(manager.canDetachTab('home')).toBe(false)
+    expect(manager.canDetachTab(present)).toBe(false)
+    expect(manager.canDetachTab('nope')).toBe(false)
+    expect(manager.detachTab(present)).toBeNull()
+  })
+
+  it('attaches a view back as a new, active tab at the requested slot', () => {
+    manager.openDocsTab('/tmp/a.docx')
+    manager.openDocsTab('/tmp/b.docx')
+    const id = manager.openSlidesTab('/tmp/deck.pptx')
+    const record = manager.detachTab(id)!
+    shellWindow.contentView.addChildView.mockClear()
+
+    const newId = manager.attachTab(record, 1)
+    expect(newId).not.toBe(id)
+    expect(shellWindow.contentView.addChildView).toHaveBeenCalledWith(record.view)
+    expect(record.view.setVisible).toHaveBeenLastCalledWith(true)
+    expect(record.view.setBounds).toHaveBeenLastCalledWith({
+      x: 0,
+      y: TAB_STRIP_HEIGHT,
+      width: WINDOW_WIDTH,
+      height: WINDOW_HEIGHT - TAB_STRIP_HEIGHT,
+    })
+    expect(manager.list().map((t) => [t.id, t.title, t.active])).toEqual([
+      ['home', 'Nawa', false],
+      [newId, 'deck.pptx', true],
+      ['t1', 'a.docx', false],
+      ['t2', 'b.docx', false],
+    ])
+    expect(setActiveSlidesWebContents).toHaveBeenLastCalledWith(record.view.webContents)
+    expect(applyMenuFor).toHaveBeenLastCalledWith('slides')
+  })
+
+  it('keeps Home pinned: slot 0 and negative slots land right after it, out-of-range appends', () => {
+    manager.openDocsTab('/tmp/a.docx')
+    const first = manager.detachTab(manager.openSheetsTab('/tmp/x.xlsx'))!
+    const second = manager.detachTab(manager.openSheetsTab('/tmp/y.xlsx'))!
+    const third = manager.detachTab(manager.openSheetsTab('/tmp/z.xlsx'))!
+    manager.attachTab(first, 0)
+    expect(manager.list().map((t) => t.title)).toEqual(['Nawa', 'x.xlsx', 'a.docx'])
+    manager.attachTab(second, -4)
+    expect(manager.list().map((t) => t.title)).toEqual(['Nawa', 'y.xlsx', 'x.xlsx', 'a.docx'])
+    manager.attachTab(third, 99)
+    expect(manager.list().map((t) => t.title)).toEqual([
+      'Nawa',
+      'y.xlsx',
+      'x.xlsx',
+      'a.docx',
+      'z.xlsx',
+    ])
+  })
+
+  it('appends when no slot is given', () => {
+    manager.openDocsTab('/tmp/a.docx')
+    const record = manager.detachTab(manager.openPdfTab('/tmp/scan.pdf'))!
+    manager.openDocsTab('/tmp/b.docx')
+    manager.attachTab(record)
+    expect(manager.list().map((t) => t.title)).toEqual(['Nawa', 'a.docx', 'b.docx', 'scan.pdf'])
+  })
+
+  it('installs the HTML-fullscreen listeners once per view across detach and re-attach', () => {
+    const id = manager.openSlidesTab('/tmp/deck.pptx')
+    const view = lastCreatedView(createSlidesView)
+    const fullScreenRegistrations = () =>
+      view.webContents.on.mock.calls.filter(([event]) => event === 'enter-html-full-screen').length
+    expect(fullScreenRegistrations()).toBe(1)
+    const record = manager.detachTab(id)!
+    const newId = manager.attachTab(record)
+    expect(fullScreenRegistrations()).toBe(1)
+
+    // the listener resolves the *current* id: fullscreen after re-attach covers the strip
+    view.webContents.listeners.get('enter-html-full-screen')!()
+    expect(view.setBounds).toHaveBeenLastCalledWith({
+      x: 0,
+      y: 0,
+      width: WINDOW_WIDTH,
+      height: WINDOW_HEIGHT,
+    })
+    view.webContents.listeners.get('leave-html-full-screen')!()
+    expect(view.setBounds).toHaveBeenLastCalledWith({
+      x: 0,
+      y: TAB_STRIP_HEIGHT,
+      width: WINDOW_WIDTH,
+      height: WINDOW_HEIGHT - TAB_STRIP_HEIGHT,
+    })
+    expect(manager.list()[1].id).toBe(newId)
+  })
+
+  it('a re-attached docs tab closes through the docs teardown path like any docs tab', async () => {
+    const record = manager.detachTab(manager.openDocsTab('/tmp/a.docx'))!
+    const newId = manager.attachTab(record)
+    await manager.closeTab(newId)
+    expect(teardownDocsRenderer).toHaveBeenCalledWith(record.view.webContents)
+    expect(record.view.webContents.close).not.toHaveBeenCalled()
+    expect(manager.list()).toHaveLength(1)
   })
 })

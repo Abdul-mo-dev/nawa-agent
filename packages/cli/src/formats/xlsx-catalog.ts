@@ -78,7 +78,8 @@ const GROUP_SUMMARIES: Record<string, string> = {
 }
 
 const NOTES: Record<string, string> = {
-  set_cell: 'a string value starting with "=" is written as a formula',
+  set_cell:
+    'a string value starting with "=" is written as a formula; type: "text" keeps such a string as literal cell text',
   set_range: 'start is the top-left cell; range, when given instead, must match the values grid',
   format_range:
     'null clears a property; colors are #RRGGBB or theme slots ("accent1", "accent1+40%", "dk2-25%", {theme, tint}) that follow the workbook theme; fill = {pattern, fg, bg?} or {gradient: {angle?, stops}}; border type none removes all borders',
@@ -126,7 +127,9 @@ const FOOTER = [
   'sheet added or renamed earlier in the batch is addressed by its new name. Rules, links, notes, filters and',
   'visuals must come after any row/column op of their sheet; defined-name ops cannot share a batch with sheet',
   'or row/column ops. Formulas written by a batch are evaluated by the workbook engine and stored',
-  'with their results; functions the engine lacks are left for Excel to compute on open (warning formulas_not_cached).',
+  'with their results; functions the engine lacks are left for Excel to compute on open (warning formulas_not_cached),',
+  'and a formula the engine cannot parse is reported separately (warning formula_errors) so a bad reference is not',
+  'mistaken for a missing function.',
 ]
 
 function opSchemas(): Map<string, JsonSchema> {

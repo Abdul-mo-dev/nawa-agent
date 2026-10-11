@@ -1,3 +1,8 @@
+import {
+  assertDirectoryStagePicker,
+  assertDirectoryStageWrite,
+  directoryStageFor,
+} from '../../../../packages/electron-utils/src/directory-stage'
 import { assertDirectoryStageCapability } from '../../../../packages/electron-utils/src/directory-stage'
 import { existsSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
@@ -16,7 +21,10 @@ import {
 } from 'electron'
 import type { WebContents } from 'electron'
 import {
+  MAX_REMOTE_IMAGE_BYTES,
   configuredDefaultSaveDir,
+  fetchRemoteImage,
+  readBodyCapped,
   saveImageFromUrl,
   contextMenuLabels,
   installContextMenu,
@@ -37,7 +45,7 @@ import {
   type LegacyAiSettings,
 } from '@genoffice/ai-provider'
 import { createAiSettingsStore } from '@genoffice/electron-utils/ai-settings-store'
-import { generateImageTool } from '@genoffice/ai-search'
+import { generateImageTool, documentMediaRoots } from '@genoffice/ai-search'
 import { ImageExportSessions } from './image-export'
 import { printMarkdownPdf } from './print-pdf'
 import { atomicWriteFile } from './atomic-write'
@@ -56,7 +64,14 @@ import {
   writeImageIntoOwnedAssets,
 } from './asset-lifecycle'
 import { createMarkdownConversionSession, writeMarkdownConversion } from './conversion-lifecycle'
-import { MARKDOWN_CHANNELS } from '../shared/ipc'
+import { MARKDOWN_CHANNELS, MAX_PASTED_IMAGE_BYTES } from '../shared/ipc'
+import type { ImageHostConfig } from '../shared/ipc'
+import { isImageHostUsable, normalizeImageHostConfig, uploadImageToHost } from './image-host'
+import {
+  EXPORT_IMAGE_EXTS,
+  EXPORT_IMAGE_MIME_BY_EXT,
+  remoteExportImageMime,
+} from '../shared/export-image-mime'
 import type {
   ExportDocxRequest,
   ExportFormat,
@@ -81,7 +96,7 @@ const toolAiSettings = () =>
 const tDlg = createI18n({
   zh: {
     dlgSaveTitle: '保存 Markdown 文档',
-    filterMarkdown: 'Markdown 文档',
+    filterMarkdown: '文本文件 (Markdown, TXT, JSON)',
     dlgPickImage: '选择图片',
     dlgSaveImage: '保存图片',
     filterImages: '图片',
@@ -94,7 +109,7 @@ const tDlg = createI18n({
   },
   en: {
     dlgSaveTitle: 'Save Markdown Document',
-    filterMarkdown: 'Markdown Documents',
+    filterMarkdown: 'Text Files (Markdown, TXT, JSON)',
     dlgPickImage: 'Choose an Image',
     dlgSaveImage: 'Save Image',
     filterImages: 'Images',
@@ -105,9 +120,22 @@ const tDlg = createI18n({
     btnDontSave: "Don't Save",
     btnCancel: 'Cancel',
   },
+  vi: {
+    dlgSaveTitle: 'Lưu tài liệu Markdown',
+    filterMarkdown: 'Tệp văn bản (Markdown, TXT, JSON)',
+    dlgPickImage: 'Chọn một hình ảnh',
+    dlgSaveImage: 'Lưu hình ảnh',
+    filterImages: 'Hình ảnh',
+    untitledFile: 'Không có tiêu đề',
+    closeUnsavedMsg: 'Tài liệu này có những thay đổi chưa được lưu.',
+    closeUnsavedDetail: 'Bạn có muốn lưu các thay đổi trước khi đóng không?',
+    btnSave: 'Lưu',
+    btnDontSave: 'Không lưu',
+    btnCancel: 'Hủy',
+  },
   ja: {
     dlgSaveTitle: 'Markdown ドキュメントを保存',
-    filterMarkdown: 'Markdown ドキュメント',
+    filterMarkdown: 'テキストファイル (Markdown, TXT, JSON)',
     dlgPickImage: '画像を選択',
     dlgSaveImage: '画像を保存',
     filterImages: '画像',
@@ -120,7 +148,7 @@ const tDlg = createI18n({
   },
   ko: {
     dlgSaveTitle: 'Markdown 문서 저장',
-    filterMarkdown: 'Markdown 문서',
+    filterMarkdown: '텍스트 파일 (Markdown, TXT, JSON)',
     dlgPickImage: '이미지 선택',
     dlgSaveImage: '이미지 저장',
     filterImages: '이미지',
@@ -133,7 +161,7 @@ const tDlg = createI18n({
   },
   fr: {
     dlgSaveTitle: 'Enregistrer le document Markdown',
-    filterMarkdown: 'Documents Markdown',
+    filterMarkdown: 'Fichiers texte (Markdown, TXT, JSON)',
     dlgPickImage: 'Choisir une image',
     dlgSaveImage: "Enregistrer l'image",
     filterImages: 'Images',
@@ -146,7 +174,7 @@ const tDlg = createI18n({
   },
   de: {
     dlgSaveTitle: 'Markdown-Dokument speichern',
-    filterMarkdown: 'Markdown-Dokumente',
+    filterMarkdown: 'Textdateien (Markdown, TXT, JSON)',
     dlgPickImage: 'Bild auswählen',
     dlgSaveImage: 'Bild speichern',
     filterImages: 'Bilder',
@@ -159,7 +187,7 @@ const tDlg = createI18n({
   },
   es: {
     dlgSaveTitle: 'Guardar documento Markdown',
-    filterMarkdown: 'Documentos Markdown',
+    filterMarkdown: 'Archivos de texto (Markdown, TXT, JSON)',
     dlgPickImage: 'Elegir imagen',
     dlgSaveImage: 'Guardar imagen',
     filterImages: 'Imágenes',
@@ -172,7 +200,7 @@ const tDlg = createI18n({
   },
   th: {
     dlgSaveTitle: 'บันทึกเอกสาร Markdown',
-    filterMarkdown: 'เอกสาร Markdown',
+    filterMarkdown: 'ไฟล์ข้อความ (Markdown, TXT, JSON)',
     dlgPickImage: 'เลือกรูปภาพ',
     dlgSaveImage: 'บันทึกรูปภาพ',
     filterImages: 'รูปภาพ',
@@ -185,7 +213,7 @@ const tDlg = createI18n({
   },
   id: {
     dlgSaveTitle: 'Simpan dokumen Markdown',
-    filterMarkdown: 'Dokumen Markdown',
+    filterMarkdown: 'File teks (Markdown, TXT, JSON)',
     dlgPickImage: 'Pilih gambar',
     dlgSaveImage: 'Simpan Gambar',
     filterImages: 'Gambar',
@@ -198,7 +226,7 @@ const tDlg = createI18n({
   },
   ru: {
     dlgSaveTitle: 'Сохранить документ Markdown',
-    filterMarkdown: 'Документы Markdown',
+    filterMarkdown: 'Текстовые файлы (Markdown, TXT, JSON)',
     dlgPickImage: 'Выберите изображение',
     dlgSaveImage: 'Сохранить изображение',
     filterImages: 'Изображения',
@@ -211,7 +239,7 @@ const tDlg = createI18n({
   },
   ar: {
     dlgSaveTitle: 'حفظ مستند Markdown',
-    filterMarkdown: 'مستندات Markdown',
+    filterMarkdown: 'ملفات نصية (Markdown, TXT, JSON)',
     dlgPickImage: 'اختر صورة',
     dlgSaveImage: 'حفظ الصورة',
     filterImages: 'صور',
@@ -224,7 +252,7 @@ const tDlg = createI18n({
   },
   pt: {
     dlgSaveTitle: 'Salvar documento Markdown',
-    filterMarkdown: 'Documentos Markdown',
+    filterMarkdown: 'Arquivos de texto (Markdown, TXT, JSON)',
     dlgPickImage: 'Escolher imagem',
     dlgSaveImage: 'Salvar imagem',
     filterImages: 'Imagens',
@@ -237,7 +265,7 @@ const tDlg = createI18n({
   },
   it: {
     dlgSaveTitle: 'Salva documento Markdown',
-    filterMarkdown: 'Documenti Markdown',
+    filterMarkdown: 'File di testo (Markdown, TXT, JSON)',
     dlgPickImage: 'Scegli immagine',
     dlgSaveImage: 'Salva immagine',
     filterImages: 'Immagini',
@@ -250,7 +278,7 @@ const tDlg = createI18n({
   },
   pl: {
     dlgSaveTitle: 'Zapisz dokument Markdown',
-    filterMarkdown: 'Dokumenty Markdown',
+    filterMarkdown: 'Pliki tekstowe (Markdown, TXT, JSON)',
     dlgPickImage: 'Wybierz obraz',
     dlgSaveImage: 'Zapisz obraz',
     filterImages: 'Obrazy',
@@ -263,7 +291,7 @@ const tDlg = createI18n({
   },
   cs: {
     dlgSaveTitle: 'Uložit dokument Markdown',
-    filterMarkdown: 'Dokumenty Markdown',
+    filterMarkdown: 'Textové soubory (Markdown, TXT, JSON)',
     dlgPickImage: 'Vyberte obrázek',
     dlgSaveImage: 'Uložit obrázek',
     filterImages: 'Obrázky',
@@ -276,7 +304,7 @@ const tDlg = createI18n({
   },
   nl: {
     dlgSaveTitle: 'Markdown-document opslaan',
-    filterMarkdown: 'Markdown-documenten',
+    filterMarkdown: 'Tekstbestanden (Markdown, TXT, JSON)',
     dlgPickImage: 'Kies een afbeelding',
     dlgSaveImage: 'Afbeelding opslaan',
     filterImages: 'Afbeeldingen',
@@ -289,7 +317,7 @@ const tDlg = createI18n({
   },
   ms: {
     dlgSaveTitle: 'Simpan dokumen Markdown',
-    filterMarkdown: 'Dokumen Markdown',
+    filterMarkdown: 'Fail teks (Markdown, TXT, JSON)',
     dlgPickImage: 'Pilih imej',
     dlgSaveImage: 'Simpan Imej',
     filterImages: 'Imej',
@@ -302,7 +330,7 @@ const tDlg = createI18n({
   },
   he: {
     dlgSaveTitle: 'שמירת מסמך Markdown',
-    filterMarkdown: 'מסמכי Markdown',
+    filterMarkdown: 'קובצי טקסט (Markdown, TXT, JSON)',
     dlgPickImage: 'בחרו תמונה',
     dlgSaveImage: 'שמור תמונה',
     filterImages: 'תמונות',
@@ -315,7 +343,7 @@ const tDlg = createI18n({
   },
   hi: {
     dlgSaveTitle: 'Markdown दस्तावेज़ सहेजें',
-    filterMarkdown: 'Markdown दस्तावेज़',
+    filterMarkdown: 'पाठ फ़ाइलें (Markdown, TXT, JSON)',
     dlgPickImage: 'छवि चुनें',
     dlgSaveImage: 'छवि सहेजें',
     filterImages: 'छवियाँ',
@@ -328,7 +356,7 @@ const tDlg = createI18n({
   },
   'zh-TW': {
     dlgSaveTitle: '儲存 Markdown 文件',
-    filterMarkdown: 'Markdown 文件',
+    filterMarkdown: '文字檔 (Markdown, TXT, JSON)',
     dlgPickImage: '選擇圖片',
     dlgSaveImage: '儲存圖片',
     filterImages: '圖片',
@@ -440,6 +468,16 @@ export function markdownFilePath(webContentsId: number): string | undefined {
   return savePathByWc.get(webContentsId)
 }
 
+/** Adopt a browser Save As target after its scoped write succeeds; the source still exists. */
+export function markdownAdoptSavedPath(contents: WebContents, filePath: string): void {
+  if (contents.isDestroyed()) return
+  savePathByWc.set(contents.id, filePath)
+  openPathByWc.set(contents.id, filePath)
+  const allowed = allowedByWc.get(contents.id) ?? new Set<string>()
+  allowed.add(filePath)
+  allowedByWc.set(contents.id, allowed)
+}
+
 /** The file was renamed on disk — re-grant the new path and tell the renderer */
 export function markdownFileRenamed(contents: WebContents, oldPath: string, newPath: string): void {
   const wcId = contents.id
@@ -516,6 +554,7 @@ export async function markdownDiscardPendingAssets(contents: WebContents): Promi
 
 /** Menu Save / Save As: ask the renderer to serialize and save; clean views resolve true immediately on plain save */
 export function requestMarkdownSave(contents: WebContents, mode: SaveMode): Promise<boolean> {
+  if (mode !== 'save') assertDirectoryStagePicker(contents)
   if (contents.isDestroyed()) return Promise.resolve(false)
   if (mode === 'save' && !dirtyByWc.has(contents.id) && savePathByWc.has(contents.id)) {
     return Promise.resolve(true)
@@ -594,6 +633,7 @@ export function markdownReadText(contents: WebContents): Promise<string> {
  * rewrite handling included) runs unattended.
  */
 export function markdownSaveToPath(contents: WebContents, filePath: string): Promise<void> {
+  assertDirectoryStageWrite(contents, filePath)
   if (contents.isDestroyed()) return Promise.reject(new Error('the document is no longer open'))
   const wcId = contents.id
   const previousPath = savePathByWc.get(wcId)
@@ -636,6 +676,11 @@ async function resolveSaveTarget(
   suggestedName?: string,
 ): Promise<string | null | 'canceled'> {
   const current = savePathByWc.get(e.sender.id)
+  if (directoryStageFor(e.sender)) {
+    if (mode !== 'save') assertDirectoryStagePicker(e.sender)
+    assertDirectoryStageWrite(e.sender, current)
+    return current ?? null
+  }
   if (mode === 'save' && current) return current
   // AI auto-naming: silent first save of an untitled document
   if (mode === 'save' && !current && suggestedName) {
@@ -658,22 +703,31 @@ async function resolveSaveTarget(
   const picked = await showSaveDialogWithMemory(dialog, win, {
     title: tm('dlgSaveTitle'),
     defaultPath,
-    filters: [{ name: tm('filterMarkdown'), extensions: ['md', 'markdown'] }],
+    filters: [{ name: tm('filterMarkdown'), extensions: ['md', 'markdown', 'txt', 'json'] }],
   })
   if (picked.canceled || !picked.filePath) return 'canceled'
   return picked.filePath
 }
 
-const DISPLAY_IMAGE_EXTS = new Set([
-  '.png',
-  '.jpg',
-  '.jpeg',
-  '.gif',
-  '.webp',
-  '.svg',
-  '.bmp',
-  '.avif',
-])
+const DISPLAY_IMAGE_EXTS = new Set(Object.keys(EXPORT_IMAGE_MIME_BY_EXT))
+
+/**
+ * `![x](https://…)` for the DOCX export: downloaded here so the renderer's
+ * origin restrictions do not apply; the SSRF guard keeps the model-writable
+ * URL off private hosts.
+ */
+async function readRemoteImage(url: string): Promise<ImageData | null> {
+  try {
+    const resp = await fetchRemoteImage(url)
+    if (!resp?.ok) return null
+    const bytes = await readBodyCapped(resp, MAX_REMOTE_IMAGE_BYTES)
+    const mime = remoteExportImageMime(bytes, resp.headers.get('content-type'), url)
+    if (!mime) return null
+    return { base64: Buffer.from(bytes).toString('base64'), mime }
+  } catch {
+    return null
+  }
+}
 
 /**
  * Serves authored image paths to the editor DOM. A plain file:// <img> URL is
@@ -787,6 +841,7 @@ function registerMarkdownIpc(): void {
           knownImageSources.add(source)
           imageSources.push(source)
         }
+        assertDirectoryStageWrite(e.sender, target)
         const prepared =
           currentPath && resolve(dirname(currentPath)) !== resolve(dirname(target))
             ? await prepareAssetsForSaveAs(currentPath, target, request.text, imageSources)
@@ -794,6 +849,7 @@ function registerMarkdownIpc(): void {
         const textToWrite = prepared?.text ?? request.text
         const savedImageSources = prepared?.imageSources ?? imageSources
         try {
+          assertDirectoryStageWrite(e.sender, target)
           await writeTextAtomic(target, textToWrite)
         } catch (error) {
           if (prepared) await rollbackPreparedSaveAsAssets(prepared).catch(() => {})
@@ -843,14 +899,15 @@ function registerMarkdownIpc(): void {
   )
 
   ipcMain.handle(MARKDOWN_CHANNELS.pickImage, async (e): Promise<string | null> => {
+    assertDirectoryStagePicker(e.sender)
+
     const docPath = savePathByWc.get(e.sender.id)
     if (!docPath) return null
     const win =
       BrowserWindow.fromWebContents(e.sender) ?? BrowserWindow.getFocusedWindow() ?? undefined
     const picked = await showOpenDialogWithMemory(dialog, win, {
       title: tm('dlgPickImage'),
-      // only formats readImage/DOCX export can round-trip (docx-engine NewImage mimes)
-      filters: [{ name: tm('filterImages'), extensions: ['png', 'jpg', 'jpeg', 'gif'] }],
+      filters: [{ name: tm('filterImages'), extensions: EXPORT_IMAGE_EXTS }],
       properties: ['openFile'],
     })
     const source = picked.filePaths[0]
@@ -864,8 +921,9 @@ function registerMarkdownIpc(): void {
       const docPath = savePathByWc.get(e.sender.id)
       const ext = String(data?.ext ?? '').toLowerCase()
       if (!docPath || typeof data?.base64 !== 'string' || !data.base64) return null
-      // keep in sync with readImage's MIME map — every authored asset must stay DOCX-exportable
-      if (!['png', 'jpg', 'jpeg', 'gif'].includes(ext)) return null
+      assertDirectoryStageWrite(e.sender, docPath)
+      if (!EXPORT_IMAGE_EXTS.includes(ext)) return null
+      if (data.base64.length > Math.ceil(MAX_PASTED_IMAGE_BYTES / 3) * 4) return null
       return writeImageIntoOwnedAssets(docPath, `image.${ext}`, Buffer.from(data.base64, 'base64'))
     },
   )
@@ -876,21 +934,81 @@ function registerMarkdownIpc(): void {
     MARKDOWN_CHANNELS.aiGenerateImage,
     (_e, op: { prompt?: unknown; aspectRatio?: unknown }) => {
       assertDirectoryStageCapability(_e.sender, 'media')
-      return generateImageTool(toolAiSettings(), {
-        prompt: String(op?.prompt ?? ''),
-        aspectRatio: op?.aspectRatio ? String(op.aspectRatio) : undefined,
+      return generateImageTool(
+        toolAiSettings(),
+        {
+          prompt: String(op?.prompt ?? ''),
+          aspectRatio: op?.aspectRatio ? String(op.aspectRatio) : undefined,
+        },
+        { mediaRoots: documentMediaRoots(markdownFilePath(_e.sender.id), undefined) },
+      )
+    },
+  )
+
+  // ---- image host (genoffice#388): bring-your-own storage for pasted images,
+  // with the local assets/ copy kept as the renderer's fallback ----
+  const imageHostConfigPath = (): string => join(app.getPath('userData'), 'markdown-settings.json')
+
+  const readImageHostConfig = async (): Promise<ImageHostConfig | null> => {
+    try {
+      const raw = JSON.parse(await readFile(imageHostConfigPath(), 'utf8'))
+      return normalizeImageHostConfig(raw?.imageHost ?? null)
+    } catch {
+      return null
+    }
+  }
+
+  ipcMain.handle(MARKDOWN_CHANNELS.getImageHost, async (e): Promise<ImageHostConfig | null> => {
+    assertDirectoryStagePicker(e.sender)
+    return readImageHostConfig()
+  })
+
+  ipcMain.handle(
+    MARKDOWN_CHANNELS.setImageHost,
+    async (_e, config: unknown): Promise<ImageHostConfig | null> => {
+      assertDirectoryStagePicker(_e.sender)
+
+      // null clears the host: pastes return to the local-assets behaviour
+      const normalized = normalizeImageHostConfig(config)
+      // an incomplete form is rejected without touching the stored host
+      if (normalized === null && config !== null) return null
+      let file: Record<string, unknown>
+      try {
+        file = JSON.parse(await readFile(imageHostConfigPath(), 'utf8'))
+      } catch {
+        file = {}
+      }
+      file.imageHost = normalized
+      await atomicWriteFile(imageHostConfigPath(), Buffer.from(JSON.stringify(file, null, 2)))
+      return normalized
+    },
+  )
+
+  ipcMain.handle(
+    MARKDOWN_CHANNELS.uploadImage,
+    async (
+      _e,
+      data: { base64?: unknown; ext?: unknown; name?: unknown },
+    ): Promise<{ ok: boolean; url?: string; error?: string }> => {
+      assertDirectoryStageCapability(_e.sender, 'media')
+      const ext = String(data?.ext ?? '').toLowerCase()
+      if (!EXPORT_IMAGE_EXTS.includes(ext)) return { ok: false, error: 'unsupported image type' }
+      if (typeof data?.base64 !== 'string' || !data.base64)
+        return { ok: false, error: 'missing image data' }
+      if (data.base64.length > Math.ceil(MAX_PASTED_IMAGE_BYTES / 3) * 4)
+        return { ok: false, error: 'image too large' }
+      const config = await readImageHostConfig()
+      if (!isImageHostUsable(config)) return { ok: false, error: 'no usable image host configured' }
+      return uploadImageToHost(config, {
+        bytes: Buffer.from(data.base64, 'base64'),
+        ext,
       })
     },
   )
 
-  const MIME_BY_EXT: Record<string, ImageData['mime']> = {
-    '.png': 'image/png',
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.gif': 'image/gif',
-  }
-
   ipcMain.handle(MARKDOWN_CHANNELS.saveImageAs, async (e, src: unknown) => {
+    assertDirectoryStagePicker(e.sender)
+
     if (typeof src !== 'string') return { ok: false }
     const win = BrowserWindow.fromWebContents(e.sender)
     return saveImageFromUrl(win, src, {
@@ -902,11 +1020,16 @@ function registerMarkdownIpc(): void {
   ipcMain.handle(
     MARKDOWN_CHANNELS.readImage,
     async (e, src: unknown): Promise<ImageData | null> => {
+      if (typeof src !== 'string') return null
+      if (/^https?:/i.test(src)) {
+        assertDirectoryStageCapability(e.sender, 'network')
+        return readRemoteImage(src)
+      }
       const docPath = savePathByWc.get(e.sender.id)
-      if (!docPath || typeof src !== 'string' || /^[a-z][a-z0-9+.-]*:/i.test(src)) return null
+      if (!docPath || /^[a-z][a-z0-9+.-]*:/i.test(src)) return null
       const target = await resolveSafeRelativeImagePath(docPath, src)
       if (!target) return null
-      const mime = MIME_BY_EXT[extname(target).toLowerCase()]
+      const mime = EXPORT_IMAGE_MIME_BY_EXT[extname(target).toLowerCase()]
       if (!mime || !existsSync(target)) return null
       try {
         return { base64: (await readFile(target)).toString('base64'), mime }
@@ -919,6 +1042,8 @@ function registerMarkdownIpc(): void {
   ipcMain.handle(
     MARKDOWN_CHANNELS.exportDocx,
     async (e, request: ExportDocxRequest): Promise<ExportResult> => {
+      assertDirectoryStagePicker(e.sender)
+
       if (typeof request?.base64 !== 'string' || !request.base64) {
         return { ok: false, error: 'markdown: bad export request' }
       }
@@ -964,6 +1089,8 @@ function registerMarkdownIpc(): void {
   ipcMain.handle(
     MARKDOWN_CHANNELS.exportPdf,
     async (e, request: ExportPdfRequest): Promise<ExportResult> => {
+      assertDirectoryStagePicker(e.sender)
+
       if (typeof request?.html !== 'string' || !request.html) {
         return { ok: false, error: 'markdown: bad export request' }
       }
@@ -1002,6 +1129,8 @@ function registerMarkdownIpc(): void {
   ipcMain.handle(
     MARKDOWN_CHANNELS.prepareImageExport,
     async (e, request: ExportPdfRequest): Promise<ImageExportPreparation> => {
+      assertDirectoryStagePicker(e.sender)
+
       if (typeof request?.html !== 'string' || !request.html)
         return { ok: false, error: 'Empty document' }
       let id: string | undefined
@@ -1033,6 +1162,8 @@ function registerMarkdownIpc(): void {
   ipcMain.handle(
     MARKDOWN_CHANNELS.writeExportImage,
     async (e, id: string, page: number, base64: string) => {
+      assertDirectoryStagePicker(e.sender)
+
       try {
         await imageExports.write(e.sender.id, id, page, base64)
         return { ok: true }
@@ -1044,6 +1175,8 @@ function registerMarkdownIpc(): void {
   ipcMain.handle(
     MARKDOWN_CHANNELS.finishImageExport,
     async (e, id: string, success: boolean): Promise<ExportResult> => {
+      assertDirectoryStagePicker(e.sender)
+
       try {
         const dir = await imageExports.finish(e.sender.id, id, success === true)
         if (!dir) return { ok: true, canceled: true }

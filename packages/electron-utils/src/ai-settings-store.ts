@@ -35,6 +35,13 @@ function transformKeys(value: JsonObject, transform: (key: string) => string): J
     for (const profile of result.chatModels) {
       if (object(profile)) config(profile.config)
     }
+  if (Array.isArray(result.customEndpoints))
+    for (const endpoint of result.customEndpoints) config(endpoint)
+  if (object(result.fileSearch) && object(result.fileSearch.keys)) {
+    for (const [endpoint, key] of Object.entries(result.fileSearch.keys)) {
+      if (typeof key === 'string') result.fileSearch.keys[endpoint] = transform(key)
+    }
+  }
   return result
 }
 

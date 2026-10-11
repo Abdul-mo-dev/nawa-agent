@@ -1,12 +1,23 @@
 import type { zh } from './zh'
 
 export const ar = {
+  redactMenuLabel: 'إخفاء التحديد عن الذكاء الاصطناعي',
+  redactDialogDesc:
+    'تبقى الكلمات في المستند وفي الملف؛ يرى النموذج العلامة أدناه. سمِّها ليعرف ما تمثّله.',
+  redactDialogScope:
+    'الإخفاء يشمل الذكاء الاصطناعي في هذا التطبيق فقط. أما CLI وأدوات MCP والتصدير بدون واجهة فيقرأون الملف مباشرة، وما زالوا يرون هذه الكلمات.',
+  redactDialogPlaceholder: 'اسم العنصر، مثال: هاتف العميل',
+  redactCancel: 'إلغاء',
+  redactInsert: 'إخفاء',
+
   loading: 'جارٍ التحميل…',
   loadFailed: 'تعذر فتح الملف',
   untitled: 'بدون عنوان',
   saveFailed: 'فشل الحفظ: {error}',
   saveFailedStatus: 'فشل الحفظ',
   exportFailed: 'فشل التصدير',
+  printFailed: 'فشل الطباعة: {error}',
+  exportHtmlSkipped: 'تم التصدير، لكن تعذّر تضمين {count} من الأصول (مثل {first})',
   viewPreview: 'معاينة',
   viewSplit: 'مقسم',
   viewSource: 'المصدر',
@@ -52,7 +63,6 @@ export const ar = {
   save: 'حفظ (⌘S)',
   saveAs: 'حفظ باسم…',
   ribbonCollapse: 'طي الشريط',
-  ribbonPin: 'تثبيت الشريط',
   ribbonExpand: 'توسيع الشريط',
   ribbonGroupInsert: 'إدراج',
   editText: 'تحرير النص',
@@ -118,6 +128,7 @@ export const ar = {
   insertImageUrl: 'صورة من رابط…',
   insertConfirm: 'إدراج',
   insertMore: 'المزيد',
+  insertSkeleton: 'إدراج الهيكل',
   insertTableSize: 'جدول {r}×{c}',
   insertTablePickSize: 'اختيار حجم الجدول',
   insertPlaceholderTableHeader: 'عنوان {n}',

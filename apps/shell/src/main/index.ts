@@ -1,10 +1,11 @@
 import { execSync, spawn } from 'node:child_process'
 import { registerWorkspaceIpc } from './workspace-ipc'
 import { configureDirectoryNative } from './directory-actions/native-runtime'
+import { assertDirectoryStagePicker } from '../../../../packages/electron-utils/src/directory-stage'
 import {
-  copyFileSync,
   cpSync,
   existsSync,
+  mkdirSync,
   readFileSync,
   readdirSync,
   renameSync,
@@ -12,6 +13,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { basename, dirname, extname, join, resolve } from 'node:path'
 import {
   BrowserWindow,
@@ -27,6 +29,7 @@ import {
   webContents,
 } from 'electron'
 import type { MenuItemConstructorOptions, NativeImage, WebContents } from 'electron'
+import { atomicCopyFile, atomicWriteFile } from './atomic-write'
 import { tabStripOverlay } from './title-bar-overlay'
 import menuDocxIcon1x from './assets/menu-docx.png?asset'
 import menuDocxIcon2x from './assets/menu-docx@2x.png?asset'
@@ -68,7 +71,12 @@ import {
   installRendererProtocol,
   registerRendererScheme,
 } from '@genoffice/electron-utils'
-import { readAppSettings, writeAppSetting, writeAppSettings } from './app-settings'
+import {
+  readAppSettings,
+  writeAppSetting,
+  writeAppSettings,
+  writeAppSettingThen,
+} from './app-settings'
 import { createAiSettingsStore } from '@genoffice/electron-utils/ai-settings-store'
 import {
   activeProvider,
@@ -81,6 +89,7 @@ import { OPEN_DOCUMENTS_FILE, clearOpenDocuments, publishOpenDocuments } from '.
 import { startControlServer, type ControlServer } from './control-server'
 import { controlHandler } from './control-handlers'
 import { installCliLinkBestEffort } from './cli-link'
+import { createDefaultAppService, execFileRunner } from './default-app'
 import { registerIntegrationsIpc } from './integrations-ipc'
 import {
   ANALYTICS_ENABLED_KEY,
@@ -98,6 +107,7 @@ import {
   syncCloudProjects,
 } from './cloud-projects'
 import { handleDroppedFiles } from './dropped-files'
+import { collectLaunchPaths } from './launch-paths'
 import {
   genofficeLogout,
   gskLoginInfo,
@@ -111,16 +121,17 @@ import {
   buildDocsMenu,
   configureDocsRuntime,
   docsFileRenamed,
-  docsQueryDirty,
-  requestDocsClose,
   readRecentFiles,
   readStarredFiles,
+  readStarredGroupMap,
+  readStarredGroups,
   recordRecentFile,
   removeRecentFiles,
   removeStarredFiles,
   replaceRecentFile,
   registerAiIpc,
   registerProjectIpc,
+  setStarredGroup,
   toggleStarredFile,
   registerDocsIpc,
   exportDocsHeadless,
@@ -128,6 +139,7 @@ import {
   setDocsMenuGate,
   setDocsShellHooks,
   createAiDocument,
+  projectFilePaths,
   projectFileRenamed,
   readWorkspaceFileText,
   setDocsHostWindowHook,
@@ -165,9 +177,12 @@ import {
   hasActiveQueuedWorkbook,
   installSheetsMenu,
   markSheetsShuttingDown,
-  requestSheetsClose,
   resolveSheetsSessionPath,
+  markSheetsUnsavedNew,
   markSheetsUntitledPath,
+  pendingUnsavedNewRecoveries,
+  unmarkSheetsUnsavedNew,
+  sheetsSuggestedPathTaken,
   authorizeMcpSheetWrite,
   sendSheetsMenuAction,
   sheetsFileRenamed,
@@ -184,11 +199,12 @@ import {
   discardSlidesRecovery,
   exportSlidesPdfHeadless,
   installSlidesMenu,
+  readSlidesRecentFiles,
   replaceSlidesRecentFile,
-  requestSlidesClose,
   setSlidesCloseTabHook,
   setSlidesExtraFileMenuItems,
   setSlidesOpenedHook,
+  setSlidesHostWindowHook,
   setSlidesShellWindow,
   setSlidesShowBleed,
   slidesFileRenamed,
@@ -199,10 +215,10 @@ import {
   markPdfUntitledPath,
   pdfFileRenamed,
   pdfIsDirty,
-  requestPdfClose,
   requestPdfSaveAs,
   sendPdfPrintRequest,
   setPdfRenamedHook,
+  setPdfRedactionSavedHook,
   setPdfSaveAsInFlight,
 } from '../../../pdf/src/main/pdf-main'
 import { PDF_CHANNELS } from '../../../pdf/src/shared/ipc'
@@ -217,7 +233,6 @@ import {
   markdownFileRenamed,
   markdownReadText,
   markdownSaveToPath,
-  requestMarkdownClose,
   requestMarkdownSave,
   sendMarkdownExportRequest,
   sendMarkdownPrintRequest,
@@ -232,7 +247,6 @@ import {
   htmlReadText,
   htmlSaveToPath,
   registerPrivilegedSchemes,
-  requestHtmlClose,
   requestHtmlSave,
   sendHtmlExportRequest,
   sendHtmlPrintRequest,
@@ -253,7 +267,12 @@ import type {
   RecentEntry,
   RecentPage,
   RenameResult,
+  DocTheme,
   UiTheme,
+  FileSearchPage,
+  FileSearchQuery,
+  FileSearchRerank,
+  FileSearchSettings,
 } from '../shared/home-api'
 import { HOME_CHANNELS } from '../shared/home-api'
 import {
@@ -264,19 +283,31 @@ import {
 import type { TabKind } from '../shared/tabs-api'
 import { TABS_CHANNELS } from '../shared/tabs-api'
 import { showErrorDialog } from './error-dialog'
+import { startRendererWatchdog } from './renderer-watchdog'
 import {
+  capStatPaths,
   matchesExtFamily,
   normalizeRecentQuery,
   pageRecentPaths,
   statPathEntries,
 } from './recent-files'
-import { isSameFile, isValidRawRenameName } from './rename-validation'
+import { isMoveSource, isUserVisibleFile, type FileTargetSources } from './file-targets'
+import {
+  DOCX_RE,
+  HTML_RE,
+  PDF_RE,
+  PPTX_RE,
+  TEXT_RE,
+  XLSX_RE,
+  renameStaysInApp,
+} from './app-routing'
+import { isSameFile, pdfSaveAsTarget, isValidRawRenameName } from './rename-validation'
 import {
   FolderWatcher,
-  collectTreeFiles,
   createFolder,
   describeRoot,
   isInsideRoot,
+  pathsUnder,
   listFolder,
   movePathsInto,
   rebasePath,
@@ -284,8 +315,21 @@ import {
   uniqueNameIn,
   type FolderErrors,
 } from './folder-tree'
+import {
+  FOLDER_ROOTS_KEY,
+  describeExtraRoot,
+  readExtraRoots,
+  withExtraRoot,
+  withoutExtraRoot,
+} from './folder-roots'
+import extractWorkerPath from './file-index/extract-worker?modulePath'
+import { FileIndexer } from './file-index/indexer'
+import { FileIndexStore } from './file-index/store'
+import { normalizeFileSearchSettings, probeDecision, SearchReranker } from './file-index/rerank'
+import { listKnowledgeFiles, readKnowledgeFilePage, searchKnowledgeBase } from './knowledge-base'
 import { runHeadlessExport, type HeadlessExporters } from './headless-export'
 import { TabManager } from './tab-manager'
+import { installShellCloseGuard } from './window-close-guard'
 import {
   activateDetached,
   closeDetachedWithoutPrompt,
@@ -295,12 +339,21 @@ import {
   detachedRenameFile,
   detachedSetFileFor,
   detachedWebContentsFor,
+  detachedSetTitleFor,
   detachedWindowForWebContents,
+  dockBandFor,
+  dragTornWindow,
+  endTornDrag,
   findDetachedTabByPath,
   focusDetachedByPath,
   focusedDetachedKind,
+  focusedDetachedTab,
+  isDetachedEditorWindow,
   isDetachedTabId,
+  isTearingOff,
   setDetachedChangedListener,
+  setDockHost,
+  takeTornTab,
 } from './detached-windows'
 import { applyUpdateChannel, checkForUpdatesNow, initAutoUpdater } from './updater'
 import { isUpdateChannel, type UpdateChannel } from '../shared/update-api'
@@ -318,12 +371,23 @@ import { isUpdateChannel, type UpdateChannel } from '../shared/update-api'
 // share the installed app's userData or single-instance lock — otherwise a dev
 // run silently quits and forwards its argv to the running installed Nawa.
 // GENOFFICE_USER_DATA: test drivers point this at a scratch dir so an
-// automated instance can run alongside the user's installed app (separate lock).
-if (process.env.GENOFFICE_USER_DATA || !app.isPackaged)
-  app.setPath(
-    'userData',
-    process.env.GENOFFICE_USER_DATA ?? join(app.getPath('appData'), 'GenOffice Dev'),
-  )
+// A single profile path preserves Nawa settings and history across development updates.
+const userDataOverride = process.env.GENOFFICE_USER_DATA?.trim()
+if (userDataOverride) {
+  app.setPath('userData', userDataOverride)
+} else if (!app.isPackaged) {
+  const previousPath = join(app.getPath('appData'), 'Nawa Dev')
+  const currentPath = join(app.getPath('appData'), 'Nawa-Dev')
+  let profilePath = currentPath
+  if (existsSync(previousPath) && !existsSync(currentPath)) {
+    try {
+      renameSync(previousPath, currentPath)
+    } catch {
+      profilePath = previousPath
+    }
+  }
+  app.setPath('userData', profilePath)
+}
 
 /**
  * `--headless-export <file> --to <format> --out <path> [--json]`: one document, no
@@ -452,9 +516,12 @@ function currentLang(): Lang {
 }
 
 function persistLang(lang: Lang): void {
-  uiLang = lang
-  setUiLang(lang)
-  writeAppSetting(APP_SETTINGS_PATH(), 'language', lang)
+  // write first: app-settings.json can be unwritable, and a language committed to
+  // memory before the write survives only until the next launch
+  writeAppSettingThen(APP_SETTINGS_PATH(), 'language', lang, (persisted) => {
+    uiLang = persisted
+    setUiLang(persisted)
+  })
 }
 
 let cachedUpdateChannel: UpdateChannel | null = null
@@ -473,6 +540,15 @@ function currentTheme(): UiTheme {
   const saved = readAppSettings(APP_SETTINGS_PATH()).theme
   cachedTheme = saved === 'light' || saved === 'dark' ? saved : 'system'
   return cachedTheme
+}
+
+let cachedDocTheme: DocTheme | null = null
+
+function currentDocTheme(): DocTheme {
+  if (cachedDocTheme) return cachedDocTheme
+  const saved = readAppSettings(APP_SETTINGS_PATH()).documentTheme
+  cachedDocTheme = saved === 'light' || saved === 'dark' ? saved : 'follow'
+  return cachedDocTheme
 }
 
 let cachedAutoSaveDefault: AutoSaveDefault | null = null
@@ -512,6 +588,7 @@ function currentAiPanelPrefs(): AiPanelPrefs {
     fontSize: saved.aiPanelFontSize,
     customFontSize: saved.aiPanelCustomFontSize,
     spellcheck: saved.aiPanelSpellcheck,
+    openInNewDocs: saved.aiPanelOpenInNewDocs,
   })
   return cachedAiPanelPrefs
 }
@@ -585,7 +662,7 @@ function initAnalytics(): void {
 
 // ---- first-run onboarding ----
 // The GenTeam community page opened from the onboarding's second slide.
-// Stable short link served by the Nawa.ai site; it 302s to the tokened
+// Stable short link served by the upstream GenOffice site; it 302s to the tokened
 // invite link, which stays out of this repo and rotates server-side.
 const GENTEAM_URL = 'https://genoffice.ai/join'
 
@@ -603,12 +680,32 @@ let tabManager: TabManager | null = null
 
 /**
  * New file from a folder view: the click remembers the folder per kind, the
- * new-tab code consumes it right away. Sheets / PDF write their blank file
+ * new-tab code consumes it right away. PDF writes its blank file
  * straight into that folder; the editors that save untitled files themselves
- * (docs, slides, markdown, html) get the folder bound to the tab that was just
+ * (docs, sheets, slides, markdown, html) get the folder bound to the tab that was just
  * created, and the tab's first save moves the fresh file there.
  * key: 'doc' | 'sheet' | 'slide' | 'markdown' | 'html' | 'pdf'
  */
+/** folders the user added to the home tree beside the default save folder */
+function extraFolderRoots(): string[] {
+  return readExtraRoots(readAppSettings(APP_SETTINGS_PATH()), defaultSaveDir())
+}
+
+let workspaceAccess: ReturnType<typeof registerWorkspaceIpc> | null = null
+
+function folderRootPaths(): string[] {
+  return workspaceAccess ? [...workspaceAccess.paths()] : []
+}
+
+function insideAnyRoot(path: string): boolean {
+  return folderRootPaths().some((root) => isInsideRoot(root, path))
+}
+
+function isAnyRoot(path: string): boolean {
+  const key = resolve(path)
+  return folderRootPaths().some((root) => resolve(root) === key)
+}
+
 const pendingNewFileDir = new Map<string, { dir: string; setAt: number }>()
 /** folder bound to a freshly created editor tab, keyed by its webContents id; consumed by the first save */
 const pendingDirByWc = new Map<number, { dir: string; setAt: number }>()
@@ -617,8 +714,7 @@ const PENDING_DIR_TTL_MS = 30 * 60 * 1000
 
 function rememberPendingDir(kind: string, opts?: NewFileOpts): void {
   const dir = opts?.dir
-  const root = defaultSaveDir()
-  if (!dir || resolve(dir) === resolve(root) || !isInsideRoot(root, dir)) {
+  if (!dir || resolve(dir) === resolve(defaultSaveDir()) || !insideAnyRoot(dir)) {
     pendingNewFileDir.delete(kind)
     return
   }
@@ -703,26 +799,149 @@ function afterFileMoved(oldPath: string, newPath: string): void {
   }
 }
 
-/** a folder moved/renamed: re-key every file that lived under it */
+function trackedFilesUnder(dir: string): string[] {
+  return pathsUnder(dir, [
+    ...readRecentFiles(),
+    ...readStarredFiles(),
+    ...projectFilePaths(),
+    ...readSlidesRecentFiles(),
+    ...(tabManager?.openFilePaths() ?? []),
+    ...detachedFilePaths(),
+  ])
+}
+
+function statMaybeFile(path: string): { isFile: () => boolean } | null {
+  try {
+    return statSync(path)
+  } catch {
+    return null
+  }
+}
+
+function fileTargetSources(): FileTargetSources {
+  return {
+    insideAnyRoot: (p) => insideAnyRoot(p),
+    trackedPaths: [
+      ...readRecentFiles(),
+      ...readStarredFiles(),
+      ...projectFilePaths(),
+      ...readSlidesRecentFiles(),
+      ...(tabManager?.openFilePaths() ?? []),
+      ...detachedFilePaths(),
+    ],
+  }
+}
+
+/** a folder moved/renamed: re-key every tracked file that lived under it */
 function afterFolderMoved(oldDir: string, newDir: string, filesBefore: readonly string[]): void {
   for (const file of filesBefore) afterFileMoved(file, rebasePath(file, oldDir, newDir))
 }
 
-let folderWatcher: FolderWatcher | null = null
-let folderWatcherRoot = ''
+const folderWatchers = new Map<string, FolderWatcher>()
 
-/** (re)start the root watcher; the tree root follows the default save folder setting */
-function ensureFolderWatcher(): void {
-  const root = defaultSaveDir()
-  if (folderWatcher?.active && folderWatcherRoot === root) return
-  folderWatcher?.close()
-  folderWatcherRoot = root
-  // the home screen and every editor's Files pane listen
-  folderWatcher = new FolderWatcher(root, (dirs) => {
-    for (const wc of webContents.getAllWebContents()) {
-      if (!wc.isDestroyed()) wc.send(HOME_CHANNELS.folderChanged, dirs)
-    }
+let fileIndexStore: FileIndexStore | null = null
+let fileIndexer: FileIndexer | null = null
+let searchReranker: SearchReranker | null = null
+
+function readFileSearchSettings(): FileSearchSettings {
+  const settings = createAiSettingsStore(safeStorage).read<Record<string, unknown>>(
+    APP_SETTINGS_PATH(),
+    {},
+  )
+  return normalizeFileSearchSettings(settings.fileSearch)
+}
+
+/** the search index lives in userData and follows the save folder plus recents/starred */
+function ensureFileIndexer(): FileIndexer | null {
+  if (fileIndexer) return fileIndexer
+  try {
+    fileIndexStore = new FileIndexStore(join(app.getPath('userData'), 'file-index.db'))
+  } catch (e) {
+    console.warn('[file-index] unavailable:', e instanceof Error ? e.message : e)
+    return null
+  }
+  fileIndexer = new FileIndexer(fileIndexStore, extractWorkerPath, {
+    roots: () => folderRootPaths().filter((root) => existsSync(root)),
+    extraPaths: () => [...readRecentFiles(), ...readStarredFiles()],
   })
+  return fileIndexer
+}
+
+const SEARCH_EXT_FAMILY: Record<string, readonly string[]> = {
+  docx: ['docx', 'doc'],
+  xlsx: ['xlsx', 'xlsm', 'xls', 'csv', 'tsv'],
+  pptx: ['pptx', 'ppt'],
+  md: ['md', 'markdown', 'txt', 'json'],
+  html: ['html', 'htm'],
+}
+
+/** one recursive watcher per tree root; follows the save-folder setting and the added folders */
+function ensureFolderWatchers(): void {
+  const wanted = new Set(folderRootPaths().filter((root) => existsSync(root)))
+  for (const [root, watcher] of folderWatchers) {
+    if (wanted.has(root) && watcher.active) continue
+    watcher.close()
+    folderWatchers.delete(root)
+  }
+  for (const root of wanted) {
+    if (folderWatchers.has(root)) continue
+    const watcher = new FolderWatcher(root, (dirs) => {
+      fileIndexer?.refresh()
+      for (const wc of webContents.getAllWebContents()) {
+        if (!wc.isDestroyed()) wc.send(HOME_CHANNELS.folderChanged, dirs)
+      }
+    })
+    folderWatchers.set(root, watcher)
+  }
+}
+
+/**
+ * Put the manual in whatever menu is currently installed.
+ *
+ * Every tab kind builds its own application menu, which is how File and Edit
+ * stay tab-shaped — and which is also why an item added to one builder is
+ * missing from the other six. F1 worked from Home and nowhere else, and the
+ * manual's own shortcut table was wrong for six of the seven tab kinds.
+ *
+ * Injecting after the builder has run is the one place that cannot be
+ * forgotten: a new tab kind gets the manual for free, and a builder that
+ * already has it is left alone rather than getting a second copy.
+ */
+function withUserGuide(): void {
+  const menu = Menu.getApplicationMenu()
+  if (!menu) return
+  const userGuide = {
+    label: tm('menuUserGuide'),
+    accelerator: 'F1',
+    click: () => tabManager?.openHelpTab(),
+  }
+  const help = menu.items.find((item) => item.role === 'help')
+  // Slides and Sheets build a File/Edit/View template with no Help menu at
+  // all, so there is nothing to insert into — one is created instead. Without
+  // this the manual would be reachable from four of the seven tab kinds.
+  if (!help) {
+    menu.append(
+      Menu.buildFromTemplate([{ role: 'help', label: tm('menuHelp'), submenu: [userGuide] }])
+        .items[0]!,
+    )
+    return
+  }
+  const submenu = help.submenu
+  if (!submenu || submenu.items.some((i) => i.accelerator === 'F1')) return
+  // A separator survives a template only *between* two real items — Electron
+  // drops one at either end, so `[userGuide, separator]` builds a single item
+  // and the destructure below used to hand `undefined` to `insert`, which threw
+  // "Invalid item" and took the main process down on the next tab switch. The
+  // third entry is filler, discarded; the type check is what stops this from
+  // silently regressing if Electron's rule ever changes again.
+  const [item, separator] = Menu.buildFromTemplate([
+    userGuide,
+    { type: 'separator' },
+    { role: 'undo' },
+  ]).items
+  if (!item) return
+  submenu.insert(0, item)
+  if (separator?.type === 'separator') submenu.insert(1, separator)
 }
 
 function applyMenuFor(kind: TabKind): void {
@@ -748,6 +967,7 @@ function applyMenuFor(kind: TabKind): void {
     default:
       buildHomeMenu()
   }
+  withUserGuide()
 }
 
 function refreshTitleBarOverlay(): void {
@@ -788,8 +1008,13 @@ function createShellWindow(): void {
   // DOM event anywhere — will-move is the only signal to dismiss popovers
   win.on('will-move', () => broadcastChromePressed())
   // A detached editor window claims the process-global menu/active-editor targets
-  // while focused; take them back when the shell window regains focus
-  win.on('focus', () => tabManager?.refreshActiveTargets())
+  // while focused; take them back when the shell window regains focus. Keyboard
+  // focus must land back on the active tab's view too — regaining window focus
+  // gives it to the chrome webContents, leaving typing dead in the document.
+  win.on('focus', () => {
+    tabManager?.refreshActiveTargets()
+    tabManager?.focusActiveView()
+  })
 
   const manager = new TabManager(
     win,
@@ -801,17 +1026,39 @@ function createShellWindow(): void {
     // no extension: these tabs have no file on disk yet; the title becomes the
     // real filename (the localized untitled default + .docx etc.) once the first save lands
     (kind) =>
-      kind === 'docs'
-        ? tm('untitledDoc')
-        : kind === 'slides'
-          ? tm('untitledDeck')
-          : kind === 'markdown'
-            ? tm('untitledMarkdown')
-            : kind === 'html'
-              ? tm('untitledHtml')
-              : tm('untitledSheet'),
+      kind === 'help'
+        ? tm('menuUserGuide')
+        : kind === 'docs'
+          ? tm('untitledDoc')
+          : kind === 'slides'
+            ? tm('untitledDeck')
+            : kind === 'markdown'
+              ? tm('untitledMarkdown')
+              : kind === 'html'
+                ? tm('untitledHtml')
+                : tm('untitledSheet'),
   )
   tabManager = manager
+
+  // Docking: a detached window dragged over this window's tab strip hands its
+  // document back. The strip reports the insertion slot for each preview
+  // (lastDockIndex); the slot is consumed by the dock that follows.
+  setDockHost({
+    band: () => dockBandFor(win),
+    preview: (x) => {
+      if (!win.isDestroyed())
+        win.webContents.send(TABS_CHANNELS.dockPreview, x === null ? null : { x })
+    },
+    dock: (tab) => {
+      const index = lastDockIndex
+      lastDockIndex = undefined
+      if (!win.isDestroyed()) win.webContents.send(TABS_CHANNELS.dockPreview, null)
+      manager.attachTab(tab, index)
+      if (win.isMinimized()) win.restore()
+      win.show()
+      win.focus()
+    },
+  })
 
   // pushRecent-triggered docs menu rebuilds must not clobber the active tab's
   // menu; a focused detached docs window owns the menu just like an active tab
@@ -825,10 +1072,11 @@ function createShellWindow(): void {
   setDocsHostWindowHook((wc) => detachedWindowForWebContents(wc.id))
   setSheetsHostWindowHook((wc) => detachedWindowForWebContents(wc.id))
   setSlidesShellWindow(win)
+  setSlidesHostWindowHook((wc) => detachedWindowForWebContents(wc.id))
   setSlidesShowBleed((wc, on) => manager.setContentBleed(wc, on))
   setHtmlPresentHooks({
     setBleed: (wc, on) => manager.setContentBleed(wc, on),
-    hostWindow: () => win,
+    hostWindow: (wc) => detachedWindowForWebContents(wc.id) ?? win,
     openTab: (owner, title) => {
       manager.openHtmlPresentTab(owner, title)
       return true
@@ -879,6 +1127,7 @@ function createShellWindow(): void {
   })
   setSlidesOpenedHook((wc, path) => {
     manager.setTabFileFor(wc.id, path)
+    detachedSetFileFor(wc.id, path)
     recordRecentFile(path)
     applyPendingDir(wc.id, path)
   })
@@ -887,7 +1136,7 @@ function createShellWindow(): void {
     manager.setTabFileFor(wc.id, path)
     detachedSetFileFor(wc.id, path)
     recordRecentFile(path)
-    applyPendingDir(wc.id, path)
+    return applyPendingDir(wc.id, path)
   })
   // ⌘O / open-path inside a docs tab: sync the tab title immediately, same
   // contract as the sheets/slides opened hooks (a plain save to the original
@@ -901,18 +1150,31 @@ function createShellWindow(): void {
   // markdown untitled first save / Save As lands on a new path
   setMarkdownFileSavedHook((wc, path) => {
     manager.setTabFileFor(wc.id, path)
+    detachedSetFileFor(wc.id, path)
     recordRecentFile(path)
     applyPendingDir(wc.id, path)
   })
   setHtmlFileSavedHook((wc, path) => {
     manager.setTabFileFor(wc.id, path)
+    detachedSetFileFor(wc.id, path)
     recordRecentFile(path)
     applyPendingDir(wc.id, path)
   })
-  setHtmlProvisionalTitleHook((wc, title) => manager.setTabTitleFor(wc.id, title))
+  setHtmlProvisionalTitleHook((wc, title) => {
+    manager.setTabTitleFor(wc.id, title)
+    detachedSetTitleFor(wc.id, title)
+  })
+  // A redacted copy becomes this tab's document; the source still exists.
+  setPdfRedactionSavedHook((wc, path) => {
+    manager.setTabFileFor(wc.id, path)
+    detachedSetFileFor(wc.id, path)
+    recordRecentFile(path)
+    applyPendingDir(wc.id, path)
+  })
   // pdf content-derived auto-rename: the file moved on disk, follow it everywhere
   setPdfRenamedHook((wc, oldPath, newPath) => {
     manager.setTabFileFor(wc.id, newPath)
+    detachedSetFileFor(wc.id, newPath)
     replaceRecentFile(oldPath, newPath)
     projectFileRenamed(oldPath, newPath)
   })
@@ -936,63 +1198,15 @@ function createShellWindow(): void {
   })
 
   // Closing the whole window walks every dirty sheets/pdf/slides/docs tab through
-  // the same save/don't-save/cancel prompt; any cancel aborts the close.
-  // docs dirtiness lives renderer-side, so any live docs tab forces the async path
-  // and gets queried there (clean tabs pass through without activation).
-  let closeConfirmed = false
-  win.on('close', (event) => {
-    if (closeConfirmed) return
-    const dirtySheets = manager.dirtySheetsTabs()
-    const dirtyPdf = manager.dirtyPdfTabs()
-    const dirtyMarkdown = manager.dirtyMarkdownTabs()
-    const dirtyHtml = manager.dirtyHtmlTabs()
-    const dirtySlides = manager.dirtySlidesTabs()
-    const docsTabs = manager.docsTabs()
-    if (
-      dirtySheets.length === 0 &&
-      dirtyPdf.length === 0 &&
-      dirtyMarkdown.length === 0 &&
-      dirtyHtml.length === 0 &&
-      dirtySlides.length === 0 &&
-      docsTabs.length === 0
-    )
-      return
-    event.preventDefault()
-    void (async () => {
-      for (const tab of dirtySheets) {
-        manager.activateTab(tab.id)
-        if (!(await requestSheetsClose(tab.webContents, win))) return
-      }
-      for (const tab of dirtyPdf) {
-        manager.activateTab(tab.id)
-        if (!(await requestPdfClose(tab.webContents, win))) return
-      }
-      for (const tab of dirtyMarkdown) {
-        manager.activateTab(tab.id)
-        if (!(await requestMarkdownClose(tab.webContents, win))) return
-      }
-      for (const tab of dirtyHtml) {
-        manager.activateTab(tab.id)
-        if (!(await requestHtmlClose(tab.webContents, win))) return
-      }
-      for (const tab of dirtySlides) {
-        manager.activateTab(tab.id)
-        if (!(await requestSlidesClose(tab.webContents, win))) return
-      }
-      for (const tab of docsTabs) {
-        if (!(await docsQueryDirty(tab.webContents))) continue
-        manager.activateTab(tab.id)
-        if (!(await requestDocsClose(tab.webContents, win))) return
-      }
-      closeConfirmed = true
-      if (!win.isDestroyed()) win.close()
-    })()
-  })
+  // the same save/don't-save/cancel prompt; any cancel aborts the close. An
+  // all-clean close is left untouched, so ⌘Q keeps quitting the app.
+  installShellCloseGuard(win, manager)
 
   win.on('closed', () => {
     if (shellWindow === win) shellWindow = null
     if (tabManager === manager) {
       tabManager = null
+      setDockHost(null)
       publishAllOpenDocuments()
     }
   })
@@ -1006,16 +1220,6 @@ function createShellWindow(): void {
 
 // ---- routing: one dispatch function for every open path ----
 
-const DOCX_RE = /\.docx$/i
-const XLSX_RE = /\.(xlsx|xlsm|xls|csv)$/i
-const PPTX_RE = /\.pptx$/i
-const PDF_RE = /\.pdf$/i
-const MD_RE = /\.(md|markdown)$/i
-const HTML_RE = /\.html?$/i
-
-/** document formats we recognize but don't open — surfaced as a dialog, not silently dropped */
-const UNSUPPORTED_DOC_RE = /\.(doc|rtf|odt|ppt|pps|odp|ods|xlsb|pages|key|numbers)$/i
-
 /**
  * Single source of truth for the open-dialog filter. Includes the
  * legacy .doc/.ppt binaries so they are selectable and surface the explicit
@@ -1028,33 +1232,17 @@ const OPEN_DIALOG_EXTENSIONS = [
   'xlsm',
   'xls',
   'csv',
+  'tsv',
   'pptx',
   'ppt',
   'pdf',
   'md',
   'markdown',
+  'txt',
+  'json',
   'html',
   'htm',
 ]
-
-function supportedFileIn(argv: string[]): string | null {
-  return (
-    argv.find(
-      (arg) =>
-        (DOCX_RE.test(arg) ||
-          XLSX_RE.test(arg) ||
-          PPTX_RE.test(arg) ||
-          PDF_RE.test(arg) ||
-          MD_RE.test(arg) ||
-          HTML_RE.test(arg)) &&
-        existsSync(arg),
-    ) ?? null
-  )
-}
-
-function unsupportedFileIn(argv: string[]): string | null {
-  return argv.find((arg) => UNSUPPORTED_DOC_RE.test(arg) && existsSync(arg)) ?? null
-}
 
 function notifyUnsupportedFile(filePath: string): void {
   const ext = extname(filePath).slice(1).toLowerCase() || basename(filePath)
@@ -1078,14 +1266,16 @@ function showAppWarning(message: string): void {
  * and route through the normal File > Open pipeline; detached editor windows
  * can host the drop target, so the shell must reveal itself after opening.
  */
+const droppedFilesDeps = () => ({
+  openDocumentPath,
+  revealShellWindow,
+  showWarning: showAppWarning,
+  unsupportedMessage: (exts: string[]) => tm('errUnsupportedExt', { ext: exts.join(', ') }),
+})
+
 function registerDroppedFilesIpc(): void {
   ipcMain.on(DROP_OPEN_CHANNEL, (_event, raw: unknown) =>
-    handleDroppedFiles(raw, {
-      openDocumentPath,
-      revealShellWindow,
-      showWarning: showAppWarning,
-      unsupportedMessage: (exts) => tm('errUnsupportedExt', { ext: exts.join(', ') }),
-    }),
+    handleDroppedFiles(raw, droppedFilesDeps()),
   )
 }
 
@@ -1159,7 +1349,7 @@ function routeDocumentPath(filePath: string): boolean {
     else tabManager.openPdfTab(filePath)
     return true
   }
-  if (MD_RE.test(filePath)) {
+  if (TEXT_RE.test(filePath)) {
     recordRecentFile(filePath)
     const existing = tabManager.findMarkdownTabByPath(filePath)
     if (existing) tabManager.activateTab(existing)
@@ -1178,30 +1368,62 @@ function routeDocumentPath(filePath: string): boolean {
 }
 
 /**
- * "New spreadsheet" creates the backing .xlsx in the default folder up front and
- * opens it as a regular file tab — the blank in-memory demo mode has no save
- * pipeline, so the file must exist before edits. Falls back to the old blank
- * tab if the write fails.
+ * "New spreadsheet" no longer drops a file in the default folder up front: the
+ * blank workbook is created in a temp directory and its first Save goes through
+ * Save As (the same path an .xls/.tsv import takes), so a new tab that is
+ * closed without saving leaves nothing behind to delete by hand — the temp
+ * directory is discarded with the session. The save pipeline still needs a real
+ * file to edit, hence the backing workbook rather than the in-memory blank grid.
+ * Falls back to a file in the default folder, then to the in-memory blank tab.
  */
-async function newSheetTab(): Promise<void> {
+async function newSheetTab(recoverAs?: string): Promise<void> {
+  // recoverAs: the would-be path of a new workbook whose recovery copy
+  // survived a crash; the sheets module offers it under that name
+  const dir = newFileDir('sheet')
+  let suggestedPath = recoverAs ?? uniquePathIn(dir, `${tm('untitledSheet')}.xlsx`)
+  // nothing is on disk yet, so two new tabs would otherwise be promised the same name
+  for (let i = 2; !recoverAs && sheetsSuggestedPathTaken(suggestedPath); i++)
+    suggestedPath = uniquePathIn(dir, `${tm('untitledSheet')} ${i}.xlsx`)
   try {
-    const filePath = uniquePathIn(newFileDir('sheet'), `${tm('untitledSheet')}.xlsx`)
-    writeFileSync(filePath, await blankXlsxBuffer())
+    // under the import root so the session-close cleanup removes it like an import copy
+    const tempDir = join(app.getPath('temp'), 'genoffice-imports', randomUUID())
+    mkdirSync(tempDir, { recursive: true })
+    const backingPath = join(tempDir, basename(suggestedPath))
+    // reserve the name before the first await so a second new tab picks another;
+    // the first Save As starts from the name the file would have had
+    markSheetsUnsavedNew(backingPath, suggestedPath, tempDir)
+    try {
+      await atomicWriteFile(backingPath, await blankXlsxBuffer())
+    } catch (err) {
+      unmarkSheetsUnsavedNew(backingPath)
+      throw err
+    }
     // eligible for content-derived auto-rename after the first AI generation
-    markSheetsUntitledPath(filePath)
-    // route directly (not via openDocumentPath) so creating a sheet emits
-    // only file_new — the file_open event is reserved for opening existing files
+    markSheetsUntitledPath(backingPath)
     if (!tabManager) throw new Error('Nawa is not ready')
-    tabManager.openSheetsTab(filePath)
+    tabManager.openSheetsTab(backingPath)
     startQueuedWorkbookNudge()
-    recordRecentFile(filePath)
+    // no recent-file entry yet: there is no user-visible file until it is saved
     analytics.track('file_new', { kind: 'xlsx' })
   } catch (err) {
-    console.warn('[shell] blank workbook create failed, opening in-memory blank tab:', err)
+    console.warn('[shell] temp workbook create failed, writing to the default folder:', err)
     try {
-      tabManager?.openSheetsTab(undefined, { newBlank: true })
+      await atomicWriteFile(suggestedPath, await blankXlsxBuffer())
+      markSheetsUntitledPath(suggestedPath)
+      // route directly (not via openDocumentPath) so creating a sheet emits
+      // only file_new — the file_open event is reserved for opening existing files
+      routeDocumentPath(suggestedPath)
+      analytics.track('file_new', { kind: 'xlsx' })
     } catch (fallbackErr) {
-      surfaceNewTabError(fallbackErr)
+      console.warn(
+        '[shell] blank workbook create failed, opening in-memory blank tab:',
+        fallbackErr,
+      )
+      try {
+        tabManager?.openSheetsTab(undefined, { newBlank: true })
+      } catch (finalErr) {
+        surfaceNewTabError(finalErr)
+      }
     }
   }
 }
@@ -1247,7 +1469,7 @@ function openBlankDocsTabForMcp(): number {
 async function openBlankSheetsTabForMcp(): Promise<number> {
   if (!tabManager) throw new Error('Nawa is not ready')
   const filePath = uniquePathIn(defaultSaveDir(), `${tm('untitledSheet')}.xlsx`)
-  writeFileSync(filePath, await blankXlsxBuffer())
+  await atomicWriteFile(filePath, await blankXlsxBuffer())
   const tabId = tabManager.openSheetsTab(filePath)
   const view = tabManager.sheetsTabs().find((t) => t.id === tabId)
   if (!view) {
@@ -1358,7 +1580,7 @@ function newHtmlTab(): void {
 async function newPdfTab(): Promise<void> {
   try {
     const filePath = uniquePathIn(newFileDir('pdf'), `${tm('untitledPdf')}.pdf`)
-    writeFileSync(filePath, await blankPdfBuffer())
+    await atomicWriteFile(filePath, await blankPdfBuffer())
     // Opt the file into content-derived auto-naming on its first save
     markPdfUntitledPath(filePath)
     // route directly (not via openDocumentPath) so creating a pdf emits only
@@ -1408,7 +1630,7 @@ function statEntries(paths: string[]): RecentEntry[] {
 }
 
 function registerHomeIpc(): void {
-  const workspaces = registerWorkspaceIpc({
+  const workspaces = (workspaceAccess = registerWorkspaceIpc({
     initialRoot: defaultSaveDir,
     getWindow: () => shellWindow,
     // Home is rendered in the shell window; its TabRecord intentionally has no view.
@@ -1416,7 +1638,12 @@ function registerHomeIpc(): void {
       !shellWindow?.isDestroyed() && shellWindow?.webContents.id === sender.id,
     readFile: readWorkspaceFileText,
     starredPaths: () => new Set(readStarredFiles()),
-  })
+    rootsChanged: () => {
+      ensureFolderWatchers()
+      ensureFileIndexer()?.refresh()
+    },
+    contentsChanged: () => fileIndexer?.refresh(),
+  }))
   // signed-in means Nawa's own device-code login; the shared gsk CLI key
   // is only a silent fallback, deliberately not shown here to nudge users onto our key
   ipcMain.handle(HOME_CHANNELS.accountStatus, async () => {
@@ -1472,10 +1699,158 @@ function registerHomeIpc(): void {
     pageRecentPaths(readRecentFiles(), query, new Set(readStarredFiles())),
   )
 
+  ipcMain.handle(HOME_CHANNELS.searchFiles, (_event, raw: unknown): FileSearchPage => {
+    assertDirectoryStagePicker(_event.sender)
+    const query = (raw && typeof raw === 'object' ? raw : {}) as Partial<FileSearchQuery>
+    const indexer = ensureFileIndexer()
+    if (!indexer || !fileIndexStore) {
+      return { hits: [], total: 0, index: { indexed: 0, pending: 0, scanning: false } }
+    }
+    // an open search box is the moment a stale index shows; rescan at most once a minute
+    indexer.refreshIfStale(60_000)
+    const q = typeof query.q === 'string' ? query.q.trim().slice(0, 200) : ''
+    const filter = typeof query.ext === 'string' ? query.ext : ''
+    const exts = filter && filter !== 'all' ? (SEARCH_EXT_FAMILY[filter] ?? [filter]) : undefined
+    const offset = Number.isFinite(query.offset) ? Math.max(0, Math.floor(query.offset!)) : 0
+    const limit = Number.isFinite(query.limit) ? Math.max(0, Math.floor(query.limit!)) : 50
+    const starred = new Set(readStarredFiles())
+    const explicitFiles = new Set([...readRecentFiles(), ...starred])
+    const result = q
+      ? fileIndexStore.search(q, {
+          exts,
+          offset,
+          limit,
+          allowPath: (path) => explicitFiles.has(path) || workspaces.contains(path),
+        })
+      : { hits: [], total: 0 }
+    return {
+      hits: result.hits.map((h) => ({ ...h, starred: starred.has(h.path) })),
+      total: result.total,
+      index: indexer.progress(),
+    }
+  })
+
+  // Knowledge-base channel: the AI-side read access to the reader's starred
+  // files (docs wires these into its panel; see knowledge-base.ts). Path
+  // arguments are validated against the starred set — a corpus file is the
+  // only thing a knowledge tool may read.
+  ipcMain.handle('kb:list', (event): unknown => {
+    assertDirectoryStagePicker(event.sender)
+    return listKnowledgeFiles(readStarredFiles())
+  })
+
+  ipcMain.handle('kb:search', (_event, raw: unknown): unknown => {
+    assertDirectoryStagePicker(_event.sender)
+    const query = (raw && typeof raw === 'object' ? raw : {}) as { q?: unknown; limit?: unknown }
+    const q = typeof query.q === 'string' ? query.q : ''
+    const limitRaw = Number(query.limit)
+    const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.floor(limitRaw)) : 8
+    if (!q.trim()) return []
+    ensureFileIndexer()?.refreshIfStale(60_000)
+    const store = fileIndexStore
+    if (!store) return []
+    const starred = readStarredFiles()
+    const corpus = new Set(starred)
+    const hits = searchKnowledgeBase(
+      (qq, pool) =>
+        store.search(qq, { limit: pool, allowPath: (path) => corpus.has(path) }).hits.map((h) => ({
+          path: h.path,
+          name: h.name,
+          ext: h.ext,
+          snippetText: (h.snippet ?? []).map((part) => part.text).join(''),
+        })),
+      q,
+      starred,
+      Math.min(limit, 20),
+    )
+    return hits
+  })
+
+  ipcMain.handle('kb:read', async (_event, raw: unknown): Promise<unknown> => {
+    assertDirectoryStagePicker(_event.sender)
+    const req = (raw && typeof raw === 'object' ? raw : {}) as {
+      path?: unknown
+      offset?: unknown
+    }
+    const path = typeof req.path === 'string' ? req.path : ''
+    const offsetRaw = Number(req.offset)
+    const offset = Number.isFinite(offsetRaw) ? Math.floor(offsetRaw) : 0
+    if (!path || !readStarredFiles().includes(path)) {
+      throw new Error('path is not in the knowledge base')
+    }
+    const page = await readKnowledgeFilePage(path, offset)
+    assertDirectoryStagePicker(_event.sender)
+    if (!readStarredFiles().includes(path))
+      throw new Error('path is no longer in the knowledge base')
+    return page
+  })
+
+  ipcMain.handle(
+    HOME_CHANNELS.rerankSearch,
+    async (_event, raw: unknown): Promise<FileSearchRerank | null> => {
+      assertDirectoryStagePicker(_event.sender)
+      const settings = readFileSearchSettings()
+      if (!settings.rerank) return null
+      const query = (raw && typeof raw === 'object' ? raw : {}) as { q?: unknown; paths?: unknown }
+      const q = typeof query.q === 'string' ? query.q.trim().slice(0, 200) : ''
+      const explicitFiles = new Set([...readRecentFiles(), ...readStarredFiles()])
+      const paths = Array.isArray(query.paths)
+        ? query.paths
+            .filter(
+              (p): p is string =>
+                typeof p === 'string' && (explicitFiles.has(p) || workspaces.contains(p)),
+            )
+            .slice(0, 20)
+        : []
+      if (!q || paths.length < 2 || !ensureFileIndexer() || !fileIndexStore) return null
+      searchReranker ??= new SearchReranker(fileIndexStore)
+      return searchReranker.rerank(q, paths, settings)
+    },
+  )
+
+  ipcMain.handle(HOME_CHANNELS.getFileSearchSettings, (event): FileSearchSettings => {
+    assertDirectoryStagePicker(event.sender)
+    return readFileSearchSettings()
+  })
+
+  ipcMain.handle(
+    HOME_CHANNELS.setFileSearchSettings,
+    (_event, patch: unknown): FileSearchSettings => {
+      assertDirectoryStagePicker(_event.sender)
+      const current = readFileSearchSettings()
+      const p = (patch && typeof patch === 'object' ? patch : {}) as Partial<FileSearchSettings>
+      const next = normalizeFileSearchSettings({
+        ...current,
+        ...p,
+        keys: { ...current.keys, ...(p.keys ?? {}) },
+      })
+      const store = createAiSettingsStore(safeStorage)
+      const settings = store.read<Record<string, unknown>>(APP_SETTINGS_PATH(), {})
+      store.write(APP_SETTINGS_PATH(), { ...settings, fileSearch: next })
+      return next
+    },
+  )
+
+  ipcMain.handle(HOME_CHANNELS.testFileSearchRerank, (_event, input: unknown) => {
+    assertDirectoryStagePicker(_event.sender)
+    return probeDecision(normalizeFileSearchSettings(input))
+  })
+
   // Starred files sort by mtime, which requires stat-ing them all first; they are hand-picked and few, so this is fine
   ipcMain.handle(HOME_CHANNELS.starred, (_event, query: unknown): RecentPage => {
     const { offset, limit, ext } = normalizeRecentQuery(query)
-    const all = statEntries(readStarredFiles()).sort((a, b) => b.mtimeMs - a.mtimeMs)
+    // the Starred view's group pills scope the whole query (totals included)
+    const raw = (query && typeof query === 'object' ? query : {}) as { group?: unknown }
+    const group = typeof raw.group === 'string' && raw.group ? raw.group : undefined
+    const groupOf = readStarredGroupMap()
+    const paths = readStarredFiles()
+    const scoped = group ? paths.filter((p) => groupOf.get(p) === group) : paths
+    const all = statEntries(scoped)
+      .sort((a, b) => b.mtimeMs - a.mtimeMs)
+      .map((entry) => {
+        const g = groupOf.get(entry.path)
+        return g ? { ...entry, group: g } : entry
+      })
     const filtered = ext ? all.filter((entry) => matchesExtFamily(entry.ext, ext)) : all
     return {
       entries: limit === 0 ? [] : filtered.slice(offset, offset + limit),
@@ -1484,8 +1859,14 @@ function registerHomeIpc(): void {
     }
   })
 
+  ipcMain.handle(HOME_CHANNELS.starredGroups, (): string[] => readStarredGroups())
+
+  ipcMain.handle(HOME_CHANNELS.setStarredGroup, (_event, paths: unknown, group: unknown) => {
+    setStarredGroup(stringPaths(paths), typeof group === 'string' && group ? group : null)
+  })
+
   ipcMain.handle(HOME_CHANNELS.statPaths, (_event, paths: unknown): RecentEntry[] =>
-    statEntries(stringPaths(paths)),
+    statEntries(capStatPaths(stringPaths(paths))),
   )
 
   ipcMain.handle(HOME_CHANNELS.toggleStar, (_event, path: unknown) => {
@@ -1493,8 +1874,10 @@ function registerHomeIpc(): void {
   })
 
   ipcMain.handle(HOME_CHANNELS.openPath, (_event, path: unknown) => {
+    assertDirectoryStagePicker(_event.sender)
     if (typeof path !== 'string' || !path || path.length > 4096) return
     openDocumentPath(path)
+    fileIndexer?.refresh()
   })
 
   ipcMain.handle(HOME_CHANNELS.browse, async (event) => {
@@ -1505,10 +1888,10 @@ function registerHomeIpc(): void {
       filters: [
         { name: tm('filterSupported'), extensions: OPEN_DIALOG_EXTENSIONS },
         { name: tm('filterWord'), extensions: ['docx', 'doc'] },
-        { name: tm('filterExcel'), extensions: ['xlsx', 'xlsm', 'xls', 'csv'] },
+        { name: tm('filterExcel'), extensions: ['xlsx', 'xlsm', 'xls', 'csv', 'tsv'] },
         { name: tm('filterPpt'), extensions: ['pptx', 'ppt'] },
         { name: tm('filterPdf'), extensions: ['pdf'] },
-        { name: tm('filterMarkdown'), extensions: ['md', 'markdown'] },
+        { name: tm('filterMarkdown'), extensions: ['md', 'markdown', 'txt', 'json'] },
         { name: tm('filterHtml'), extensions: ['html', 'htm'] },
       ],
       properties: ['openFile', 'multiSelections'],
@@ -1554,6 +1937,14 @@ function registerHomeIpc(): void {
     removeStarredFiles(list.filter((p) => !existsSync(p)))
   })
 
+  // Bulk unstar from the Starred view: every row there is a favorite, so the
+  // selection action is "unstar", not "remove from recents" — removeRecent
+  // keeps existing files' stars on purpose, which made the Starred view's
+  // bulk removal a no-op for anything still on disk
+  ipcMain.handle(HOME_CHANNELS.unstarPaths, (_event, paths: unknown) => {
+    removeStarredFiles(stringPaths(paths))
+  })
+
   ipcMain.handle(HOME_CHANNELS.revealPath, (_event, path: unknown) => {
     if (typeof path === 'string' && existsSync(path)) shell.showItemInFolder(path)
   })
@@ -1569,6 +1960,10 @@ function registerHomeIpc(): void {
       // with the localized gate instead of renaming to a different
       // name than requested.
       if (!isValidRawRenameName(newName)) return { ok: false, error: tm('errBadName') }
+      if (!renameStaysInApp(path, newName.trim()))
+        return { ok: false, error: tm('errBadExtension') }
+      if (!isUserVisibleFile(path, fileTargetSources()))
+        return { ok: false, error: tm('errBadArgs') }
       const name = newName.trim()
       if (!existsSync(path)) return { ok: false, error: tm('errMissing') }
       const target = join(dirname(path), name)
@@ -1588,22 +1983,32 @@ function registerHomeIpc(): void {
     },
   )
 
-  ipcMain.handle(HOME_CHANNELS.duplicateFile, (_event, path: unknown) => {
+  ipcMain.handle(HOME_CHANNELS.duplicateFile, async (_event, path: unknown) => {
     if (typeof path !== 'string' || !existsSync(path)) return
+    if (!isUserVisibleFile(path, fileTargetSources())) return
     const ext = extname(path)
     const base = basename(path, ext)
     const dir = dirname(path)
     for (let i = 1; ; i++) {
       const target = join(dir, `${base} ${tm('copySuffix')}${i === 1 ? '' : ` ${i}`}${ext}`)
       if (existsSync(target)) continue
-      copyFileSync(path, target)
+      try {
+        await atomicCopyFile(path, target)
+      } catch (err) {
+        showErrorDialog(shellWindow, tm('errDuplicateFailed'), err)
+        return
+      }
       recordRecentFile(target)
       return
     }
   })
 
   ipcMain.handle(HOME_CHANNELS.deleteFiles, async (_event, paths: unknown) => {
-    const list = stringPaths(paths)
+    const targets = fileTargetSources()
+    // a missing path still passes so the ghost recent/star entry gets cleaned up
+    const list = stringPaths(paths).filter(
+      (p) => isUserVisibleFile(p, targets) && statMaybeFile(p)?.isFile() !== false,
+    )
     const removed: string[] = []
     const failed: string[] = []
     for (const p of list) {
@@ -1630,6 +2035,9 @@ function registerHomeIpc(): void {
     }
   })
 
+  ipcMain.handle(HOME_CHANNELS.openHelp, () => {
+    tabManager?.openHelpTab()
+  })
   ipcMain.handle(HOME_CHANNELS.getLanguage, (): Lang => currentLang())
 
   ipcMain.handle(HOME_CHANNELS.setLanguage, (_event, lang: unknown) => {
@@ -1677,6 +2085,19 @@ function registerHomeIpc(): void {
     nativeTheme.themeSource = theme
     refreshTitleBarOverlay()
     for (const wc of webContents.getAllWebContents()) wc.send('app:theme-changed', theme)
+  })
+
+  ipcMain.handle(HOME_CHANNELS.getDocumentTheme, (): DocTheme => currentDocTheme())
+  // editor tabs ask via the app-wide channel (symmetric with app:get-theme)
+  ipcMain.handle('app:get-document-theme', (): DocTheme => currentDocTheme())
+
+  ipcMain.handle(HOME_CHANNELS.setDocumentTheme, (_event, theme: unknown) => {
+    if (theme !== 'light' && theme !== 'dark' && theme !== 'follow') return
+    if (theme === currentDocTheme()) return
+    cachedDocTheme = theme
+    writeAppSetting(APP_SETTINGS_PATH(), 'documentTheme', theme)
+    // the native theme is untouched — only the editors' canvas/paper follows this
+    for (const wc of webContents.getAllWebContents()) wc.send('app:document-theme-changed', theme)
   })
 
   ipcMain.handle(HOME_CHANNELS.getAutoSaveDefault, (): AutoSaveDefault => currentAutoSaveDefault())
@@ -1762,6 +2183,7 @@ function registerHomeIpc(): void {
       fontSize: 'fontSize' in raw ? raw.fontSize : prev.fontSize,
       customFontSize: 'customFontSize' in raw ? raw.customFontSize : prev.customFontSize,
       spellcheck: 'spellcheck' in raw ? raw.spellcheck : prev.spellcheck,
+      openInNewDocs: 'openInNewDocs' in raw ? raw.openInNewDocs : prev.openInNewDocs,
     })
     if (sameAiPanelPrefs(next, prev)) return prev
     cachedAiPanelPrefs = next
@@ -1770,12 +2192,19 @@ function registerHomeIpc(): void {
       aiPanelFontSize: next.fontSize,
       aiPanelCustomFontSize: next.customFontSize,
       aiPanelSpellcheck: next.spellcheck,
+      aiPanelOpenInNewDocs: next.openInNewDocs,
     })
     for (const wc of webContents.getAllWebContents()) wc.send('app:ai-panel-prefs-changed', next)
     return next
   }
-  ipcMain.handle(HOME_CHANNELS.setAiPanelPrefs, (_event, patch) => setAiPanelPrefs(patch))
-  ipcMain.handle('app:set-ai-panel-prefs', (_event, patch) => setAiPanelPrefs(patch))
+  ipcMain.handle(HOME_CHANNELS.setAiPanelPrefs, (_event, patch) => {
+    assertDirectoryStagePicker(_event.sender)
+    return setAiPanelPrefs(patch)
+  })
+  ipcMain.handle('app:set-ai-panel-prefs', (_event, patch) => {
+    assertDirectoryStagePicker(_event.sender)
+    return setAiPanelPrefs(patch)
+  })
 
   // effective folder where new/untitled files land; the editor mains resolve
   // the same setting themselves (configuredDefaultSaveDir via docs' defaultSaveDir)
@@ -1788,16 +2217,61 @@ function registerHomeIpc(): void {
     failed: tm('errRenameFailed'),
   })
   const insideRoot = (path: unknown): path is string =>
-    typeof path === 'string' && (workspaces.contains(path) || isInsideRoot(defaultSaveDir(), path))
-  // A registered root can be detached with minus, never renamed/moved/deleted as a tree child.
-  const isRoot = (path: string) =>
-    workspaces.isRoot(path) || resolve(path) === resolve(defaultSaveDir())
+    typeof path === 'string' && (workspaces.contains(path) || insideAnyRoot(path))
+  const isRoot = (path: string) => workspaces.isRoot(path) || isAnyRoot(path)
 
-  ipcMain.handle(HOME_CHANNELS.folderRoot, (): FolderRoot => {
-    // describeRoot creates a missing root, so the watcher has something to attach to
-    const root = describeRoot(defaultSaveDir())
-    if (root.usable) ensureFolderWatcher()
-    return root
+  ipcMain.handle(HOME_CHANNELS.folderRoots, (): FolderRoot[] => {
+    // describeRoot creates a missing save folder, so its watcher has something to attach to
+    const roots = [describeRoot(defaultSaveDir()), ...extraFolderRoots().map(describeExtraRoot)]
+    ensureFolderWatchers()
+    return roots
+  })
+
+  // an added folder joins the tree where it is: nothing on disk is created, copied or moved
+  const addFolderRoot = (path: string): FolderRoot | null => {
+    const extras = withExtraRoot(extraFolderRoots(), defaultSaveDir(), path)
+    if (!extras) return null
+    writeAppSetting(APP_SETTINGS_PATH(), FOLDER_ROOTS_KEY, extras)
+    ensureFolderWatchers()
+    fileIndexer?.refresh()
+    return describeExtraRoot(path)
+  }
+
+  ipcMain.handle(HOME_CHANNELS.addFolderRoot, async (): Promise<FolderRoot | null> => {
+    const result = await showOpenDialogWithMemory(dialog, shellWindow, {
+      title: tm('dlgAddFolderRoot'),
+      properties: ['openDirectory'],
+    })
+    const picked = result.filePaths[0]
+    if (result.canceled || !picked) return null
+    if (!describeExtraRoot(picked).readable) {
+      showErrorDialog(shellWindow, tm('errFolderRootUnusable'), picked)
+      return null
+    }
+    return addFolderRoot(picked)
+  })
+
+  ipcMain.handle(HOME_CHANNELS.dropFolderRoots, (_event, paths: unknown): FolderRoot[] => {
+    const added: FolderRoot[] = []
+    const files: string[] = []
+    for (const path of stringPaths(paths)) {
+      if (!describeExtraRoot(path).readable) {
+        files.push(path)
+        continue
+      }
+      const root = addFolderRoot(path)
+      if (root) added.push(root)
+    }
+    if (files.length > 0) handleDroppedFiles(files, droppedFilesDeps())
+    return added
+  })
+
+  ipcMain.handle(HOME_CHANNELS.removeFolderRoot, (_event, path: unknown) => {
+    if (typeof path !== 'string') return
+    const extras = withoutExtraRoot(extraFolderRoots(), path)
+    writeAppSetting(APP_SETTINGS_PATH(), FOLDER_ROOTS_KEY, extras)
+    ensureFolderWatchers()
+    fileIndexer?.refresh()
   })
 
   ipcMain.handle(HOME_CHANNELS.listFolder, (_event, dir: unknown): FolderListing => {
@@ -1830,7 +2304,7 @@ function registerHomeIpc(): void {
     (_event, dir: unknown, newName: unknown): RenameResult => {
       if (!insideRoot(dir) || isRoot(dir) || typeof newName !== 'string')
         return { ok: false, error: tm('errBadArgs') }
-      const filesBefore = collectTreeFiles(dir)
+      const filesBefore = trackedFilesUnder(dir)
       const result = renameFolder(dir, newName, folderErrors())
       if (result.ok && result.path && result.path !== dir) {
         afterFolderMoved(dir, result.path, filesBefore)
@@ -1856,9 +2330,10 @@ function registerHomeIpc(): void {
           return false
         }
       }
-      // files may come from anywhere (the Recent list); folders only from inside the tree
-      const sources = list.filter((p) => !isRoot(p) && (!isDir(p) || insideRoot(p)))
-      const dirFiles = new Map(sources.filter(isDir).map((p) => [p, collectTreeFiles(p)]))
+      // files may come from anywhere the UI can show (the Recent list); folders only from inside the tree, never a root itself
+      const moveSources = { ...fileTargetSources(), isDirectory: isDir, isAnyRoot }
+      const sources = list.filter((p) => isMoveSource(p, moveSources))
+      const dirFiles = new Map(sources.filter(isDir).map((p) => [p, trackedFilesUnder(p)]))
       // 'replace' must not destroy data: the displaced target goes to the trash,
       // and everything keyed on its path (recents, stars, chat history) leaves
       // with it so the incoming file does not inherit another document's record
@@ -1866,7 +2341,7 @@ function registerHomeIpc(): void {
       const result = movePathsInto(sources, targetDir, conflictPolicy, folderErrors(), {
         replaceExisting: (path) => {
           const parked = join(dirname(path), `.genoffice-replaced-${Date.now()}-${basename(path)}`)
-          const files = isDir(path) ? collectTreeFiles(path) : [path]
+          const files = isDir(path) ? trackedFilesUnder(path) : [path]
           renameSync(path, parked)
           return {
             commit: () => {
@@ -1898,7 +2373,7 @@ function registerHomeIpc(): void {
   ipcMain.handle(HOME_CHANNELS.deleteFolder, async (_event, dir: unknown) => {
     if (!insideRoot(dir) || isRoot(dir))
       throw new Error('This directory cannot be removed from the workspace.')
-    const files = collectTreeFiles(dir)
+    const files = trackedFilesUnder(dir)
     // Propagate a Recycle Bin failure; do not report deletion or remove history entries.
     await shell.trashItem(dir)
     removeRecentFiles(files)
@@ -1906,6 +2381,16 @@ function registerHomeIpc(): void {
   })
 
   ipcMain.handle(HOME_CHANNELS.getDefaultSaveDir, (): string => defaultSaveDir())
+
+  const defaultApp = createDefaultAppService({
+    platform: process.platform,
+    packaged: app.isPackaged,
+    exePath: app.getPath('exe'),
+    run: execFileRunner,
+    openExternal: (url) => shell.openExternal(url),
+  })
+  ipcMain.handle(HOME_CHANNELS.getDefaultAppStatus, () => defaultApp.status())
+  ipcMain.handle(HOME_CHANNELS.setDefaultApp, () => defaultApp.set())
 
   ipcMain.handle(HOME_CHANNELS.pickDefaultSaveDir, async (): Promise<string | null> => {
     const result = await showOpenDialogWithMemory(dialog, shellWindow, {
@@ -1920,7 +2405,7 @@ function registerHomeIpc(): void {
       return null
     }
     writeAppSetting(APP_SETTINGS_PATH(), DEFAULT_SAVE_DIR_KEY, picked)
-    ensureFolderWatcher()
+    ensureFolderWatchers()
     return picked
   })
 
@@ -1994,6 +2479,7 @@ const TAB_MENU_ICON: Record<TabKind, keyof MenuIconSet> = {
   pdf: 'pdf',
   markdown: 'md',
   html: 'html',
+  help: 'home',
 }
 
 // tab views see neither DOM events nor a focus change when the user clicks the
@@ -2024,6 +2510,56 @@ function detachTabToWindow(id: string): void {
   if (!record) return
   const win = createDetachedEditorWindow({ ...record, applyMenuFor })
   win.focus()
+}
+
+/** Tear-off: the tab leaves the strip for a window created under the held
+ *  pointer at (x, y); the strip keeps steering it until release. */
+function tearOffTabToWindow(id: string, x: number, y: number): boolean {
+  if (!tabManager || isTearingOff() || !tabManager.canDetachTab(id)) return false
+  const record = tabManager.detachTab(id)
+  if (!record) return false
+  createDetachedEditorWindow({ ...record, applyMenuFor, tearOffAt: { x, y } })
+  return true
+}
+
+/** insertion slot the shell strip reported for the current dock preview */
+let lastDockIndex: number | undefined
+
+/** Menu-command target for the editors whose menus resolve through the shell
+ *  (pdf / markdown / html): the focused detached window of that kind first,
+ *  else the shell's active tab of that kind. */
+function activeEditorTarget(
+  kind: TabKind,
+  fromTabs: () => { id: string; webContents: WebContents; filePath?: string } | undefined,
+): { id: string; webContents: WebContents; filePath?: string } | undefined {
+  const detachedTab = focusedDetachedTab()
+  if (detachedTab?.kind === kind) return detachedTab
+  return fromTabs()
+}
+function activePdfTarget() {
+  return activeEditorTarget('pdf', () => tabManager?.activePdfTab())
+}
+
+/** ⌘W / File > Close targets the focused window: a detached editor closes
+ *  itself (its own unsaved-changes guard runs), otherwise the shell's active tab
+ *  — the same rule the docs / sheets / slides close hooks follow */
+function closeFocusedEditor(): void {
+  const focused = BrowserWindow.getFocusedWindow()
+  if (focused && focused !== shellWindow && isDetachedEditorWindow(focused)) focused.close()
+  else tabManager?.closeActiveTab()
+}
+
+/** the window a pdf command's dialogs and progress belong to: the detached
+ *  editor hosting the tab when there is one, else the shell */
+function pdfHostWindow(tab: { webContents: WebContents } | undefined): BrowserWindow | null {
+  if (!tab) return null
+  return detachedWindowForWebContents(tab.webContents.id) ?? shellWindow
+}
+function activeMarkdownTarget() {
+  return activeEditorTarget('markdown', () => tabManager?.activeMarkdownTab())
+}
+function activeHtmlTarget() {
+  return activeEditorTarget('html', () => tabManager?.activeHtmlTab())
 }
 
 function registerTabsIpc(): void {
@@ -2070,9 +2606,27 @@ function registerTabsIpc(): void {
     })
   })
   ipcMain.handle(TABS_CHANNELS.detach, (_event, id: unknown) => {
-    if (typeof id !== 'string') return
-    const tab = tabManager?.list().find((t) => t.id === id)
-    if (tab && (tab.kind === 'docs' || tab.kind === 'sheets')) detachTabToWindow(id)
+    if (typeof id !== 'string' || !tabManager?.canDetachTab(id)) return
+    detachTabToWindow(id)
+  })
+  // drag-to-tear-off: the strip drives the window until the pointer lifts
+  ipcMain.handle(TABS_CHANNELS.tearOff, (_event, id: unknown, x: unknown, y: unknown) => {
+    if (typeof id !== 'string' || typeof x !== 'number' || typeof y !== 'number') return false
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return false
+    return tearOffTabToWindow(id, x, y)
+  })
+  ipcMain.on(TABS_CHANNELS.dragTornWindow, (_event, x: unknown, y: unknown) => {
+    if (typeof x === 'number' && typeof y === 'number' && Number.isFinite(x) && Number.isFinite(y))
+      dragTornWindow(x, y)
+  })
+  ipcMain.handle(TABS_CHANNELS.dockTornWindow, (_event, index: unknown) => {
+    const tab = takeTornTab()
+    if (!tab) return
+    ensureTabManager().attachTab(tab, typeof index === 'number' ? index : undefined)
+  })
+  ipcMain.handle(TABS_CHANNELS.endTornDrag, () => endTornDrag())
+  ipcMain.on(TABS_CHANNELS.dockIndex, (_event, index: unknown) => {
+    lastDockIndex = typeof index === 'number' && Number.isInteger(index) ? index : undefined
   })
   // per-tab context menu — native for the same reason as the tab list above
   ipcMain.handle(TABS_CHANNELS.showTabMenu, (_event, id: unknown, x: unknown, y: unknown) => {
@@ -2080,9 +2634,9 @@ function registerTabsIpc(): void {
     const tab = tabManager.list().find((t) => t.id === id)
     if (!tab || tab.kind === 'home') return
     const template: MenuItemConstructorOptions[] = []
-    // MVP: docs + sheets; the other editors follow once their
-    // detached-window quirks (slides fullscreen bleed, pdf) are covered
-    if (tab.kind === 'docs' || tab.kind === 'sheets') {
+    // every document tab except a chrome-free Present tab (a live preview of
+    // another tab's document — it has nothing of its own to move)
+    if (tabManager.canDetachTab(id)) {
       template.push({
         label: tm('menuOpenInNewWindow'),
         click: () => detachTabToWindow(id),
@@ -2199,6 +2753,8 @@ function buildHomeMenu(): void {
       role: 'help',
       label: tm('menuHelp'),
       submenu: [
+        { label: tm('menuUserGuide'), accelerator: 'F1', click: () => tabManager?.openHelpTab() },
+        { type: 'separator' },
         { label: tm('thirdPartyNotices'), click: () => void openThirdPartyNotices() },
         { type: 'separator' },
         checkUpdatesMenuItem(appMenuLabels(currentLang())),
@@ -2234,7 +2790,7 @@ function buildPdfMenu(): void {
           label: tm('menuSave'),
           accelerator: 'CmdOrCtrl+S',
           click: () => {
-            const tab = tabManager?.activePdfTab()
+            const tab = activePdfTarget()
             if (tab) void flushPdfSave(tab.webContents)
           },
         },
@@ -2264,7 +2820,7 @@ function buildPdfMenu(): void {
           label: tm('menuPrint'),
           accelerator: 'CmdOrCtrl+P',
           click: () => {
-            const tab = tabManager?.activePdfTab()
+            const tab = activePdfTarget()
             if (tab) sendPdfPrintRequest(tab.webContents)
           },
         },
@@ -2272,7 +2828,7 @@ function buildPdfMenu(): void {
         {
           label: tm('menuClose'),
           accelerator: 'CmdOrCtrl+W',
-          click: () => tabManager?.closeActiveTab(),
+          click: () => closeFocusedEditor(),
         },
       ],
     },
@@ -2317,7 +2873,7 @@ function buildMarkdownMenu(): void {
           label: tm('menuSave'),
           accelerator: 'CmdOrCtrl+S',
           click: () => {
-            const tab = tabManager?.activeMarkdownTab()
+            const tab = activeMarkdownTarget()
             if (tab) void requestMarkdownSave(tab.webContents, 'save')
           },
         },
@@ -2325,7 +2881,7 @@ function buildMarkdownMenu(): void {
           label: tm('menuSaveAs'),
           accelerator: 'CmdOrCtrl+Shift+S',
           click: () => {
-            const tab = tabManager?.activeMarkdownTab()
+            const tab = activeMarkdownTarget()
             if (tab) void requestMarkdownSave(tab.webContents, 'saveAs')
           },
         },
@@ -2333,28 +2889,28 @@ function buildMarkdownMenu(): void {
         {
           label: tm('menuExportDocx'),
           click: () => {
-            const tab = tabManager?.activeMarkdownTab()
+            const tab = activeMarkdownTarget()
             if (tab) sendMarkdownExportRequest(tab.webContents, 'docx')
           },
         },
         {
           label: tm('menuExportPdf'),
           click: () => {
-            const tab = tabManager?.activeMarkdownTab()
+            const tab = activeMarkdownTarget()
             if (tab) sendMarkdownExportRequest(tab.webContents, 'pdf')
           },
         },
         {
           label: tm('menuExportImages'),
           click: () => {
-            const tab = tabManager?.activeMarkdownTab()
+            const tab = activeMarkdownTarget()
             if (tab) sendMarkdownExportRequest(tab.webContents, 'png')
           },
         },
         {
           label: tm('menuOpenInDocs'),
           click: () => {
-            const tab = tabManager?.activeMarkdownTab()
+            const tab = activeMarkdownTarget()
             if (tab) sendMarkdownExportRequest(tab.webContents, 'docs')
           },
         },
@@ -2363,7 +2919,7 @@ function buildMarkdownMenu(): void {
           label: tm('menuPrint'),
           accelerator: 'CmdOrCtrl+P',
           click: () => {
-            const tab = tabManager?.activeMarkdownTab()
+            const tab = activeMarkdownTarget()
             if (tab) sendMarkdownPrintRequest(tab.webContents)
           },
         },
@@ -2371,7 +2927,7 @@ function buildMarkdownMenu(): void {
         {
           label: tm('menuClose'),
           accelerator: 'CmdOrCtrl+W',
-          click: () => tabManager?.closeActiveTab(),
+          click: () => closeFocusedEditor(),
         },
       ],
     },
@@ -2416,7 +2972,7 @@ function buildHtmlMenu(): void {
           label: tm('menuSave'),
           accelerator: 'CmdOrCtrl+S',
           click: () => {
-            const tab = tabManager?.activeHtmlTab()
+            const tab = activeHtmlTarget()
             if (tab) void requestHtmlSave(tab.webContents, 'save')
           },
         },
@@ -2424,7 +2980,7 @@ function buildHtmlMenu(): void {
           label: tm('menuSaveAs'),
           accelerator: 'CmdOrCtrl+Shift+S',
           click: () => {
-            const tab = tabManager?.activeHtmlTab()
+            const tab = activeHtmlTarget()
             if (tab) void requestHtmlSave(tab.webContents, 'saveAs')
           },
         },
@@ -2432,21 +2988,21 @@ function buildHtmlMenu(): void {
         {
           label: tm('menuExportDocx'),
           click: () => {
-            const tab = tabManager?.activeHtmlTab()
+            const tab = activeHtmlTarget()
             if (tab) sendHtmlExportRequest(tab.webContents, 'docx')
           },
         },
         {
           label: tm('menuExportPdf'),
           click: () => {
-            const tab = tabManager?.activeHtmlTab()
+            const tab = activeHtmlTarget()
             if (tab) sendHtmlExportRequest(tab.webContents, 'pdf')
           },
         },
         {
           label: tm('menuExportHtml'),
           click: () => {
-            const tab = tabManager?.activeHtmlTab()
+            const tab = activeHtmlTarget()
             if (tab) sendHtmlExportRequest(tab.webContents, 'html')
           },
         },
@@ -2455,7 +3011,7 @@ function buildHtmlMenu(): void {
           label: tm('menuPrint'),
           accelerator: 'CmdOrCtrl+P',
           click: () => {
-            const tab = tabManager?.activeHtmlTab()
+            const tab = activeHtmlTarget()
             if (tab) sendHtmlPrintRequest(tab.webContents)
           },
         },
@@ -2463,7 +3019,7 @@ function buildHtmlMenu(): void {
         {
           label: tm('menuClose'),
           accelerator: 'CmdOrCtrl+W',
-          click: () => tabManager?.closeActiveTab(),
+          click: () => closeFocusedEditor(),
         },
       ],
     },
@@ -2494,27 +3050,32 @@ function buildHtmlMenu(): void {
 let savingPdfAs = false
 
 async function savePdfAs(): Promise<void> {
-  const tab = tabManager?.activePdfTab()
-  if (!tab?.filePath || !shellWindow || savingPdfAs) return
+  const tab = activePdfTarget()
+  const host = pdfHostWindow(tab)
+  if (!tab?.filePath || !host || savingPdfAs) return
   savingPdfAs = true
   // Pause renderer autosave for the whole flow: the dialog blurs the window, and a
   // blur-triggered autosave would write the pending edits into the original file
   setPdfSaveAsInFlight(tab.webContents, true)
   try {
-    const picked = await showSaveDialogWithMemory(dialog, shellWindow, {
+    const picked = await showSaveDialogWithMemory(dialog, host, {
       defaultPath: tab.filePath,
       filters: [{ name: tm('filterPdf'), extensions: ['pdf'] }],
     })
-    if (picked.canceled || !picked.filePath || picked.filePath === tab.filePath) return
+    const target = pdfSaveAsTarget(picked, tab.filePath)
+    if (!target) return
     if (pdfIsDirty(tab.webContents.id)) {
       // Renderer applies its pending edits onto the source bytes; the pdf main
       // process writes the result to the picked path only
-      if (!(await requestPdfSaveAs(tab.webContents, picked.filePath))) return
+      if (!(await requestPdfSaveAs(tab.webContents, target))) return
     } else {
       // No pending edits → a byte-identical copy
-      copyFileSync(tab.filePath, picked.filePath)
+      await atomicCopyFile(tab.filePath, target)
     }
-    openDocumentPath(picked.filePath)
+    openDocumentPath(target)
+  } catch (err) {
+    console.error('[shell] pdf save as failed:', err)
+    showErrorDialog(host, tm('errPdfSaveAsFailed'), err)
   } finally {
     savingPdfAs = false
     setPdfSaveAsInFlight(tab.webContents, false)
@@ -2533,10 +3094,11 @@ let exportingPdfDocx = false
  * file and open it in a Docs tab. No login, no credits.
  */
 async function exportPdfAsDocxLocal(): Promise<void> {
-  const tab = tabManager?.activePdfTab()
-  if (!tab?.filePath || !shellWindow) return
+  const tab = activePdfTarget()
+  const host = pdfHostWindow(tab)
+  if (!tab?.filePath || !host) return
   if (exportingPdfDocx) {
-    void dialog.showMessageBox(shellWindow, {
+    void dialog.showMessageBox(host, {
       type: 'info',
       message: tm('pdfDocxBusyMsg'),
     })
@@ -2545,7 +3107,7 @@ async function exportPdfAsDocxLocal(): Promise<void> {
   exportingPdfDocx = true
   try {
     if (!(await flushPdfSave(tab.webContents))) return
-    const picked = await showSaveDialogWithMemory(dialog, shellWindow, {
+    const picked = await showSaveDialogWithMemory(dialog, host, {
       defaultPath: tab.filePath.replace(/\.pdf$/i, '.docx'),
       filters: [{ name: tm('filterWord'), extensions: ['docx'] }],
     })
@@ -2559,14 +3121,14 @@ async function exportPdfAsDocxLocal(): Promise<void> {
       tabManager?.activateTab(tab.id)
       if (tabManager?.findDocsTabByPath(picked.filePath)) return
     }
-    shellWindow.setProgressBar(2)
+    host.setProgressBar(2)
     // encrypted PDFs prompt for the password (P23), looping on wrong entries;
     // null result = user cancelled the prompt → abort silently
     const pdfPath = tab.filePath
     const result = await convertPdfFileToDocxLocalWithPrompt(
       pdfPath,
       (retry) =>
-        promptPdfPassword(shellWindow, {
+        promptPdfPassword(host, {
           fileName: basename(pdfPath),
           retry,
           busy: false,
@@ -2585,13 +3147,13 @@ async function exportPdfAsDocxLocal(): Promise<void> {
           },
         }),
       (page, total) => {
-        if (shellWindow && !shellWindow.isDestroyed() && total > 0) {
-          shellWindow.setProgressBar(page / total)
+        if (host && !host.isDestroyed() && total > 0) {
+          host.setProgressBar(page / total)
         }
       },
     )
     if (result === null) return
-    writeFileSync(picked.filePath, result.docx)
+    await atomicWriteFile(picked.filePath, result.docx)
 
     // degrade transparency (plan §7.6 dual-track split): whole scan → say so
     // once; individual image-fallback pages → name them;
@@ -2602,7 +3164,7 @@ async function exportPdfAsDocxLocal(): Promise<void> {
       .filter((r) => r.status !== 'ok' && r.status !== 'ocr')
       .map((r) => r.page)
     if (result.scannedDocument) {
-      await dialog.showMessageBox(shellWindow, {
+      await dialog.showMessageBox(host, {
         type: 'info',
         message: tm('pdfDocxLocalScannedMsg'),
         detail: tm('pdfDocxLocalScannedDetail'),
@@ -2610,7 +3172,7 @@ async function exportPdfAsDocxLocal(): Promise<void> {
     } else if (imagePages.length > 0 && ocrPages.length > 0) {
       // mixed documents surface BOTH facts in one dialog: which pages shipped
       // as images and which carry machine-read text the user should proofread
-      await dialog.showMessageBox(shellWindow, {
+      await dialog.showMessageBox(host, {
         type: 'info',
         message: tm('pdfDocxLocalDegradedMsg'),
         detail:
@@ -2619,13 +3181,13 @@ async function exportPdfAsDocxLocal(): Promise<void> {
           tm('pdfDocxLocalOcrDetail', { pages: ocrPages.join(', ') }),
       })
     } else if (imagePages.length > 0) {
-      await dialog.showMessageBox(shellWindow, {
+      await dialog.showMessageBox(host, {
         type: 'info',
         message: tm('pdfDocxLocalDegradedMsg'),
         detail: tm('pdfDocxLocalDegradedDetail', { pages: imagePages.join(', ') }),
       })
     } else if (ocrPages.length > 0) {
-      await dialog.showMessageBox(shellWindow, {
+      await dialog.showMessageBox(host, {
         type: 'info',
         message: tm('pdfDocxLocalOcrMsg'),
         detail: tm('pdfDocxLocalOcrDetail', { pages: ocrPages.join(', ') }),
@@ -2633,7 +3195,7 @@ async function exportPdfAsDocxLocal(): Promise<void> {
     }
     openDocumentPath(picked.filePath)
   } catch (err) {
-    if (shellWindow && !shellWindow.isDestroyed()) {
+    if (host && !host.isDestroyed()) {
       // structured load failures (P22): password-protected / damaged PDFs get
       // a human-readable explanation instead of the raw PDFium error string
       const detail =
@@ -2649,7 +3211,7 @@ async function exportPdfAsDocxLocal(): Promise<void> {
           : err instanceof Error
             ? err.message
             : String(err)
-      void dialog.showMessageBox(shellWindow, {
+      void dialog.showMessageBox(host, {
         type: 'error',
         message: tm('pdfDocxFailedMsg'),
         detail,
@@ -2660,7 +3222,7 @@ async function exportPdfAsDocxLocal(): Promise<void> {
     // or a non-password error thrown mid-retry
     closePdfPasswordDialog()
     exportingPdfDocx = false
-    if (shellWindow && !shellWindow.isDestroyed()) shellWindow.setProgressBar(-1)
+    if (host && !host.isDestroyed()) host.setProgressBar(-1)
   }
 }
 
@@ -2672,10 +3234,11 @@ async function exportPdfAsDocxLocal(): Promise<void> {
  * conversions at once.
  */
 async function exportPdfAsPptxLocal(): Promise<void> {
-  const tab = tabManager?.activePdfTab()
-  if (!tab?.filePath || !shellWindow) return
+  const tab = activePdfTarget()
+  const host = pdfHostWindow(tab)
+  if (!tab?.filePath || !host) return
   if (exportingPdfDocx) {
-    void dialog.showMessageBox(shellWindow, {
+    void dialog.showMessageBox(host, {
       type: 'info',
       message: tm('pdfPptxBusyMsg'),
     })
@@ -2684,7 +3247,7 @@ async function exportPdfAsPptxLocal(): Promise<void> {
   exportingPdfDocx = true
   try {
     if (!(await flushPdfSave(tab.webContents))) return
-    const picked = await showSaveDialogWithMemory(dialog, shellWindow, {
+    const picked = await showSaveDialogWithMemory(dialog, host, {
       defaultPath: tab.filePath.replace(/\.pdf$/i, '.pptx'),
       filters: [{ name: tm('filterPpt'), extensions: ['pptx'] }],
     })
@@ -2697,14 +3260,14 @@ async function exportPdfAsPptxLocal(): Promise<void> {
       tabManager?.activateTab(tab.id)
       if (tabManager?.findSlidesTabByPath(picked.filePath)) return
     }
-    shellWindow.setProgressBar(2)
+    host.setProgressBar(2)
     // encrypted PDFs prompt for the password (P23), looping on wrong entries;
     // null result = user cancelled the prompt → abort silently
     const pdfPath = tab.filePath
     const result = await convertPdfFileToPptxLocalWithPrompt(
       pdfPath,
       (retry) =>
-        promptPdfPassword(shellWindow, {
+        promptPdfPassword(host, {
           fileName: basename(pdfPath),
           retry,
           busy: false,
@@ -2723,25 +3286,25 @@ async function exportPdfAsPptxLocal(): Promise<void> {
           },
         }),
       (page, total) => {
-        if (shellWindow && !shellWindow.isDestroyed() && total > 0) {
-          shellWindow.setProgressBar(page / total)
+        if (host && !host.isDestroyed() && total > 0) {
+          host.setProgressBar(page / total)
         }
       },
     )
     if (result === null) return
-    writeFileSync(picked.filePath, result.pptx)
+    await atomicWriteFile(picked.filePath, result.pptx)
 
     // degrade transparency (same split as the Word export): whole scan vs
     // individual image-fallback pages
     const imagePages = result.pageResults.filter((r) => r.status !== 'ok').map((r) => r.page)
     if (result.scannedDocument) {
-      await dialog.showMessageBox(shellWindow, {
+      await dialog.showMessageBox(host, {
         type: 'info',
         message: tm('pdfDocxLocalScannedMsg'),
         detail: tm('pdfPptxLocalScannedDetail'),
       })
     } else if (imagePages.length > 0) {
-      await dialog.showMessageBox(shellWindow, {
+      await dialog.showMessageBox(host, {
         type: 'info',
         message: tm('pdfDocxLocalDegradedMsg'),
         detail: tm('pdfDocxLocalDegradedDetail', { pages: imagePages.join(', ') }),
@@ -2749,7 +3312,7 @@ async function exportPdfAsPptxLocal(): Promise<void> {
     }
     openDocumentPath(picked.filePath)
   } catch (err) {
-    if (shellWindow && !shellWindow.isDestroyed()) {
+    if (host && !host.isDestroyed()) {
       // structured load failures (P22): same explanations as the Word export
       const detail =
         err instanceof PdfLoadError
@@ -2761,7 +3324,7 @@ async function exportPdfAsPptxLocal(): Promise<void> {
           : err instanceof Error
             ? err.message
             : String(err)
-      void dialog.showMessageBox(shellWindow, {
+      void dialog.showMessageBox(host, {
         type: 'error',
         message: tm('pdfPptxFailedMsg'),
         detail,
@@ -2770,7 +3333,7 @@ async function exportPdfAsPptxLocal(): Promise<void> {
   } finally {
     closePdfPasswordDialog()
     exportingPdfDocx = false
-    if (shellWindow && !shellWindow.isDestroyed()) shellWindow.setProgressBar(-1)
+    if (host && !host.isDestroyed()) host.setProgressBar(-1)
   }
 }
 
@@ -2782,10 +3345,11 @@ async function exportPdfAsPptxLocal(): Promise<void> {
  * conversions at once.
  */
 async function exportPdfAsXlsxLocal(): Promise<void> {
-  const tab = tabManager?.activePdfTab()
-  if (!tab?.filePath || !shellWindow) return
+  const tab = activePdfTarget()
+  const host = pdfHostWindow(tab)
+  if (!tab?.filePath || !host) return
   if (exportingPdfDocx) {
-    void dialog.showMessageBox(shellWindow, {
+    void dialog.showMessageBox(host, {
       type: 'info',
       message: tm('pdfXlsxBusyMsg'),
     })
@@ -2794,7 +3358,7 @@ async function exportPdfAsXlsxLocal(): Promise<void> {
   exportingPdfDocx = true
   try {
     if (!(await flushPdfSave(tab.webContents))) return
-    const picked = await showSaveDialogWithMemory(dialog, shellWindow, {
+    const picked = await showSaveDialogWithMemory(dialog, host, {
       defaultPath: tab.filePath.replace(/\.pdf$/i, '.xlsx'),
       filters: [{ name: tm('filterExcel'), extensions: ['xlsx'] }],
     })
@@ -2807,14 +3371,14 @@ async function exportPdfAsXlsxLocal(): Promise<void> {
       tabManager?.activateTab(tab.id)
       if (tabManager?.findSheetsTabByPath(picked.filePath)) return
     }
-    shellWindow.setProgressBar(2)
+    host.setProgressBar(2)
     // encrypted PDFs prompt for the password (P23), looping on wrong entries;
     // null result = user cancelled the prompt → abort silently
     const pdfPath = tab.filePath
     const result = await convertPdfFileToXlsxLocalWithPrompt(
       pdfPath,
       (retry) =>
-        promptPdfPassword(shellWindow, {
+        promptPdfPassword(host, {
           fileName: basename(pdfPath),
           retry,
           busy: false,
@@ -2833,25 +3397,25 @@ async function exportPdfAsXlsxLocal(): Promise<void> {
           },
         }),
       (page, total) => {
-        if (shellWindow && !shellWindow.isDestroyed() && total > 0) {
-          shellWindow.setProgressBar(page / total)
+        if (host && !host.isDestroyed() && total > 0) {
+          host.setProgressBar(page / total)
         }
       },
     )
     if (result === null) return
-    writeFileSync(picked.filePath, result.xlsx)
+    await atomicWriteFile(picked.filePath, result.xlsx)
 
     // degrade transparency: pages that could not become cells got a notice
     // row on their worksheet instead of an image (a spreadsheet has none)
     const noticePages = result.pageResults.filter((r) => r.status !== 'ok').map((r) => r.page)
     if (result.scannedDocument) {
-      await dialog.showMessageBox(shellWindow, {
+      await dialog.showMessageBox(host, {
         type: 'info',
         message: tm('pdfDocxLocalScannedMsg'),
         detail: tm('pdfXlsxLocalScannedDetail'),
       })
     } else if (noticePages.length > 0) {
-      await dialog.showMessageBox(shellWindow, {
+      await dialog.showMessageBox(host, {
         type: 'info',
         message: tm('pdfXlsxLocalSkippedMsg'),
         detail: tm('pdfXlsxLocalSkippedDetail', { pages: noticePages.join(', ') }),
@@ -2859,7 +3423,7 @@ async function exportPdfAsXlsxLocal(): Promise<void> {
     }
     openDocumentPath(picked.filePath)
   } catch (err) {
-    if (shellWindow && !shellWindow.isDestroyed()) {
+    if (host && !host.isDestroyed()) {
       // structured load failures (P22): same explanations as the Word export
       const detail =
         err instanceof PdfLoadError
@@ -2871,7 +3435,7 @@ async function exportPdfAsXlsxLocal(): Promise<void> {
           : err instanceof Error
             ? err.message
             : String(err)
-      void dialog.showMessageBox(shellWindow, {
+      void dialog.showMessageBox(host, {
         type: 'error',
         message: tm('pdfXlsxFailedMsg'),
         detail,
@@ -2880,7 +3444,7 @@ async function exportPdfAsXlsxLocal(): Promise<void> {
   } finally {
     closePdfPasswordDialog()
     exportingPdfDocx = false
-    if (shellWindow && !shellWindow.isDestroyed()) shellWindow.setProgressBar(-1)
+    if (host && !host.isDestroyed()) host.setProgressBar(-1)
   }
 }
 
@@ -2888,7 +3452,7 @@ async function exportPdfAsXlsxLocal(): Promise<void> {
 // flows as the File menu items (dialogs, password prompt, in-flight guard included)
 ipcMain.handle(PDF_CHANNELS.convertOffice, async (e, format: unknown) => {
   // only the active pdf tab may trigger a conversion (its file is the source)
-  if (tabManager?.activePdfTab()?.webContents.id !== e.sender.id) return
+  if (activePdfTarget()?.webContents.id !== e.sender.id) return
   if (format === 'docx') await exportPdfAsDocxLocal()
   else if (format === 'xlsx') await exportPdfAsXlsxLocal()
   else if (format === 'pptx') await exportPdfAsPptxLocal()
@@ -2966,18 +3530,33 @@ async function installMainProcessProxy(): Promise<void> {
   // the dispatcher below — forward the proxy to them via env
   setGskProxyUrl(proxyUrl)
   try {
-    const { ProxyAgent, setGlobalDispatcher } = await import('undici')
-    setGlobalDispatcher(new ProxyAgent(proxyUrl))
+    const { EnvHttpProxyAgent, setGlobalDispatcher } = await import('undici')
+    // Preserve configured bypasses and keep local model traffic direct, including
+    // GUI launches that discover a system proxy without a shell NO_PROXY value.
+    setGlobalDispatcher(
+      new EnvHttpProxyAgent({
+        httpProxy: proxyUrl,
+        httpsProxy: proxyUrl,
+        noProxy: [
+          process.env.no_proxy ?? process.env.NO_PROXY ?? '',
+          'localhost',
+          '127.0.0.1',
+          '[::1]',
+        ]
+          .filter(Boolean)
+          .join(','),
+      }),
+    )
     // strip user:pass credentials before logging
     console.log('[proxy] main-process fetch via', proxyUrl.replace(/\/\/[^@/]*@/, '//***@'))
   } catch (e) {
-    console.warn('[proxy] failed to set ProxyAgent:', e)
+    console.warn('[proxy] failed to set EnvHttpProxyAgent:', e)
   }
 }
 
 // ---- lifecycle (the shell is the only owner) ----
 
-let pendingLaunchPath = supportedFileIn(process.argv) ?? unsupportedFileIn(process.argv)
+let pendingLaunchPaths = collectLaunchPaths(process.argv)
 let controlServer: ControlServer | null = null
 
 // show() does not un-minimize, and on macOS ⌘W destroys the shell window while the
@@ -2989,6 +3568,12 @@ function revealShellWindow(): void {
   shellWindow?.focus()
 }
 
+function openLaunchPaths(paths: readonly string[]): void {
+  let opened = false
+  for (const filePath of paths) opened = openDocumentPath(filePath) || opened
+  if (!opened) tabManager?.openHomeTab()
+}
+
 // On macOS a file opened from Finder is not in argv; it arrives via the open-file event (before ready).
 // If another instance already holds the lock, this process exits, and the path must ride along in
 // the lock request's additionalData to the surviving instance — so the lock request is deferred
@@ -2996,20 +3581,17 @@ function revealShellWindow(): void {
 app.on('open-file', (event, filePath) => {
   event.preventDefault()
   if (!app.isReady()) {
-    pendingLaunchPath = filePath
+    if (!pendingLaunchPaths.includes(filePath)) pendingLaunchPaths.push(filePath)
     return
   }
   revealShellWindow()
-  if (!openDocumentPath(filePath)) tabManager?.openHomeTab()
+  openLaunchPaths([filePath])
 })
 
 app.on('second-instance', (_event, argv, _cwd, additionalData) => {
-  const file =
-    supportedFileIn(argv) ??
-    unsupportedFileIn(argv) ??
-    (additionalData as { launchPath?: string } | null)?.launchPath
+  const paths = collectLaunchPaths(argv, additionalData)
   revealShellWindow()
-  if (!file || !openDocumentPath(file)) tabManager?.openHomeTab()
+  openLaunchPaths(paths)
 })
 
 installNavigationGuard(app)
@@ -3019,6 +3601,17 @@ installNavigationGuard(app)
 registerRendererScheme()
 installContextMenu(app, () => contextMenuLabels(currentLang()))
 registerAiIpc()
+ipcMain.handle('ai:open-model-settings', (event) => {
+  assertDirectoryStagePicker(event.sender)
+  const win = shellWindow
+  if (!win || win.isDestroyed()) return
+  // the request may come from a detached window or while the shell is minimized
+  if (win.isMinimized()) win.restore()
+  win.show()
+  win.focus()
+  tabManager?.openHomeTab()
+  win.webContents.send(HOME_CHANNELS.openSettings, { section: 'aiModel' })
+})
 registerProjectIpc()
 registerDocsIpc()
 registerHomeIpc()
@@ -3109,6 +3702,8 @@ async function runHeadlessAiSettingsEntry(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  // first scan waits for the windows to come up; later ones follow folder changes
+  setTimeout(() => ensureFileIndexer()?.refresh(), 4000)
   installRendererProtocol({
     docs: join(DOCS_OUT, 'renderer'),
     sheets: join(SHEETS_OUT, 'renderer'),
@@ -3116,6 +3711,8 @@ app.whenReady().then(async () => {
     pdf: join(PDF_OUT, 'renderer'),
     markdown: join(MARKDOWN_OUT, 'renderer'),
     html: join(HTML_OUT, 'renderer'),
+    // the manual shares the shell's own renderer bundle (help mode)
+    help: join(__dirname, '../renderer'),
   })
   if (headlessAiSettings) {
     await runHeadlessAiSettingsEntry()
@@ -3125,7 +3722,10 @@ app.whenReady().then(async () => {
     await runHeadlessExportEntry(headlessArgv)
     return
   }
-  const lockData = () => (pendingLaunchPath ? { launchPath: pendingLaunchPath } : {})
+  const lockData = () =>
+    pendingLaunchPaths.length > 0
+      ? { launchPath: pendingLaunchPaths[0], launchPaths: pendingLaunchPaths }
+      : {}
   let hasLock = app.requestSingleInstanceLock(lockData())
   if (!hasLock && !app.isPackaged) {
     // Dev watch restart: electron-vite SIGTERMs the previous instance and spawns this
@@ -3307,9 +3907,25 @@ app.whenReady().then(async () => {
   installDockMenu()
   setUpdateCheckInvoker(() => void checkForUpdatesNow())
   initAutoUpdater(() => shellWindow, currentUpdateChannel())
+  // resource watchdog: a renderer that stays hot for minutes gets diagnostics
+  // recorded and the user an offer to close the document (headless exports
+  // are short-lived and unattended)
+  if (headlessArgv.kind === 'none') {
+    startRendererWatchdog({
+      describe: (wc) => tabManager?.describeWebContents(wc.id) ?? null,
+      parentWindow: (wc) => BrowserWindow.fromWebContents(wc) ?? shellWindow,
+      closeDocument: async (wc) => {
+        const id = tabManager?.tabIdForWebContents(wc.id)
+        if (id && tabManager) await tabManager.closeTab(id)
+        else BrowserWindow.fromWebContents(wc)?.close()
+      },
+      t: (key, params) => tm(key, params),
+    })
+  }
 
-  if (!pendingLaunchPath || !openDocumentPath(pendingLaunchPath)) tabManager?.openHomeTab()
-  pendingLaunchPath = null
+  openLaunchPaths(pendingLaunchPaths)
+  pendingLaunchPaths = []
+  for (const recoverAs of pendingUnsavedNewRecoveries()) void newSheetTab(recoverAs)
 
   startControlServer(
     app.getPath('userData'),
@@ -3351,8 +3967,10 @@ app.on('before-quit', () => {
 
 // after every window has closed, so the shell window's own 'closed' republish cannot revive the file
 app.on('will-quit', () => {
+  fileIndexer?.stop()
+  fileIndexStore?.close()
   stopAuthWatch?.()
-  folderWatcher?.close()
+  for (const watcher of folderWatchers.values()) watcher.close()
   controlServer?.close()
   // a second instance that lost the lock quits too; it must not delete the running editor's list
   if (ownsOpenDocumentsRegistry) clearOpenDocuments(OPEN_DOCUMENTS_PATH())

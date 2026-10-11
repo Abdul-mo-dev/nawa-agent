@@ -127,6 +127,7 @@ export const zhTW = {
   aiClarifyOther: '其他(可填寫)',
   aiClarifySkip: '略過問卷',
   aiClarifyNext: '下一題',
+  aiClarifyPrev: '上一題',
   aiClarifySubmit: '開始產生',
   aiSumReadAttachment: '讀取附件',
   aiSumReadAttachmentName: '讀取附件 {name}',
@@ -215,4 +216,5 @@ export const zhTW = {
   aiSumSaveTemplate: '儲存風格範本"{name}"',
   aiSumTemplatesEmpty: '風格範本清單（空）',
   aiSumListTemplates: '列出 {count} 個風格範本',
+  aiPageCloudToLocal: '雲端不可用,已本地生成',
 } satisfies Record<keyof typeof zh, string>

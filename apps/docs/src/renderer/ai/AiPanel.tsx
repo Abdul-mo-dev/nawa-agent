@@ -10,10 +10,18 @@ import { ChatModelPicker } from '@genoffice/ui'
 import { setRendererChatModel, getRendererChatModel } from '@genoffice/ai-provider/browser'
 import '@genoffice/ui/chat-model-picker.css'
 import { AiPanelSideButton, useAiPanelWidth } from '@genoffice/ui'
+import { AiQueueStrip, AI_QUEUE_LABELS, useChatRunQueue } from '@genoffice/ui'
 import { useEffect, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/core'
 import type { Block } from '@genoffice/docx-engine'
-import { AgentLoop, composeSkills, streamText, type AgentImage } from '@genoffice/agent-core'
+import {
+  AgentLoop,
+  composeSkills,
+  createKnowledgeBaseSkill,
+  streamText,
+  type AgentImage,
+  type KbFileInfo,
+} from '@genoffice/agent-core'
 import { imageGenerationAvailable, mediaAnalysisAvailable } from '@genoffice/ai-provider/browser'
 import type { AiSettings, AttachmentAddResult, AttachmentMeta } from '../../shared/ipc'
 import { ATTACHMENT_IMAGE_EXTS } from '../../shared/ipc'
@@ -53,8 +61,9 @@ import { waitForFullContent } from '../phased-content'
 import { currentDocGeneration } from '../file-actions'
 import { createFilesSkill } from './files-skill'
 import { createElectronTransport, loadChatModelSettings } from './transport'
+import { boundChatHistory } from './chat-retention'
 import { useI18n, t as tModule, aiLangDirective, type StringKey } from '../i18n/locale'
-import { Markdown } from '@genoffice/ui'
+import { createFileNav, Markdown } from '@genoffice/ui'
 import { AiComposer, AiScopeQuote, AiTypingIndicator, type AiScopeQuoteData } from '@genoffice/ui'
 import { NawaMark } from '../components/icons'
 import sendEnterOn from '../assets/send-enter-on.png'
@@ -337,10 +346,35 @@ export function AiPanel({
   const isRtl = lang === 'ar' || lang === 'he'
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
+  /** messages queued while a reply runs; the pump re-runs them through runWith on settle */
+  const msgQueue = useChatRunQueue<{
+    attachments: AttachmentMeta[]
+    scope: AiScopeQuoteData | null
+  }>({
+    busy,
+    submit: (text, meta) => {
+      const loop = loopRef.current
+      if (!loop || loop.busy || pendingSendRef.current) return false
+      runWith(text, text, meta.attachments, meta.scope)
+      return true
+    },
+  })
   /** Wall-clock start of the current run, drives the elapsed badge */
   const runStartedAtRef = useRef(0)
   /** a send waiting on a phased open's tail; Stop / New chat abort it before it runs */
   const pendingSendRef = useRef<{ aborted: boolean } | null>(null)
+  // snapshot of the starred files feeding the knowledge-base skill; refreshed
+  // on mount and before each send so a freshly starred file is answerable
+  const kbFilesRef = useRef<KbFileInfo[]>([])
+  const refreshKbFiles = (): void => {
+    if (typeof window.desktop?.kbList !== 'function') return
+    void window.desktop
+      .kbList()
+      .then((files) => {
+        kbFilesRef.current = files
+      })
+      .catch(() => undefined)
+  }
   const [chat, setChat] = useState<ChatEntry[]>([])
   /** a streamed write stopped early: the draft stays in the document until the user keeps or discards it */
   const [activePartial, setActivePartial] = useState<{ blocks: number } | null>(null)
@@ -363,6 +397,10 @@ export function AiPanel({
       files skill must keep reading them mid-run and in follow-up turns. Deduped by path
       against the live composer list. */
   const sentAttachmentsRef = useRef<AttachmentMeta[]>([])
+  useEffect(() => {
+    refreshKbFiles()
+  }, [])
+
   useEffect(() => {
     // previews cover the composer plus every image echoed on a sent/history message
     // (history chips re-read the file by its stored path; a deleted file keeps the placeholder)
@@ -630,7 +668,8 @@ export function AiPanel({
       const last = next[next.length - 1]
       if (!last || last.role !== 'assistant') return prev
       next[next.length - 1] = { ...last, ...(typeof patch === 'function' ? patch(last) : patch) }
-      return next
+      // bounded: this is where a finished run's full-document snapshot lands
+      return boundChatHistory(next)
     })
   }
 
@@ -742,6 +781,19 @@ export function AiPanel({
       transport: transportRef.current,
       systemSuffix: aiLangDirective,
       skill: composeSkills('docs+files', '', [
+        // the reader's starred files; empty while the user stars nothing —
+        // buildContext then returns '' and the skill stays out of the way.
+        // Mounted only when the bridge carries the kb channel at all: a test
+        // mock or an older preload must not grow tools that cannot execute.
+        ...(typeof window.desktop?.kbList === 'function'
+          ? [
+              createKnowledgeBaseSkill({
+                listFiles: () => kbFilesRef.current,
+                search: (query, limit) => window.desktop.kbSearch({ q: query, limit }),
+                read: (path, offset) => window.desktop.kbRead(path, offset),
+              }),
+            ]
+          : []),
         createDocsSkill(
           () => editorRef.current,
           numIds,
@@ -809,7 +861,9 @@ export function AiPanel({
         },
         onTurnEnd: () => {
           patchLastAssistant({ streaming: false })
-          setChat((prev) => [...prev, { role: 'assistant', text: '', streaming: true }])
+          setChat((prev) =>
+            boundChatHistory([...prev, { role: 'assistant', text: '', streaming: true }]),
+          )
         },
         onDone: ({ text, cancelled, turnLimit, truncated }) => {
           // module-level t: the loop instance is created only once; the component's t goes stale with the first-render closure
@@ -850,7 +904,7 @@ export function AiPanel({
                 snapshot: runSnapshotRef.current ?? undefined,
               }
             }
-            return next
+            return boundChatHistory(next)
           })
           // Signed-out failures get an inline sign-in button; detected via
           // gsk status rather than matching the localized error text
@@ -941,6 +995,10 @@ export function AiPanel({
       if (index !== null) navigateToBlock(editorRef.current, index)
     },
   }
+  // [name](filenav:///abs/path) citations open the cited file in its own app
+  const fileNav = createFileNav((path) => {
+    void window.desktop.openSourcePath(path)
+  })
 
   // follow the stream, but stop yanking once the user scrolls up to read;
   // `open` dep: re-expanding lands on messages streamed while collapsed
@@ -1019,16 +1077,18 @@ export function AiPanel({
     runToolsRef.current = []
     runSnapshotRef.current = null
     stickToBottomRef.current = true
-    setChat((prev) => [
-      ...prev,
-      {
-        role: 'user',
-        text: displayInstruction,
-        ...(sentAtts.length > 0 ? { attachments: sentAtts } : {}),
-        ...(scope ? { scope } : {}),
-      },
-      { role: 'assistant', text: '', streaming: true },
-    ])
+    setChat((prev) =>
+      boundChatHistory([
+        ...prev,
+        {
+          role: 'user',
+          text: displayInstruction,
+          ...(sentAtts.length > 0 ? { attachments: sentAtts } : {}),
+          ...(scope ? { scope } : {}),
+        },
+        { role: 'assistant', text: '', streaming: true },
+      ]),
+    )
     runStartedAtRef.current = Date.now()
     setBusy(true)
     // claimed before the async image read so Stop / New chat can flag this send at any point
@@ -1060,6 +1120,7 @@ export function AiPanel({
           setBusy(false)
           return
         }
+        refreshKbFiles()
         return loop.run(instruction, images)
       })
   }
@@ -1096,7 +1157,27 @@ export function AiPanel({
 
   const continueRun = () => runWith(DOCS_CONTINUE_INSTRUCTION, t('aiContinue'))
 
+  /** Enter while a reply runs: the draft joins the queue above the composer */
+  const enqueueDraft = () => {
+    const text = input.trim()
+    if (!text) return
+    // snapshot + consume the composer attachments exactly like a send does: the
+    // queued message owns them, and pump time hands them to runWith as an override
+    const attachments = attachmentsRef.current
+    if (attachments.length > 0) {
+      const seen = new Set(sentAttachmentsRef.current.map((a) => a.path))
+      sentAttachmentsRef.current = [
+        ...sentAttachmentsRef.current,
+        ...attachments.filter((a) => !seen.has(a.path)),
+      ]
+      setAttachments([])
+    }
+    msgQueue.enqueue(text, { attachments, scope: selectionScopeQuote() ?? null })
+    setInput('')
+  }
+
   const newChat = () => {
+    msgQueue.clear()
     if (pendingSendRef.current) {
       pendingSendRef.current.aborted = true
       pendingSendRef.current = null
@@ -1278,7 +1359,7 @@ export function AiPanel({
                 {entry.tools && entry.tools.length > 0 && <ToolChipList tools={entry.tools} />}
                 {entry.text && (
                   <div dir="auto">
-                    <Markdown text={entry.text} nav={docNav} />
+                    <Markdown text={entry.text} navs={[docNav, fileNav]} />
                   </div>
                 )}
               </div>
@@ -1350,7 +1431,7 @@ export function AiPanel({
                 </span>
               ) : entry.role === 'assistant' ? (
                 <div dir="auto">
-                  <Markdown text={entry.text} nav={docNav} />
+                  <Markdown text={entry.text} navs={[docNav, fileNav]} />
                 </div>
               ) : (
                 <span dir="auto">{entry.text}</span>
@@ -1486,6 +1567,20 @@ export function AiPanel({
           disabled={busy}
         />
         <AiComposer
+          queueStrip={
+            <AiQueueStrip
+              items={msgQueue.queued}
+              labels={AI_QUEUE_LABELS[lang]}
+              onUpdate={msgQueue.update}
+              onRemove={msgQueue.remove}
+              onClear={msgQueue.clear}
+              paused={msgQueue.paused}
+              onTogglePause={msgQueue.togglePaused}
+              onMove={msgQueue.move}
+            />
+          }
+          onQueue={enqueueDraft}
+          queuePlaceholder={AI_QUEUE_LABELS[lang].queuePlaceholder}
           header={
             (hasScopeSelection || attachments.length > 0) && (
               <>

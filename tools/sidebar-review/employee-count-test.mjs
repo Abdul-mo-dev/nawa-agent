@@ -35,8 +35,8 @@ try {
   await page.getByRole('button', { name: 'New chat', exact: true }).click()
   await page.evaluate(() => {
     const folder = 'C:\\Review workspace\\Quarterly reports'
-    window.sidebarFixture.state.scenario = 'employee-count'
-    window.sidebarFixture.select(
+    globalThis.sidebarFixture.state.scenario = 'employee-count'
+    globalThis.sidebarFixture.select(
       [
         folder + '\\employee-data.xlsx',
         ...Array.from({ length: 22 }, (_, i) => folder + '\\other-' + i + '.xlsx'),
@@ -51,10 +51,10 @@ try {
   await page.getByText('There are 500 included records.', { exact: false }).waitFor()
   await page.getByRole('button', { name: 'Send', exact: true }).waitFor()
   const captured = await page.evaluate(() => ({
-    first: window.sidebarFixture.state.requests[0],
-    analysis: window.sidebarFixture.state.analyticsRequests,
-    messages: window.sidebarFixture.messages(),
-    scope: window.sidebarFixture.state.beginScopes.at(-1),
+    first: globalThis.sidebarFixture.state.requests[0],
+    analysis: globalThis.sidebarFixture.state.analyticsRequests,
+    messages: globalThis.sidebarFixture.messages(),
+    scope: globalThis.sidebarFixture.state.beginScopes.at(-1),
   }))
   check(
     'Native analysis is advertised before the first model response',
@@ -63,7 +63,7 @@ try {
   check(
     'Verified dataset IDs and actual headers are supplied before inspection',
     JSON.stringify(captured.first.messages).includes('ready-employees') &&
-      JSON.stringify(captured.first.messages).includes('name\\\":\\\"name'),
+      JSON.stringify(captured.first.messages).includes('name\\":\\"name'),
   )
   check(
     'The named Ready dataset is queried without reimporting',

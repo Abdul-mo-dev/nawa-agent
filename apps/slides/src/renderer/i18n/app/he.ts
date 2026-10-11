@@ -1,6 +1,16 @@
 import type { zh } from './zh'
 
 export const he = {
+  redactMenuLabel: 'הסתרת הבחירה מהמודל',
+  redactDialogDesc:
+    'הבחירה נשארת במסמך ובקובץ; המודל רואה רק את הסימון. תן לו שם כדי שיהיה ברור מה הוא מייצג.',
+  redactDialogScope:
+    'ההסתרה חלה רק על המודל באפליקציה הזו. CLI, כלי MCP וייצוא ללא ממשק קוראים את הקובץ ישירות ועדיין רואים את המילות האלה.',
+  redactDialogPlaceholder: 'שם הסימון, לדוגמה: טלפון הלקוח',
+  redactCancel: 'ביטול',
+  redactInsert: 'הסתר',
+  redactEnable: 'לחיצה ימנית על טקסט נבחר מסתיר אותו מהמודל.',
+
   appPhPromptTitle: 'לחץ כדי להוסיף כותרת',
   appPhPromptSubtitle: 'לחץ כדי להוסיף כותרת משנה',
   appPhPromptBody: 'לחץ כדי להוסיף טקסט',
@@ -107,6 +117,7 @@ export const he = {
   appPasteOptSource: 'שמור על עיצוב המקור',
   appPasteOptTheme: 'השתמש בערכת הנושא של היעד',
   appStatusPasteOptionsExpired: 'אפשרויות ההדבקה אינן זמינות עוד',
+  appStatusPasteTruncated: 'הטקסט שהודבק ארוך מדי ונחתך',
   appCtxHideSlide: 'הסתר שקופית',
   appCtxUnhideSlide: 'בטל הסתרת שקופית',
   appCtxAddSectionBefore: 'הוסף מקטע (לפני שקופית זו)',

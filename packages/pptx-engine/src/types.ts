@@ -185,6 +185,23 @@ export interface TextRun {
   strikeStyle?: string
   /** Original rPr carried an explicit u="none" — an override of inherited underline the rebuild path must re-emit */
   underlineExplicitNone?: boolean
+  /**
+   * Withheld from the model: `label` is the only part a model ever sees, in
+   * place of this run's words. The words themselves stay in the document and in
+   * the file — a run is a mark over real text, never a replacement for it.
+   *
+   * It is stored on the model rather than left to ride along in the XML because
+   * two save paths discard anything they do not model: the structural rebuild
+   * (`rebuildTxBody`, taken when the run count changes) regenerates `<a:rPr>`
+   * from scratch, and the patch path rewrites `u`/`b`/`i`/`sz` from the model.
+   * Verified against this engine, not assumed: an `<a:extLst>` left in the
+   * original `<a:rPr>` survives an in-place text patch but is lost on rebuild.
+   *
+   * `underline` is the visible half and is NOT free: the patch path writes
+   * `u="none"` for a run whose model does not carry it, so applying a
+   * redaction must also set `underline` or the mark becomes invisible.
+   */
+  redact?: string
   /** Original rPr carried strike="noStrike" (see underlineExplicitNone) */
   strikeExplicitNone?: boolean
   /** Explicit cap attribute verbatim (incl. "none"); `cap` below holds the resolved display value, which may be inherited */
@@ -303,6 +320,12 @@ export interface Paragraph {
   alignSrc?: string
   /** Paragraph base direction (a:pPr rtl): true = RTL base, false = explicit LTR base, absent = inferred from the first strong character */
   rtl?: boolean
+  /** <a:pPr hangingPunct="0"> switches off East Asian hanging punctuation (a trailing closing mark may overhang the margin); absent = PowerPoint's default, on */
+  hangingPunct?: boolean
+  /** <a:pPr latinLnBrk="1"> ("allow Latin text to wrap in the middle of a word"): Hangul words then break per syllable like CJK; absent = word wrap */
+  latinLnBrk?: boolean
+  /** <a:pPr eaLnBrk="0"> switches off East Asian line-break rules (kinsoku: no closing mark at a line start, no opening bracket at a line end) */
+  eaLnBrk?: boolean
   /** Indent level (bullet level) */
   level?: number
   /** Line spacing (%, 100 = single) or absolute (pt, via lineExact) */
@@ -471,6 +494,21 @@ interface ElementBase {
    */
   descr?: string
   /**
+   * Withheld from the model, at element granularity. Only a picture can carry
+   * one: images, video and audio have no words to redact, so the point is that
+   * the model is not handed a reference it could fetch.
+   *
+   * Shape-level rather than run-level, because a picture is atomic — there is
+   * no run inside it to mark. `media.target` is the reason this is not merely
+   * cosmetic: for video and audio it can be an **external URL** (`r:link` of
+   * `videoFile`/`audioFile`), so emitting it hands the model a link it can
+   * replay, signed or not.
+   *
+   * The label is what the model sees. The `target`, the duration and the
+   * dimensions must not be.
+   */
+  redact?: string
+  /**
    * <p:cNvPr id>: matching key between group children and slices of the group's
    * originalXml (for in-group editing). parseGroup iterates children grouped by
    * tag, which differs from document order, so index alignment is not possible.
@@ -521,6 +559,8 @@ export interface Scene3D {
   extrusionColor?: ResolvedColor
   /** <a:sp3d prstMaterial> (legacyWireframe renders edges only) */
   material?: string
+  /** <a:sp3d><a:bevelT>: front-face bevel (width/height EMU, ST_BevelPresetType; defaults 76200/circle) */
+  bevelTop?: { wEmu: number; hEmu: number; preset: string }
 }
 
 export interface TextElement extends ElementBase {
@@ -557,6 +597,8 @@ export interface PictureElement extends ElementBase {
   dataUrl?: string
   /** Source crop <a:srcRect>: fraction cropped from each edge (0..1) */
   srcRect?: { l: number; t: number; r: number; b: number }
+  /** <a:tile> fill mode: the bitmap repeats across the frame instead of stretching to it */
+  tile?: true
   /** Whole-image opacity <a:blip><a:alphaModFix amt> (0..1, 1 = opaque; default 1) */
   opacity?: number
   /** Soft edges <a:softEdge rad> (EMU feather radius) */

@@ -124,8 +124,10 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  padding: 8px 28px 24px;
+  padding: 0 28px 24px;
   overflow-y: auto;
+  /* height of the sticky title row, so focus/scroll-into-view lands below it */
+  scroll-padding-top: 49px;
 }
 
 /* the pane scrolls, so rows must keep their natural height: .set-field's
@@ -136,7 +138,7 @@
 }
 
 .set-pane-title {
-  margin: 0 0 18px;
+  margin: 8px 0 18px;
   font-size: 18px;
   font-weight: 600;
   letter-spacing: -0.01em;
@@ -144,36 +146,178 @@
 }
 
 /* Knowledge has one connection form and progressive disclosure for tuning. */
-.set-dialog [hidden] { display:none !important; }
-.nawa-knowledge-settings { min-width:0; }
-.nawa-settings-heading { font-size:14px; font-weight:650; margin:0 0 10px; }
-.nawa-knowledge-settings .nawa-rag-field { margin:10px 0; gap:4px; }
-.nawa-knowledge-settings .nawa-data-settings { padding-block-start:18px; border-top:1px solid var(--border-subtle); }
-.nawa-knowledge-settings .nawa-rag-settings details, .nawa-knowledge-settings .nawa-analysis-limits { margin:12px 0; border:0; padding:0; }
-.nawa-knowledge-settings summary, .set-optional-integration summary { cursor:pointer; color:var(--text-secondary); font-size:13px; font-weight:500; }
-.nawa-knowledge-settings :is(.nawa-rag-grid,.nawa-data-settings-grid) { grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 16px; }
-.nawa-knowledge-settings .nawa-settings-footer { border:0; margin:12px 0 0; padding:0; }
-.nawa-knowledge-settings .nawa-settings-footer p { margin:8px 0; }
-.nawa-settings-hint, .nawa-knowledge-settings small { color:var(--text-secondary); font-size:12px; }
-.nawa-embedding-source { display:flex; flex-wrap:wrap; align-items:center; gap:10px; color:var(--text-secondary); font-size:12px; margin-block:8px; }
-.nawa-embedding-source strong { color:var(--text-primary); font-weight:600; }
-.nawa-embedding-model { display:flex; align-items:flex-end; gap:8px; }
-.nawa-embedding-model .nawa-rag-field { flex:1; min-width:0; }
-.nawa-embedding-model > button { flex:none; margin-block-end:10px; }
-.set-optional-integration { margin-block-start:24px; border-top:1px solid var(--border-subtle); padding-block-start:16px; }
-.set-optional-integration > summary { margin-block-end:12px; }
-.set-close-prompt { display:flex; align-items:center; flex-wrap:wrap; gap:10px; padding:12px 22px; border-top:1px solid var(--border-subtle); }
-.set-close-prompt > span { flex:1; min-width:160px; font-size:13px; }
-.set-dialog :is(button,input,select,summary):focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
-@media (max-width:640px) {
-  .set-overlay { padding:12px; }
-  .set-dialog { height:calc(100dvh - 24px); max-height:calc(100dvh - 24px); }
-  .set-header { padding:12px 16px; }
-  .set-body { flex-direction:column; }
-  .set-nav { width:auto; padding:4px 12px 10px; flex-direction:row; overflow-x:auto; }
-  .set-nav-item { width:auto; white-space:nowrap; flex:none; gap:6px; }
-  .set-pane { padding:12px 16px 20px; }
-  .nawa-knowledge-settings :is(.nawa-rag-grid,.nawa-data-settings-grid) { grid-template-columns:minmax(0,1fr); }
+.set-dialog [hidden] {
+  display: none !important;
+}
+.nawa-knowledge-settings {
+  min-width: 0;
+}
+.nawa-settings-heading {
+  font-size: 14px;
+  font-weight: 650;
+  margin: 0 0 10px;
+}
+.nawa-knowledge-settings .nawa-rag-field {
+  margin: 10px 0;
+  gap: 4px;
+}
+.nawa-knowledge-settings .nawa-data-settings {
+  padding-block-start: 18px;
+  border-top: 1px solid var(--border-subtle);
+}
+.nawa-knowledge-settings .nawa-rag-settings details,
+.nawa-knowledge-settings .nawa-analysis-limits {
+  margin: 12px 0;
+  border: 0;
+  padding: 0;
+}
+.nawa-knowledge-settings summary,
+.set-optional-integration summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+}
+.nawa-knowledge-settings :is(.nawa-rag-grid, .nawa-data-settings-grid) {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 16px;
+}
+.nawa-knowledge-settings .nawa-settings-footer {
+  border: 0;
+  margin: 12px 0 0;
+  padding: 0;
+}
+.nawa-knowledge-settings .nawa-settings-footer p {
+  margin: 8px 0;
+}
+.nawa-settings-hint,
+.nawa-knowledge-settings small {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.nawa-embedding-source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin-block: 8px;
+}
+.nawa-embedding-source strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.nawa-embedding-model {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.nawa-embedding-model .nawa-rag-field {
+  flex: 1;
+  min-width: 0;
+}
+.nawa-embedding-model > button {
+  flex: none;
+  margin-block-end: 10px;
+}
+.set-optional-integration {
+  margin-block-start: 24px;
+  border-top: 1px solid var(--border-subtle);
+  padding-block-start: 16px;
+}
+.set-optional-integration > summary {
+  margin-block-end: 12px;
+}
+.set-close-prompt {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 22px;
+  border-top: 1px solid var(--border-subtle);
+}
+.set-close-prompt > span {
+  flex: 1;
+  min-width: 160px;
+  font-size: 13px;
+}
+.set-dialog :is(button, input, select, summary):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+@media (max-width: 640px) {
+  .set-overlay {
+    padding: 12px;
+  }
+  .set-dialog {
+    height: calc(100dvh - 24px);
+    max-height: calc(100dvh - 24px);
+  }
+  .set-header {
+    padding: 12px 16px;
+  }
+  .set-body {
+    flex-direction: column;
+  }
+  .set-nav {
+    width: auto;
+    padding: 4px 12px 10px;
+    flex-direction: row;
+    overflow-x: auto;
+  }
+  .set-nav-item {
+    width: auto;
+    white-space: nowrap;
+    flex: none;
+    gap: 6px;
+  }
+  .set-pane {
+    padding: 12px 16px 20px;
+  }
+  .nawa-knowledge-settings :is(.nawa-rag-grid, .nawa-data-settings-grid) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* title row pinned to the top of the scrolling pane so the test/save actions
+   and their result pill stay in view however long the form is */
+.set-pane-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 0 -28px 12px;
+  padding: 8px 28px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface);
+}
+
+.set-media-fields {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.set-pane-head .set-pane-title {
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.set-pane-actions {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.set-pane-actions .set-ai-status {
+  margin-right: 0;
 }
 
 .set-field {
@@ -544,7 +688,7 @@
   line-height: 1.5;
 }
 
-/* footer feedback pill: spinner while testing, green on success/saved, red on failure */
+/* feedback pill: spinner while testing, green on success/saved, red on failure */
 .set-ai-status {
   display: inline-flex;
   align-items: center;
@@ -602,6 +746,23 @@
   font-size: 14px;
   font-weight: 600;
   color: var(--text);
+}
+
+.set-pane-subhead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 28px 0 4px;
+}
+
+.set-pane-subhead .set-pane-subtitle {
+  margin: 0;
+}
+
+.set-pane-subhead .set-ai-status {
+  margin-right: 0;
+  padding: 2px 8px 2px 6px;
+  font-size: 12px;
 }
 
 /* ── Integrations pane ── */
@@ -846,4 +1007,31 @@
 
 .set-intg-path {
   text-align: left;
+}
+
+/* Settings → About: the one-click update entry next to the version row */
+.set-update-btn {
+  height: 26px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.set-update-btn:hover {
+  background: var(--hover);
+}
+
+.set-ai-endpoint-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.set-ai-endpoint-row .set-dd {
+  flex: 1;
+  min-width: 0;
 }

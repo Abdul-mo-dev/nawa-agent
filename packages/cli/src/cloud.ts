@@ -128,8 +128,19 @@ export async function prepareCloud(env: NodeJS.ProcessEnv): Promise<void> {
   const proxy = proxyUrlFromEnv(env)
   if (proxy) {
     setGskProxyUrl(proxy)
-    const { ProxyAgent, setGlobalDispatcher } = await import('undici')
-    setGlobalDispatcher(new ProxyAgent(proxy))
+    const { EnvHttpProxyAgent, setGlobalDispatcher } = await import('undici')
+    // Cloud commands also run inside the long-lived MCP process. A plain
+    // ProxyAgent would send its local transport (and local model providers)
+    // through the remote proxy, even when the caller explicitly bypasses them.
+    setGlobalDispatcher(
+      new EnvHttpProxyAgent({
+        httpProxy: proxy,
+        httpsProxy: proxy,
+        noProxy: ['localhost', '127.0.0.1', '[::1]', env.no_proxy ?? env.NO_PROXY ?? '']
+          .filter(Boolean)
+          .join(','),
+      }),
+    )
   }
   const packaged = packagedResourcesDir()
   if (packaged && !env.GSK_CLI_PATH) {

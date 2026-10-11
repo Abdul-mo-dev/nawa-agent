@@ -179,8 +179,8 @@ export function scatterAxisBounds(
   explicit?: { min?: number | undefined; max?: number | undefined; majorUnit?: number | undefined },
 ): ScatterAxis {
   const finite = values.filter((value) => Number.isFinite(value))
-  const dataMin = finite.length > 0 ? Math.min(...finite) : 0
-  const dataMax = finite.length > 0 ? Math.max(...finite) : 1
+  const dataMin = finite.length > 0 ? finite.reduce((min, value) => (value < min ? value : min)) : 0
+  const dataMax = finite.length > 0 ? finite.reduce((max, value) => (value > max ? value : max)) : 1
   const min = explicit?.min ?? (dataMin >= 0 ? 0 : -niceCeiling(-dataMin))
   let max = explicit?.max ?? (dataMax <= 0 ? 0 : niceCeiling(dataMax))
   if (!(max > min)) max = min + 1
@@ -196,18 +196,43 @@ export function scatterAxisBounds(
 /// max = min + unit · ceil(bumped / unit). Calibrated on Excel-rendered
 /// refs: 18 → 20 step 2, 148 → 160 step 20, 877 → 1000 step 100, 1000 →
 /// 1200 step 200, 289753.76 → 350000 step 50000 (real-run1 + prod corpora).
+///
+/// `dataMin` is the series minimum, and it is the LAST parameter on purpose:
+/// `explicit` already sits in second position at every call site, so
+/// inserting a second positional would reinterpret the `c:scaling` object
+/// as a minimum. Non-negative data (the default 0) takes the original
+/// 0-based scale untouched.
 export function valueAxisScale(
   dataMax: number,
   explicit?: { min?: number | undefined; max?: number | undefined; majorUnit?: number | undefined },
+  dataMin = 0,
 ): { min: number; max: number; ticks: number[] } {
-  const min = explicit?.min ?? 0
-  const target = explicit?.max ?? Math.max(dataMax, min)
+  // A caller with no values at all passes Infinity/NaN; treat it as the
+  // non-negative default rather than scaling to -Infinity. Folding dataMax in
+  // keeps the invariant that the axis always contains the data it was given:
+  // a bare valueAxisScale(-100) can only be scaled by a negative floor.
+  const floor = Math.min(Number.isFinite(dataMin) ? dataMin : 0, dataMax)
+  // Below-zero data gets the same 5% headroom under its floor that the
+  // maximum gets above (Excel: -100 -> -120, -500 -> -600).
+  const autoMin =
+    floor >= 0
+      ? 0
+      : explicit?.majorUnit
+        ? -Math.ceil((-floor * 1.05) / explicit.majorUnit) * explicit.majorUnit
+        : -niceCeiling(-floor * 1.05)
+  const min = explicit?.min ?? autoMin
+  // Data that never rises above zero tops out AT zero, not above it: Excel
+  // shows no headroom over a zero baseline, and a bar/column needs that
+  // baseline inside the plot to have something to stand on.
+  const zeroTop = explicit?.max === undefined && dataMax <= 0
+  const target = explicit?.max ?? (zeroTop ? 0 : Math.max(dataMax, min))
   const span = target - min
-  // Flat data (all zeros): Excel scales 0..1 in 0.2 steps.
+  // Flat data (all zeros, or one repeated negative value): Excel scales
+  // 0..1 in 0.2 steps.
   if (!(span > 0)) {
     return { min, max: min + 1, ticks: unitTicks(min, min + 1, 0.2) }
   }
-  const bumped = explicit?.max === undefined ? span * 1.05 : span
+  const bumped = explicit?.max === undefined && !zeroTop ? span * 1.05 : span
   const unit = explicit?.majorUnit ?? autoAxisUnit(bumped)
   const max = explicit?.max ?? min + Math.ceil(bumped / unit - 1e-9) * unit
   return { min, max: max > min ? max : min + unit, ticks: unitTicks(min, max, unit) }
@@ -227,9 +252,21 @@ function autoAxisUnit(span: number): number {
   return 10 ** Math.ceil(Math.log10(span))
 }
 
+/// Ceiling for `unitTicks`; far above any axis a reader can draw, and only
+/// reachable when a c:majorUnit is finer than float noise.
+const MAX_AXIS_TICKS = 10_000
+
 function unitTicks(min: number, max: number, unit: number): number[] {
+  // A zero or non-finite unit has no tick count at all: min + index · 0
+  // never advances, so fall back to the bounds pair instead of looping.
+  if (!Number.isFinite(unit) || !(unit > 0)) return [min, max]
   const ticks: number[] = []
-  for (let index = 0; index < 25; index += 1) {
+  // Walk exactly the ticks min..max imply, rather than a fixed number of
+  // iterations: a fine c:majorUnit (0.1 over 0..10) needs 101 of them, and a
+  // fixed cap left the axis short of its own data. MAX_AXIS_TICKS only stops
+  // a unit so fine that the implied count is effectively unbounded.
+  const count = Math.min(Math.floor((max - min) / unit + 1e-6) + 1, MAX_AXIS_TICKS)
+  for (let index = 0; index < count; index += 1) {
     const tick = min + index * unit
     if (tick > max + unit * 1e-6) break
     ticks.push(Number(tick.toPrecision(12)))
@@ -582,12 +619,21 @@ export function chartDataFromValues(
 }
 
 /// `'Sheet Name'!$B$2:$B$13` (chart `c:f` style) → sheet name + plain range.
+/// A range is a cell, a cell range, a whole-column range (`$A:$A`) or a
+/// whole-row range (`$1:$1`), the shapes Excel writes into `c:f`. Case
+/// is accepted because parseAddress downstream is case-strict, so the range is
+/// normalised here. A defined name names no sheet and stays null: rewriting
+/// one would need the defined-names table, not a sheet rename.
 export function splitSheetRef(ref: string): { sheetName: string; range: string } | null {
-  const match = /^'?((?:[^'!]|'')+?)'?!(\$?[A-Z]{1,3}\$?[0-9]+(?::\$?[A-Z]{1,3}\$?[0-9]+)?)$/.exec(
-    ref.trim(),
-  )
+  const match =
+    /^'?((?:[^'!]|'')+?)'?!(\$?[A-Z]{1,3}\$?[0-9]+(?::\$?[A-Z]{1,3}\$?[0-9]+)?|\$?[A-Z]{1,3}:\$?[A-Z]{1,3}|\$?[0-9]+:\$?[0-9]+)$/i.exec(
+      ref.trim(),
+    )
   if (!match?.[1] || !match[2]) return null
-  return { sheetName: match[1].replace(/''/g, "'"), range: match[2].replace(/\$/g, '') }
+  return {
+    sheetName: match[1].replace(/''/g, "'"),
+    range: match[2].toUpperCase().replace(/\$/g, ''),
+  }
 }
 
 /// Rewrites the sheet-name qualifier of a chart `c:f` reference, keeping the

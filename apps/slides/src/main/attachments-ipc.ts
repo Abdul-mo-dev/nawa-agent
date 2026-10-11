@@ -1,3 +1,7 @@
+import {
+  assertDirectoryStagePicker,
+  assertDirectoryStageLocalRead,
+} from '../../../../packages/electron-utils/src/directory-stage'
 /**
  * Chat attachment IPC for the slides main process, extracted from
  * slides-main.ts: local files are validated/parsed here and fed to the agent
@@ -110,24 +114,30 @@ function collectAttachments(paths: string[]): AttachmentAddResult {
   return { accepted, rejected }
 }
 
-/** Save clipboard-pasted image bytes to a temp file (screenshots/bitmaps without a local path); null for non-images or empty data */
+/** Save clipboard-pasted image bytes to a temp file (screenshots/bitmaps without a local path) */
 let pastedImageSeq = 0
-function savePastedImage(data: unknown, ext: unknown): string | null {
+function savePastedImage(
+  data: unknown,
+  ext: unknown,
+): { path: string } | { error: 'too-large' | 'invalid' } {
   const cleanExt = typeof ext === 'string' ? ext.toLowerCase() : ''
-  if (!ATTACHMENT_IMAGE_EXTS.has(cleanExt)) return null
+  if (!ATTACHMENT_IMAGE_EXTS.has(cleanExt)) return { error: 'invalid' }
   const bytes =
     data instanceof ArrayBuffer
       ? Buffer.from(data)
       : ArrayBuffer.isView(data)
         ? Buffer.from(data.buffer, data.byteOffset, data.byteLength)
         : null
-  if (!bytes || bytes.byteLength === 0) return null
+  if (!bytes || bytes.byteLength === 0) return { error: 'invalid' }
+  // Renderer-driven clipboard bytes hit the temp disk: enforce the same 5MB
+  // image cap as file attachments so pastes cannot fill the disk.
+  if (bytes.byteLength > ATTACHMENT_IMAGE_MAX_BYTES) return { error: 'too-large' }
   const dir = join(app.getPath('temp'), 'genoffice-pasted')
   mkdirSync(dir, { recursive: true })
   const stamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-')
   const filePath = join(dir, `pasted-${stamp}-${++pastedImageSeq}.${cleanExt}`)
   writeFileSync(filePath, bytes)
-  return filePath
+  return { path: filePath }
 }
 
 /** Extract attachment text via @genoffice/file-parse (docx/pdf/pptx/xlsx/plain text) */
@@ -152,7 +162,9 @@ async function extractAttachmentText(filePath: string): Promise<string> {
 
 /** Register the slides:files-* attachment channels (called from registerSlidesIpc). */
 export function registerAttachmentIpc(): void {
-  ipcMain.handle('slides:files-pick', async (): Promise<AttachmentAddResult | null> => {
+  ipcMain.handle('slides:files-pick', async (_stageEvent): Promise<AttachmentAddResult | null> => {
+    assertDirectoryStagePicker(_stageEvent.sender)
+
     const parent = dialogParent()
     const options = {
       title: tm('dlgAddAttachment'),
@@ -167,7 +179,10 @@ export function registerAttachmentIpc(): void {
     return collectAttachments(r.filePaths)
   })
 
-  ipcMain.handle('slides:files-add', (_e, paths: string[]) => collectAttachments(paths))
+  ipcMain.handle('slides:files-add', (_e, paths: string[]) => {
+    for (const path of paths) assertDirectoryStageLocalRead(_e.sender, path)
+    return collectAttachments(paths)
+  })
 
   ipcMain.handle(
     'slides:files-read',
@@ -177,6 +192,7 @@ export function registerAttachmentIpc(): void {
       offset: number,
       maxChars: number,
     ): Promise<AttachmentReadResult> => {
+      assertDirectoryStageLocalRead(_e.sender, filePath)
       const name = basename(filePath)
       const ext = name.split('.').pop()?.toLowerCase() ?? ''
       if (!ATTACHMENT_EXTS.has(ext)) return { ok: false, error: tm('errUnsupportedExt', { ext }) }
@@ -202,6 +218,7 @@ export function registerAttachmentIpc(): void {
 
   // Image attachments read raw bytes -> base64; AiPanel puts them into the user message's images for multimodal
   ipcMain.handle('slides:files-read-image', (_e, filePath: string): AttachmentImageResult => {
+    assertDirectoryStageLocalRead(_e.sender, filePath)
     const name = basename(filePath)
     const ext = name.split('.').pop()?.toLowerCase() ?? ''
     const mime = ATTACHMENT_IMAGE_MIME[ext]
@@ -221,10 +238,16 @@ export function registerAttachmentIpc(): void {
   ipcMain.handle(
     'slides:files-add-pasted-image',
     (_e, data: unknown, ext: unknown): AttachmentAddResult => {
-      const filePath = savePastedImage(data, ext)
-      return filePath
-        ? collectAttachments([filePath])
-        : { accepted: [], rejected: [tm('errNotImage')] }
+      assertDirectoryStagePicker(_e.sender)
+
+      const saved = savePastedImage(data, ext)
+      if ('error' in saved) {
+        return {
+          accepted: [],
+          rejected: [saved.error === 'too-large' ? tm('errImageTooLarge') : tm('errNotImage')],
+        }
+      }
+      return collectAttachments([saved.path])
     },
   )
 }

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
-import { printPdf, printScaleForAreas } from '../src/renderer/print'
+import { printPdf, printScaleForAreas, PRINT_DIALOG_TIMEOUT_MS } from '../src/renderer/print'
 
 function fakeDoc(numPages: number, render = vi.fn(() => ({ promise: Promise.resolve() }))) {
   const getPage = vi.fn(async () => ({
@@ -90,6 +90,17 @@ describe('printPdf', () => {
     expect(window.print).toHaveBeenCalledTimes(1)
   })
 
+  it('refuses to open the print dialog when every requested page is out of range', async () => {
+    const { doc, getPage } = fakeDoc(5)
+
+    // Printing an empty document silently is worse than telling the caller
+    // their selection no longer exists.
+    await expect(printPdf(doc, [0])).rejects.toThrow('none of the requested pages')
+    await expect(printPdf(doc, [999])).rejects.toThrow('none of the requested pages')
+    expect(getPage).not.toHaveBeenCalled()
+    expect(window.print).not.toHaveBeenCalled()
+  })
+
   it('waits for afterprint before resolving', async () => {
     const { doc } = fakeDoc(1)
     let fireAfterPrint: () => void = () => {}
@@ -120,6 +131,52 @@ describe('printPdf', () => {
     await expect(printPdf(doc)).rejects.toThrow('decode failed')
     expect(document.querySelector('.pdf-print-root')).toBeNull()
     expect(window.print).not.toHaveBeenCalled()
+  })
+
+  it('gives up and releases the pages when afterprint never fires', async () => {
+    vi.useFakeTimers()
+    try {
+      const { doc } = fakeDoc(2)
+      // A suppressed print: the dialog never opens, so no event ever arrives.
+      ;(window.print as ReturnType<typeof vi.fn>).mockImplementation(() => {})
+      const done = printPdf(doc)
+      const settled = done.then(
+        () => 'resolved',
+        (err: Error) => err.message,
+      )
+      await vi.advanceTimersByTimeAsync(PRINT_DIALOG_TIMEOUT_MS)
+
+      // Settles instead of hanging, and the rasterized pages are released.
+      await expect(settled).resolves.toContain('never reported completion')
+      expect(document.querySelector('.pdf-print-root')).toBeNull()
+      // Nothing left listening, so a stray event cannot resolve a dead print.
+      expect(window.print).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('rejects when window.print throws synchronously', async () => {
+    const { doc } = fakeDoc(1)
+    ;(window.print as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      throw new Error('print blocked')
+    })
+    await expect(printPdf(doc)).rejects.toThrow('print blocked')
+    expect(document.querySelector('.pdf-print-root')).toBeNull()
+  })
+
+  it('still resolves on afterprint without waiting out the timeout', async () => {
+    vi.useFakeTimers()
+    try {
+      const { doc } = fakeDoc(1)
+      ;(window.print as ReturnType<typeof vi.fn>).mockImplementation(() => {
+        window.dispatchEvent(new Event('afterprint'))
+      })
+      await expect(printPdf(doc)).resolves.toBeUndefined()
+      expect(document.querySelector('.pdf-print-root')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

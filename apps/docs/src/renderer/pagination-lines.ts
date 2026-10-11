@@ -1,7 +1,7 @@
 // DOM line-box sampling for page-crossing blocks (cached per element), the
 // line-split re-slice, table row cut positions and line anchors.
 import { rangeSlot } from './dom-range'
-import { applyBlockMeta } from './pagination-measure'
+import { applyBlockMeta, lineLeadPx } from './pagination-measure'
 import { CapacityWindows, SortedYs } from './pagination-index'
 import { blockInlineExtraPx } from './pagination-sections'
 import {
@@ -22,6 +22,7 @@ import type {
   SectionGeom,
   SliceOutputs,
   TableRowBox,
+  LineBox,
 } from './pagination-types'
 
 const rowRange = rangeSlot()
@@ -60,6 +61,51 @@ const PATCH_KEYS = [
   'oversizeClips',
 ] as const
 
+/**
+ * Carry the previous pass's line/row samples onto the freshly measured blocks
+ * of a streaming open's pass (genoffice#526): only the appended tail can
+ * change layout, and fillLineBoxes skips blocks that already carry samples, so
+ * the unchanged prefix pays no DOM sampling at all — the sampler's own
+ * per-element cache still charges a full subtree signature per block per pass.
+ *
+ * Gated on pure appends: `dirty` is the first top-level index the pass was
+ * triggered for, `lastPassChildCount` the document's child count at the last
+ * pass. An edit below the append frontier (dirty < lastPassChildCount)
+ * disables the carry outright — a same-height edit would keep stale line
+ * boxes the height gate cannot see; an edit above it sits beyond the element
+ * identity prefix and never matches. A webfont load reaches the pass with
+ * dirty = null, so the gate drops the carry there too (line boxes shift
+ * without height). Caller passes `pending` (a phased open is streaming) so
+ * this module stays decoupled from the phased-open state.
+ */
+export function carryStreamedSamples(
+  blocks: BlockBox[],
+  lastBlocks: BlockBox[],
+  opts: { pending: boolean; dirty: number | null; lastPassChildCount: number },
+): number {
+  if (!opts.pending || lastBlocks.length === 0) return 0
+  if (opts.dirty === null || opts.dirty < opts.lastPassChildCount) return 0
+  const n = Math.min(blocks.length, lastBlocks.length)
+  let carried = 0
+  for (let i = 0; i < n; i++) {
+    const b = blocks[i]
+    const p = lastBlocks[i]
+    // element identity is the append frontier: once it diverges (user
+    // insert/delete, remount), the arrays no longer align
+    if (!b.el || b.el !== p.el) break
+    if (Math.abs(b.height - p.height) > 0.01) continue
+    if ((b.spaceAfterPx ?? 0) !== (p.spaceAfterPx ?? 0)) continue
+    if ((b.widthPx ?? -1) !== (p.widthPx ?? -1)) continue
+    if (p.lineBoxes) b.lineBoxes = p.lineBoxes
+    if (p.tableRows) b.tableRows = p.tableRows
+    if (p.lineLeadPx !== undefined) b.lineLeadPx = p.lineLeadPx
+    if (p.colWraps) b.colWraps = p.colWraps
+    if (p.oversizeLineH !== undefined) b.oversizeLineH = p.oversizeLineH
+    if (p.lineBoxes || p.tableRows) carried++
+  }
+  return carried
+}
+
 export function sliceWithLineSplit(
   blocks: BlockBox[],
   geoms: SectionGeom[],
@@ -69,7 +115,7 @@ export function sliceWithLineSplit(
   out?: SliceOutputs,
   resume?: PassResume,
 ): PageSlice[] {
-  if (metaOf) applyBlockMeta(blocks, metaOf, zoomFactor)
+  applyBlockMeta(blocks, metaOf, zoomFactor)
   const outs: SliceOutputs = out ?? {}
   outs.colWrapRequests ??= []
   const prefix = resume ? resume.prevSlices.slice(0, resume.page) : []
@@ -364,7 +410,13 @@ export function probeColWrap(
  */
 const lineSampleCache = new WeakMap<
   HTMLElement,
-  { sig: string; boundaries?: number[]; rows?: TableRowBox[]; soleLineBottom?: number }
+  {
+    sig: string
+    boundaries?: number[]
+    rows?: TableRowBox[]
+    soleLineBottom?: number
+    soleLineTop?: number
+  }
 >()
 
 // webfont loads shift line boxes without changing block height (explicit line
@@ -374,7 +426,6 @@ let lineSampleFontEpoch = 0
 export function bumpLineSampleFontEpoch(): void {
   lineSampleFontEpoch++
 }
-
 // the DOM does not change inside one slicing call, so its fixed-point iterations
 // share the per-element signature reads instead of repeating them
 let sigMemo: Map<HTMLElement, string> | null = null
@@ -475,6 +526,8 @@ export function fillLineBoxes(
       !atPageTop &&
       // a mid-paragraph page break splits the block at a line boundary
       !block.innerBreaks?.length &&
+      // an in-cell page break needs row data to act on even without a crossing
+      !block.hasCellBreak &&
       // chain anchors always need line/row data: the chain only keeps with the
       // anchor's first line(s)/row, so the whole-block height is misleading
       !(i > 0 && blocks[i - 1].keepNext && !block.keepNext)
@@ -505,6 +558,7 @@ export function fillLineBoxes(
         ? hit.rows.map((r) => ({ ...r }))
         : domTableRows(block.el, textH, zoomFactor)
       if (!hit?.rows) lineSampleCache.set(block.el, { sig, rows: rows.map((r) => ({ ...r })) })
+      overlayLiveRowFlags(block.el, rows)
       if (rows.length > 0) {
         const flags =
           block.docxIndex !== undefined ? metaOf?.(block.docxIndex)?.tableRowFlags : undefined
@@ -514,7 +568,7 @@ export function fillLineBoxes(
             // it must beat the source XML so turning repetition off takes effect
             // before the document is saved and reopened.
             if (r.isHeader === undefined && flags[i]?.isHeader) r.isHeader = true
-            if (flags[i]?.cantSplit) r.cantSplit = true
+            if (r.cantSplit === undefined && flags[i]?.cantSplit) r.cantSplit = true
             if (flags[i]?.keepNext) r.keepNext = true
             if (flags[i]?.minHPx) r.minHPx = flags[i].minHPx
           })
@@ -526,36 +580,68 @@ export function fillLineBoxes(
       }
       continue
     }
+    if (block.lineLeadPx === undefined) {
+      block.lineLeadPx = lineLeadPx(block.el)
+      if (block.lineLeadPx > 0.5) changed = true
+    }
     // synthesized over-page cuts below mutate the list, so cached entries are copied out
     let boundaries: number[]
     let soleLineBottom: number | undefined
+    let soleLineTop: number
     if (hit?.boundaries) {
       boundaries = [...hit.boundaries]
       soleLineBottom = hit.soleLineBottom
+      soleLineTop = hit.soleLineTop ?? 0
     } else {
       const lines = domLineRects(block.el, zoomFactor)
       boundaries = lineBreakBoundaries(lines)
       soleLineBottom = lines.length === 1 ? lines[0].bottom : undefined
+      soleLineTop = lines.length === 1 ? lines[0].offset : 0
       lineSampleCache.set(block.el, {
         sig,
         boundaries: [...boundaries],
-        ...(soleLineBottom !== undefined ? { soleLineBottom } : {}),
+        ...(soleLineBottom !== undefined ? { soleLineBottom, soleLineTop } : {}),
       })
     }
     // sole line taller than the column (oversized inline picture): no break
     // points exist, so flag the block for the atomic page-bottom clip instead
-    // of cutting (Word overflow-clips the line; see the placement branch)
-    if (boundaries.length === 0 && soleLineBottom !== undefined && soleLineBottom > capH + 0.5) {
-      if (block.oversizeLineH !== soleLineBottom) {
-        block.oversizeLineH = soleLineBottom
-        changed = true
+    // of cutting (Word overflow-clips the line; see the placement branch).
+    // Any excess counts, even a sub-pixel one: cutting it would leave an
+    // ink-less tail slice that opens a blank page. A block already clipped
+    // measures at the capacity, so only its unclipped line extent can tell.
+    // A text line counts by its own height: a short line pushed under a
+    // page-tall float ends below the capacity too, but it belongs at the next
+    // page top (the synthesized cut below), not under the clip.
+    if (boundaries.length === 0 && soleLineBottom !== undefined) {
+      const replaced = replacedSoleLine(block.el)
+      const overCap = !replaced
+        ? soleLineBottom - soleLineTop > capH + 0.5
+        : clipMarked
+          ? soleLineBottom > capH - 0.01
+          : soleLineBottom > capH + 0.5 || block.height - (block.spaceAfterPx ?? 0) > capH + 0.01
+      if (overCap) {
+        if (block.oversizeLineH !== soleLineBottom) {
+          block.oversizeLineH = soleLineBottom
+          changed = true
+        }
+        continue
       }
-      continue
+      // the space above a line pushed under a page-tall float is ink-less lead:
+      // the page bottom swallows it and the line opens the next page (Word).
+      // Cutting it at page height would push the lead whole instead.
+      if (!replaced && soleLineTop > 0.5 && block.height > contentH) {
+        const boxes = tileBoxes([soleLineTop], textH)
+        boxes[0].lead = true
+        block.lineBoxes = boxes
+        changed = true
+        continue
+      }
     }
     if (boundaries.length === 0 && block.height > contentH) {
       // over-page block with no in-flow lines at all (floated/absolute content):
-      // synthesize cut points at page height, equivalent to hard pixel cuts
-      for (let y = contentH; y < block.height; y += contentH) boundaries.push(y)
+      // synthesize cut points at page height, equivalent to hard pixel cuts;
+      // a sub-pixel remainder is not a slice
+      for (let y = contentH; y < block.height - 1; y += contentH) boundaries.push(y)
     }
     // a leading page break's line has no text rect, so its cut (the first text
     // line's ink top) lands inside the first sampled line box: make it a boundary
@@ -571,11 +657,14 @@ export function fillLineBoxes(
   return changed
 }
 
+function replacedSoleLine(el: HTMLElement): boolean {
+  if (el.classList.contains('doc-protected-image') || el.classList.contains('doc-protected-chart'))
+    return true
+  return el.querySelector('img') !== null && !(el.textContent ?? '').trim()
+}
+
 /** Boundary list (excluding 0) → line boxes tiling the block height (heights are adjacent-boundary diffs; the first box starts at 0) */
-function tileBoxes(
-  boundaries: number[],
-  blockHeight: number,
-): Array<{ offsetInBlock: number; height: number }> {
+function tileBoxes(boundaries: number[], blockHeight: number): LineBox[] {
   const tops = [0, ...boundaries.filter((b) => b > 0.5 && b < blockHeight)]
   return tops.map((top, i) => ({
     offsetInBlock: top,
@@ -656,6 +745,20 @@ export function applyRowNotes(
   })
 }
 
+/** tr attributes are live editor state (repeat header / cantSplit toggles change no text or
+ *  geometry, so the sample cache would otherwise keep the stale flags) */
+export function overlayLiveRowFlags(el: HTMLElement, rows: TableRowBox[]): void {
+  const trs = outerTableRows(el)
+  rows.forEach((row, i) => {
+    const tr = trs[i]
+    if (!tr) return
+    if (tr.hasAttribute('data-repeat-header'))
+      row.isHeader = tr.getAttribute('data-repeat-header') === '1'
+    if (tr.hasAttribute('data-cant-split'))
+      row.cantSplit = tr.getAttribute('data-cant-split') === '1'
+  })
+}
+
 function domTableRows(el: HTMLElement, blockHeight: number, zoomFactor: number): TableRowBox[] {
   const gaps = Array.from(el.querySelectorAll('.page-gap-inline')).map((g) =>
     g.getBoundingClientRect(),
@@ -674,7 +777,7 @@ function domTableRows(el: HTMLElement, blockHeight: number, zoomFactor: number):
   }
   return tileBoxes(tops, blockHeight).map((b, i) => {
     if (!trs[i]) return { height: b.height }
-    const { cuts, contentBottom, cells } = rowCutYs(
+    const { cuts, contentBottom, cells, forcedCuts } = rowCutYs(
       trs[i],
       b.offsetInBlock,
       b.height,
@@ -689,7 +792,11 @@ function domTableRows(el: HTMLElement, blockHeight: number, zoomFactor: number):
       ...(trs[i].hasAttribute('data-repeat-header')
         ? { isHeader: trs[i].getAttribute('data-repeat-header') === '1' }
         : {}),
+      ...(trs[i].hasAttribute('data-cant-split')
+        ? { cantSplit: trs[i].getAttribute('data-cant-split') === '1' }
+        : {}),
       ...(cuts.length > 0 ? { cutYs: cuts } : {}),
+      ...(forcedCuts && forcedCuts.length > 0 ? { forcedCuts } : {}),
       ...(cells ? { cells } : {}),
       ...(splitExtra > 0 ? { splitExtra } : {}),
     }
@@ -702,6 +809,29 @@ const PARA_SELECTOR = 'p, h1, h2, h3, h4, h5, h6, .doc-li'
  *  per cell (Word breaks between any two lines), rejecting cuts that would cross a
  *  line box in another cell. Also reports the lowest content-band bottom and, for
  *  multi-cell rows, each cell's own line geometry (per-cell Word-style splitting). */
+/** Page-break offsets inside a row, relative to the row top (px, unscaled).
+ *
+ *  A break is what DocHardBreak renders for `w:br w:type="page"`, and nothing
+ *  else in the pagination engine looks for it — so this is the only place the
+ *  author's explicit page turn can reach the layout. jsdom does no layout, so
+ *  this stays a pure function over rects and is exercised directly. */
+export function forcedCutYs(
+  breaks: ReadonlyArray<{ rect: DOMRect }>,
+  elTop: number,
+  rowTop: number,
+  gapAbove: (top: number) => number,
+  zoomFactor: number,
+): number[] {
+  const out: number[] = []
+  for (const { rect } of breaks) {
+    // rect.top rather than offsetTop: a collapsed <br> has no height but still
+    // reports a position, and offsetTop lives in the offsetParent's coordinate
+    // space, which is not the one elTop is measured in.
+    out.push((rect.top - elTop - gapAbove(rect.top)) / zoomFactor - rowTop)
+  }
+  return out
+}
+
 function rowCutYs(
   tr: Element,
   rowTop: number,
@@ -709,12 +839,44 @@ function rowCutYs(
   elTop: number,
   gapAbove: (top: number) => number,
   zoomFactor: number,
-): { cuts: number[]; contentBottom: number; cells?: RowCellBox[] } {
+): { cuts: number[]; contentBottom: number; cells?: RowCellBox[]; forcedCuts?: number[] } {
   const cells = Array.from(tr.children).filter((c) => c.tagName === 'TD' || c.tagName === 'TH')
   const range = rowRange()
   const cellBands: Array<Array<[number, number]>> = []
   const paraBands: Array<Array<[number, number]>> = []
   const cellBoxes: RowCellBox[] = []
+  // Explicit page breaks the author typed inside this row. Measured, not
+  // inferred: br.doc-page-br is what DocHardBreak renders, and an author who
+  // pressed the break expects a page to turn even mid-line.
+  // Explicit page breaks inside this row, as offsets from the row top (px).
+  //
+  // Two shapes reach a cell, and the editor produces the second one:
+  //
+  //  - `p.page-break-before` — Ctrl+Enter splits the paragraph and sets the
+  //    flag on the new one. This is what the editor actually emits, and the
+  //    block-level reader honours it only for top-level blocks, so inside a
+  //    cell nobody was reading it.
+  //  - `br.doc-page-br` — a `w:br w:type="page"` in the source. The editor
+  //    only produces this when the caret sits at the very start of a paragraph,
+  //    and `styles.css` hides it inside table cells, so a display:none node
+  //    reports an all-zero rect and carries no usable position.
+  //
+  // A break is an instruction rather than a heuristic, so these are forced
+  // cuts: exempt from the line-safety and widow/orphan filters, which exist to
+  // avoid cutting text rather than to override the author. Word honours a
+  // mid-line paragraph break too.
+  // a page-break-before paragraph turns the page at its own top edge. (The
+  // br.doc-page-br shape is deliberately not collected: styles.css hides it
+  // inside table cells, so it measures a zero rect and carries no position.)
+  const forcedCuts = forcedCutYs(
+    [...tr.querySelectorAll('p.page-break-before')].map((p) => ({
+      rect: p.getBoundingClientRect(),
+    })),
+    elTop,
+    rowTop,
+    gapAbove,
+    zoomFactor,
+  )
   // exact-height clip boxes and vertical text are not line-splittable content
   let cellsOk =
     cells.length >= 2 && !tr.querySelector(':scope > * > .cell-clip, :scope > * > .cell-vert')
@@ -797,8 +959,12 @@ function rowCutYs(
     (max, bands) => bands.reduce((m, [, b]) => Math.max(m, b), max),
     0,
   )
+  // forced cuts travel separately from the content-line candidates: a forced
+  // cut must turn the page even when the whole row fits, which the placement
+  // gate would skip, and per-cell line splitting must not double-cut at it
   return {
     cuts: cellCutYs(cellBands, rowHeight, paraBands),
+    ...(forcedCuts.length > 0 ? { forcedCuts } : {}),
     contentBottom,
     ...(cellsOk && cellBoxes.some((c) => c.lines.length > 0) ? { cells: cellBoxes } : {}),
   }
@@ -890,11 +1056,20 @@ function clusterLineBands(bands: Array<[number, number]>): Array<[number, number
  *  tolerance for sub-pixel jitter). paraBands (per-paragraph line bands across
  *  all cells) add Word's widow/orphan rule to in-row breaks: a cut through a
  *  paragraph must leave at least two of its lines on each side, else the whole
- *  row pushes (Word pushes a row whose 2-line cell would split, prod100r4/32+47). */
+ *  row pushes (Word pushes a row whose 2-line cell would split, prod100r4/32+47).
+ *
+ *  forcedCuts are explicit page breaks the author typed (br.doc-page-br), as
+ *  offsets from the row top. They are honoured whatever the heuristics say:
+ *  a break is an instruction, not a suggestion, and it is the only thing that
+ *  makes the page actually turn — the marker renders either way. They are
+ *  exempt from the line-safety and widow/orphan filters for the same reason,
+ *  because Word honours them mid-line too. Only the row-edge clamp applies, so
+ *  a break at y=0 or at the very bottom is not a cut. */
 export function cellCutYs(
   cellBands: Array<Array<[number, number]>>,
   rowHeight: number,
   paraBands?: Array<Array<[number, number]>>,
+  forcedCuts: readonly number[] = [],
 ): number[] {
   const cellLines = cellBands.map(clusterLineBands)
   const paraLines = (paraBands ?? []).map(clusterLineBands)
@@ -923,7 +1098,18 @@ export function cellCutYs(
     if (cuts.length > 0 && y - cuts[cuts.length - 1] < 1) continue
     cuts.push(y)
   }
-  return cuts
+  const forced = [...forcedCuts].sort((a, b) => a - b)
+  for (let i = 0; i < forced.length; i++) {
+    const y = forced[i]
+    // row edges only: a break there has no page above or below to separate
+    if (y <= 2 || y >= rowHeight - 2) continue
+    // de-duplicate against the previous *break*, not the previous cut: a break
+    // landing 1px from another break is still one break, and comparing against a
+    // heuristic cut would drop it for being near a line boundary instead
+    if (i > 0 && y - forced[i - 1] < 1) continue
+    cuts.push(y)
+  }
+  return cuts.sort((a, b) => a - b).filter((y, i, all) => i === 0 || y - all[i - 1] >= 1)
 }
 
 /**

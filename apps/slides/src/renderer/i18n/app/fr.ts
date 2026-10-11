@@ -1,6 +1,16 @@
 import type { zh } from './zh'
 
 export const fr = {
+  redactMenuLabel: 'Masquer la sélection à l’IA',
+  redactDialogDesc:
+    'La sélection reste dans le document et dans le fichier ; le modèle ne voit que le marqueur ci-dessous. Donnez-lui un nom pour qu’il sache ce qu’il désigne.',
+  redactDialogScope:
+    'Le masquage ne concerne que l’IA de cette application. La CLI, les outils MCP et l’exportation sans interface lisent le fichier directement et voient toujours ces mots.',
+  redactDialogPlaceholder: 'Nom du placeholder, ex. : téléphone du client',
+  redactCancel: 'Annuler',
+  redactInsert: 'Masquer',
+  redactEnable: 'Clic droit sur une sélection pour la masquer au modèle.',
+
   appPhPromptTitle: 'Cliquez pour ajouter un titre',
   appPhPromptSubtitle: 'Cliquez pour ajouter un sous-titre',
   appPhPromptBody: 'Cliquez pour ajouter du texte',
@@ -122,6 +132,7 @@ export const fr = {
   appPasteOptSource: 'Conserver la mise en forme source',
   appPasteOptTheme: 'Utiliser le thème de destination',
   appStatusPasteOptionsExpired: 'Les options de collage ne sont plus disponibles',
+  appStatusPasteTruncated: 'Le texte collé était trop long et a été tronqué',
   appCtxHideSlide: 'Masquer la diapositive',
   appCtxUnhideSlide: 'Afficher la diapositive',
   appCtxAddSectionBefore: 'Ajouter une section (avant cette diapositive)',

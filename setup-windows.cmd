@@ -16,7 +16,7 @@ if errorlevel 1 goto :failed
 call npm run browser:build
 if errorlevel 1 goto :failed
 echo.
-echo Setup completed. Double-click "Start GenOffice.cmd".
+echo Setup completed. Double-click "Start-Nawa.cmd".
 pause
 exit /b 0
 :failed

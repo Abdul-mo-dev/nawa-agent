@@ -13,6 +13,7 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use crate::SidecarError;
+use crate::xml_util::copy_entry_bounded;
 
 const MAX_ENTRY_COUNT: usize = 10_000;
 /// Cap on a single decompressed entry handed to the patching layer. The
@@ -24,7 +25,7 @@ const MAX_ENTRY_COUNT: usize = 10_000;
 // 500 MiB, not 512: the host patches entries as JavaScript strings, and
 // V8's maximum string length is 536,870,888 bytes — an entry between that
 // and 512 MiB would pass a 512 MiB cap and then fail to materialize.
-const MAX_EXTRACTED_ENTRY_BYTES: u64 = 500 * 1024 * 1024;
+pub(crate) const MAX_EXTRACTED_ENTRY_BYTES: u64 = 500 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -149,15 +150,15 @@ pub fn read_entries_to_dir(
     for (index, name) in names.iter().enumerate() {
         let mut entry = crate::zip_entry(&mut archive, name)
             .map_err(|_| SidecarError::Workbook(format!("Workbook is missing {name}.")))?;
-        if entry.size() > MAX_EXTRACTED_ENTRY_BYTES {
+        let declared = entry.size();
+        if declared > MAX_EXTRACTED_ENTRY_BYTES {
             return Err(SidecarError::Workbook(format!(
-                "Entry {name} is {} bytes uncompressed, above the {MAX_EXTRACTED_ENTRY_BYTES} byte patch limit.",
-                entry.size()
+                "Entry {name} is {declared} bytes uncompressed, above the {MAX_EXTRACTED_ENTRY_BYTES} byte patch limit."
             )));
         }
         let output_path = output_dir.join(format!("entry-{index}.bin"));
         let mut output = BufWriter::new(File::create(&output_path)?);
-        std::io::copy(&mut entry, &mut output)?;
+        copy_entry_bounded(&mut entry, declared, MAX_EXTRACTED_ENTRY_BYTES, &mut output)?;
         output.flush()?;
         extracted.push(ExtractedEntry {
             name: name.clone(),
@@ -290,6 +291,77 @@ fn validate_edit_sets(
 
 fn is_safe_entry_name(name: &str) -> bool {
     !name.is_empty() && canonical_entry_name(name).as_deref() == Some(name)
+}
+
+pub(crate) fn resolve_relationship_target(
+    source_path: &str,
+    target: &str,
+) -> Result<String, SidecarError> {
+    let target = target.trim();
+    let target = target
+        .split_once('#')
+        .map(|(path, _)| path)
+        .unwrap_or(target);
+    let decoded = crate::xml_util::decode_uri_path(target)?;
+    if decoded.is_empty()
+        || decoded.contains('\0')
+        || decoded.starts_with("//")
+        || decoded.starts_with('\\')
+        || has_uri_scheme(&decoded)
+    {
+        return Err(SidecarError::Workbook(
+            "OOXML relationship target is malformed or unsafe.".into(),
+        ));
+    }
+    let source = source_path.replace('\\', "/");
+    let mut parts: Vec<String> = if decoded.starts_with('/') {
+        Vec::new()
+    } else {
+        let mut source_parts: Vec<&str> = source
+            .split('/')
+            .filter(|segment| !segment.is_empty() && *segment != ".")
+            .collect();
+        source_parts.pop();
+        source_parts.into_iter().map(str::to_owned).collect()
+    };
+    for segment in decoded.replace('\\', "/").split('/') {
+        match segment {
+            "" | "." => {}
+            ".." => {
+                if parts.pop().is_none() {
+                    return Err(SidecarError::Workbook(
+                        "OOXML relationship escapes the package.".into(),
+                    ));
+                }
+            }
+            value => parts.push(value.to_owned()),
+        }
+    }
+    if parts.is_empty() {
+        return Err(SidecarError::Workbook(
+            "OOXML relationship target is malformed or unsafe.".into(),
+        ));
+    }
+    Ok(parts.join("/"))
+}
+
+fn has_uri_scheme(value: &str) -> bool {
+    let mut characters = value.chars();
+    let Some(first) = characters.next() else {
+        return false;
+    };
+    if !first.is_ascii_alphabetic() {
+        return false;
+    }
+    for character in characters {
+        if character == ':' {
+            return true;
+        }
+        if !(character.is_ascii_alphanumeric() || matches!(character, '+' | '-' | '.')) {
+            return false;
+        }
+    }
+    false
 }
 
 /// The package-relative form of a ZIP entry name: '\' separators, a leading

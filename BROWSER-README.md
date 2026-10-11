@@ -2,20 +2,18 @@
 
 This adds `apps/browser` to the supplied Nawa project. A local service owns filesystem access and editing-engine sessions; the user works in a normal browser. Files are read from and saved to mounted directories on the service computer. Docker, WSL and a Linux runtime are not part of either Windows launch path.
 
-**Delivery status:** the dependency-free filesystem service and source-editor workflows have been tested. The original rich editors have been connected to an Electron-backed service, but that complete integration has **not** been built or executed on Windows in the authoring environment. This is source code, not a verified Windows installer. Read `BROWSER-VALIDATION.md` before using important documents; start with copies.
+**Validation status:** the filesystem service and browser bridge regressions pass, and the native host plus all six rich-editor bundles build on Linux. The complete integration has **not** been executed on Windows in the review environment. This is source code, not a verified Windows installer. Read `BROWSER-VALIDATION.md` for the exact scope.
 
-## Apply the refactor
+## Source checkout
 
-Extract the original uploaded project first. Copy the contents of the refactor overlay ZIP into its `genoffice-main` directory, alongside the existing `package.json`. Replace matching files. Do not put the overlay inside another nested project directory.
-
-The overlay contains new and changed source files only. Keep the original `apps`, `packages`, assets and licenses. Existing font assets are not redistributed in this overlay. The original desktop launch/build scripts are preserved.
+Use the [Nawa repository](https://github.com/Abdul-mo-dev/nawa-agent). Run the commands below from its root directory, alongside `package.json`. Keep the `apps`, `packages`, assets and licenses together. For the desktop suite, `Start-NawaShell.ps1` builds all six editors, the spreadsheet helper, the CLI and the shell before launching; the browser launchers use the separate browser builds described here.
 
 ## Quick start: no npm install, no Rust, no Electron
 
 This mode is available immediately with **Node.js 22.12 or newer**:
 
 ```cmd
-cd /d C:\Projects\genoffice-main
+cd /d C:\Projects\nawa-agent
 node apps\browser\server\start.mjs --mount "C:\Users\You\Documents"
 ```
 
@@ -23,7 +21,7 @@ Alternatively, double-click **Start Nawa Source Only.cmd**. Open the complete co
 
 In the browser, choose **Mount folder**, enter an absolute Windows directory, then click a file. Use **New** to create a file or folder. **Save / Ctrl+S** writes back to the original file. **Save As** creates a new file within the same mount. **Files** returns to directory browsing without closing editor tabs.
 
-This mode edits UTF-8 text, Markdown source, HTML source, CSV source, JSON and other UTF-8 text files. It does **not** provide rich DOCX/XLSX/PPTX/PDF editing. Binary files are never decoded and rewritten as text. The separate `genoffice-browser-source-only.zip` includes this same mode as a self-contained source package; it still requires Node, but not the original monorepo or any npm packages.
+This mode edits UTF-8 text, Markdown source, HTML source, CSV/TSV source, JSON and other UTF-8 text files. It does **not** provide rich DOCX/XLSX/PPTX/PDF editing. Binary files are never decoded and rewritten as text.
 
 ## Full Nawa editor integration: Windows build
 
@@ -41,7 +39,7 @@ npm run browser:build
 Then launch:
 
 ```cmd
-"Start Nawa.cmd" --mount "C:\Users\You\Documents"
+"Start-Nawa.cmd" --mount "C:\Users\You\Documents"
 ```
 
 The full launcher starts the local service and opens the default browser. It does not open the old Electron editor window. Its console prints a private connection URL. After connecting, the browser removes the launch token from its address bar.
@@ -55,7 +53,7 @@ There is no prebuilt `.exe` or MSI in this delivery. The supplied Windows workfl
 Both services accept `--port`, `--state-dir` and `--mount`. The full service also accepts `--no-open` to avoid opening a browser automatically. `GENOFFICE_BROWSER_PORT` and `GENOFFICE_BROWSER_STATE` provide environment-variable defaults. Example:
 
 ```cmd
-"Start Nawa.cmd" --port 3211 --state-dir "C:\GenOfficeData" --mount "D:\Work"
+"Start-Nawa.cmd" --port 3211 --state-dir "C:\GenOfficeData" --mount "D:\Work"
 ```
 
 The default port is 3210. Binding is deliberately restricted to `127.0.0.1`; there is no `--host 0.0.0.0` option. Mounts are remembered under `%LOCALAPPDATA%\GenOfficeBrowser\mounts.json`; native editor preferences/recovery are kept separately under its `engine` subdirectory. Removed or disconnected mount roots are skipped on startup. Unsaved browser buffers and open tabs do not survive a service restart.
@@ -72,6 +70,7 @@ The full build compiles the existing Docs, Sheets, Slides, PDF, Markdown and HTM
 | ---------------- | -------------------- | ------------------------------------------------------------------ |
 | DOCX             | No binary editing    | Original Docs editor                                               |
 | XLSX / XLSM      | No binary editing    | Original Sheets editor and Windows sidecar; new workbooks are XLSX |
+| XLS / TSV        | TSV source editing   | Imported in Sheets; save as a new XLSX workbook                    |
 | PPTX             | No binary editing    | Original Slides editor                                             |
 | PDF              | No binary editing    | Original PDF editor, with restrictions below                       |
 | Markdown / HTML  | UTF-8 source editing | Original rich editor plus explicit Source action                   |
@@ -117,6 +116,13 @@ After installing the original npm dependencies, run the real-browser regression:
 ```cmd
 npx playwright install chromium
 npm run browser:test:ui
+```
+
+The native-host bridge and workspace navigation race regressions also run
+without an installed browser after installing the npm dependencies:
+
+```cmd
+npm run test:native -w @genoffice/browser
 ```
 
 `BROWSER-VALIDATION.md` records exactly what was executed and what still needs Windows verification. The new Windows CI workflow does not replace manual rich-editor save/reopen checks.

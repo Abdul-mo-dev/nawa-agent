@@ -1,11 +1,22 @@
 /** app strings, zh: defines the key set every other locale shard must match. */
 export const zh = {
+  redactMenuLabel: '把选中的内容对 AI 隐藏',
+  redactDialogDesc:
+    '这段文字会留在文档和文件里，AI 读到的却是下面的标记。给它起个名字，AI 才知道它是什么。',
+  redactDialogScope:
+    '这只针对本应用的 AI。命令行、MCP 工具和无界面导出会直接读取文件，仍然看得到这些文字。',
+  redactDialogPlaceholder: '占位名称，例如：客户电话',
+  redactCancel: '取消',
+  redactInsert: '隐藏',
+
   loading: '加载中…',
   loadFailed: '无法打开文件',
   untitled: '未命名文档',
   saveFailed: '保存失败：{error}',
   saveFailedStatus: '保存失败',
   exportFailed: '导出失败',
+  printFailed: '打印失败：{error}',
+  exportHtmlSkipped: '已导出，但有 {count} 个资源无法内嵌（如 {first}）',
   viewPreview: '预览',
   viewSplit: '分栏',
   viewSource: '源码',
@@ -50,7 +61,6 @@ export const zh = {
   save: '保存 (⌘S)',
   saveAs: '另存为…',
   ribbonCollapse: '折叠功能区',
-  ribbonPin: '固定功能区',
   ribbonExpand: '展开功能区',
   ribbonGroupInsert: '插入',
   editText: '编辑文字',
@@ -116,6 +126,7 @@ export const zh = {
   insertImageUrl: '图片链接…',
   insertConfirm: '插入',
   insertMore: '更多',
+  insertSkeleton: '插入骨架',
   insertTableSize: '{r}×{c} 表格',
   insertTablePickSize: '选择表格尺寸',
   insertPlaceholderTableHeader: '标题 {n}',

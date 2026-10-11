@@ -116,10 +116,21 @@ export function appLaunch(env: NodeJS.ProcessEnv = process.env): AppLaunch | nul
   return null
 }
 
-function installedAppBinaries(env: NodeJS.ProcessEnv): string[] {
-  switch (process.platform) {
+function installedAppBinaries(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform,
+  resources: string | null = packagedResourcesDir(),
+): string[] {
+  const shipped = resources
+    ? [
+        appBinaryForResources(resources, platform),
+        appBinaryForResources(resources, platform, 'GenOffice'),
+      ]
+    : []
+  switch (platform) {
     case 'darwin':
       return [
+        ...shipped,
         '/Applications/Nawa.app/Contents/MacOS/Nawa',
         join(homedir(), 'Applications/Nawa.app/Contents/MacOS/Nawa'),
         '/Applications/GenOffice.app/Contents/MacOS/GenOffice',
@@ -127,14 +138,32 @@ function installedAppBinaries(env: NodeJS.ProcessEnv): string[] {
       ]
     case 'win32':
       return [
+        ...shipped,
         env.LOCALAPPDATA ? join(env.LOCALAPPDATA, 'Programs', 'Nawa', 'Nawa.exe') : '',
         env.ProgramFiles ? join(env.ProgramFiles, 'Nawa', 'Nawa.exe') : '',
         env.LOCALAPPDATA ? join(env.LOCALAPPDATA, 'Programs', 'GenOffice', 'GenOffice.exe') : '',
         env.ProgramFiles ? join(env.ProgramFiles, 'GenOffice', 'GenOffice.exe') : '',
       ].filter(Boolean)
     default:
-      return ['/opt/Nawa/nawa', '/usr/bin/nawa', '/opt/GenOffice/genoffice', '/usr/bin/genoffice']
+      return [
+        ...shipped,
+        '/opt/Nawa/nawa',
+        '/usr/bin/nawa',
+        '/opt/GenOffice/genoffice',
+        '/usr/bin/genoffice',
+      ]
   }
+}
+
+export function appBinaryForResources(
+  resources: string,
+  platform: NodeJS.Platform,
+  product: 'Nawa' | 'GenOffice' = 'Nawa',
+): string {
+  const install = dirname(resources)
+  if (platform === 'darwin') return join(install, 'MacOS', product)
+  if (platform === 'win32') return join(install, `${product}.exe`)
+  return join(install, product.toLowerCase())
 }
 
 /**

@@ -452,7 +452,7 @@ try {
   await arabicSettings.getByRole('heading', { name: 'المعرفة', exact: true }).waitFor()
   check(
     'Knowledge settings follow Arabic direction',
-    await arabicSettings.evaluate((node) => getComputedStyle(node).direction === 'rtl'),
+    await arabicSettings.evaluate((node) => globalThis.getComputedStyle(node).direction === 'rtl'),
   )
   check(
     'Server address remains readable left to right',

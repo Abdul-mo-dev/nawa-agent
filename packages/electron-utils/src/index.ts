@@ -2,7 +2,9 @@ export {
   buildContextMenuItems,
   contextMenuLabels,
   installContextMenu,
+  setContextMenuInterceptor,
   VIEW_IMAGE_CHANNEL,
+  type ContextMenuInterceptor,
   type ContextMenuItem,
   type ContextMenuLabels,
 } from './context-menu'
@@ -24,6 +26,7 @@ export {
   viewMenuTemplate,
   windowMenuTemplate,
   type AppMenuLabels,
+  type ViewMenuOptions,
 } from './app-menu'
 export {
   saveAsSuggestion,
@@ -54,7 +57,13 @@ export {
   isSafeRemoteUrl,
   type FetchWithSsrfGuardOptions,
 } from './safe-remote-url'
-export { fetchRemoteImage, remoteImageHeaders } from './remote-image'
+export {
+  MAX_REMOTE_IMAGE_BYTES,
+  ResponseTooLargeError,
+  fetchRemoteImage,
+  readBodyCapped,
+  remoteImageHeaders,
+} from './remote-image'
 export { GENERATED_IMAGE_DIR, readGeneratedImage, storeGeneratedImage } from './generated-images'
 export {
   buildPrintableHtml,
@@ -93,3 +102,12 @@ export {
 export { installRendererProtocol, registerRendererScheme } from './renderer-protocol'
 
 export { setDefaultSaveDirProvider } from './default-save-dir'
+export { atomicWriteFile, writeJsonAtomic } from './atomic-write'
+export {
+  PRINT_READY_SCRIPT,
+  printHtmlDocument,
+  type PrintDialogOutcome,
+  type PrintDialogWindow,
+  type PrintDocumentOptions,
+} from './print-window'
+export { abortOnDestroyed, type DestroyableSender } from './abort-on-destroyed'

@@ -11,10 +11,14 @@
     "./ai-settings-store": "./src/ai-settings-store.ts",
     "./drop-open": "./src/drop-open.ts",
     "./generated-images": "./src/generated-images.ts",
+    "./font-catalog": "./src/font-catalog.ts",
+    "./font-store": "./src/font-store.ts",
     "./headless-export": "./src/headless-export.ts",
+    "./print-window": "./src/print-window.ts",
     "./remote-image": "./src/remote-image.ts",
     "./renderer-protocol": "./src/renderer-protocol.ts",
     "./renderer-scheme": "./src/renderer-scheme.ts",
+    "./safe-external-url": "./src/safe-external-url.ts",
     "./safe-remote-url": "./src/safe-remote-url.ts"
   },
   "scripts": {

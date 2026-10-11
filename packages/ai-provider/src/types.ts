@@ -16,12 +16,19 @@ export type AiProviderId =
   | 'glm'
   | 'qwen'
   | 'doubao'
+  | 'mimo'
+  | 'hunyuan'
+  | 'ling'
+  | 'spark'
+  | 'longcat'
   | 'minimax'
   | 'xai'
   | 'mistral'
   | 'openrouter'
   | 'requesty'
   | 'opper'
+  | 'cheaperinference'
+  | 'atlascloud'
   | 'opencode-zen'
   | 'opencode-go'
   | 'custom'
@@ -59,6 +66,19 @@ export interface AiModelPolicy {
     | undefined
 }
 
+/** One user-hosted OpenAI-compatible server; the active one is mirrored into `providers.custom` */
+export interface AiCustomEndpoint {
+  id: string
+  name: string
+  baseUrl: string
+  apiKey: string
+  model: string
+  /** Preserve this endpoint's local/cloud limits when switching saved servers. */
+  policy?: AiModelPolicy | undefined
+  /** ids the server advertised on the last `/models` probe, so the composer chip can list them offline */
+  models?: string[] | undefined
+}
+
 /** Live picker data returned by Codex app-server's model/list method. */
 export interface CodexModelCatalog {
   models: string[]
@@ -77,7 +97,16 @@ export interface AiProviderMeta {
 
 /** Image generation / media analysis backends (separate from the chat provider) */
 export type AiMediaProviderId =
-  'genspark' | 'openai' | 'gemini' | 'doubao' | 'glm' | 'xai' | 'qwen' | 'minimax' | 'custom'
+  | 'genspark'
+  | 'openai'
+  | 'gemini'
+  | 'doubao'
+  | 'glm'
+  | 'xai'
+  | 'qwen'
+  | 'minimax'
+  | 'deepseek'
+  | 'custom'
 
 /** wire shape of the image endpoint */
 export type AiImageProtocol = 'openai-images' | 'gemini' | 'dashscope' | 'minimax'
@@ -127,8 +156,9 @@ export interface AiMediaSettings {
   provider?: AiMediaProviderId | undefined
 }
 
-/** web/image search backends: Genspark (gsk) or a user key for Serper / Tavily */
-export type AiSearchProviderId = 'genspark' | 'serper' | 'tavily'
+/** web/image search backends; Parallel supports both a user key and free keyless search */
+export type AiSearchProviderId =
+  'genspark' | 'serper' | 'serply' | 'tavily' | 'parallel' | 'exa' | 'firecrawl'
 
 export interface AiSearchProviderMeta {
   id: AiSearchProviderId
@@ -153,6 +183,10 @@ export interface AiSettings {
   defaultChatModelId?: string | undefined
   provider: AiProviderId
   providers: Record<AiProviderId, AiProviderConfig>
+  /** every saved custom endpoint; absent on files written before the list existed */
+  customEndpoints?: AiCustomEndpoint[] | undefined
+  /** id of the endpoint `providers.custom` mirrors */
+  customEndpoint?: string | undefined
   /**
    * Provider for generate_image / analyze_media. Absent (pre-media settings
    * files) means Genspark, i.e. the gsk login + gskToolsEnabled gate.

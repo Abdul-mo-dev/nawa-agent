@@ -15,7 +15,7 @@ it('preserves active opaque tool state and removes it when a new request begins'
       queueMicrotask(() => {
         if (requests.length === 1) {
           cb.onProviderState?.(state)
-          cb.onToolCall({ id: 'call', name: 'read', input: {} })
+          cb.onToolCall({ id: 'call', name: 'read', input: {}, signature: 'call-signature' })
         } else cb.onDelta('verified')
         cb.onDone()
       })
@@ -31,10 +31,19 @@ it('preserves active opaque tool state and removes it when a new request begins'
   await new Promise((resolve) => setTimeout(resolve, 10))
   const assistant = requests[1]?.messages.find((message) => message.role === 'assistant')
   expect(assistant).toMatchObject({ providerState: state })
+  expect(assistant?.role === 'assistant' && assistant.toolCalls?.[0]?.signature).toBe(
+    'call-signature',
+  )
   expect(execute).toHaveBeenCalledOnce()
   loop.run('follow up with another model')
   await new Promise((resolve) => setTimeout(resolve, 10))
   expect(
     requests[2].messages.some((message) => message.role === 'assistant' && message.providerState),
+  ).toBe(false)
+  expect(
+    requests[2].messages.some(
+      (message) =>
+        message.role === 'assistant' && message.toolCalls?.some((call) => call.signature),
+    ),
   ).toBe(false)
 })

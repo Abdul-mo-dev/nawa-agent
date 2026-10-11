@@ -76,7 +76,7 @@ function collect(
   walk(root, null, 0)
 }
 
-/** Upstream GenOffice f4ea9de9: index previous entries instead of scanning the whole map per element. */
+/** Previous entries bucketed by tag + path, each bucket sorted by start offset. */
 function indexPrevious(previous: ParseMap | null): Map<string, ElementEntry[]> | null {
   if (!previous) return null
   const buckets = new Map<string, ElementEntry[]>()
@@ -86,12 +86,20 @@ function indexPrevious(previous: ParseMap | null): Map<string, ElementEntry[]> |
     if (bucket) bucket.push(entry)
     else buckets.set(key, [entry])
   }
+  // collect() emits strictly increasing start offsets, so this only makes the
+  // per-bucket order explicit; equal offsets keep document order.
   for (const bucket of buckets.values()) bucket.sort((a, b) => a.startTag[0] - b.startTag[0])
   return buckets
 }
-function bucketKey(tag: string, path: string): string { return `${tag}\u0000${path}` }
+
+function bucketKey(tag: string, path: string): string {
+  return `${tag}\u0000${path}`
+}
+
+/** First index in the bucket whose start offset is >= offset. */
 function lowerBound(bucket: readonly ElementEntry[], offset: number): number {
-  let lo = 0, hi = bucket.length
+  let lo = 0
+  let hi = bucket.length
   while (lo < hi) {
     const mid = (lo + hi) >> 1
     if (bucket[mid]!.startTag[0] < offset) lo = mid + 1
@@ -99,7 +107,16 @@ function lowerBound(bucket: readonly ElementEntry[], offset: number): number {
   }
   return lo
 }
-function matchSid(entry: Omit<ElementEntry, 'sid'>, buckets: Map<string, ElementEntry[]> | null): number | null {
+
+/** Reuse the previous sid for an element with the same tag, same parent path and the
+ * closest start offset. Only the two bucket neighbours can be closest, so the
+ * nearest-offset search is a binary search instead of a scan of every entry; a
+ * matched entry is removed from its bucket so a sid is never reused. Ties go to
+ * the smaller offset, which is what the former document-order scan picked. */
+function matchSid(
+  entry: Omit<ElementEntry, 'sid'>,
+  buckets: Map<string, ElementEntry[]> | null,
+): number | null {
   if (!buckets) return null
   const bucket = buckets.get(bucketKey(entry.tag, entry.path))
   if (!bucket) return null
@@ -117,6 +134,9 @@ function matchSid(entry: Omit<ElementEntry, 'sid'>, buckets: Map<string, Element
   const [matched] = bucket.splice(bestAt, 1)
   return matched!.sid
 }
+
+/** One past the highest sid of the previous build; a loop, not a spread, so a
+ * document with more entries than the argument limit cannot throw. */
 function nextSidAfter(previous: ParseMap | null): number {
   if (!previous) return 1
   let max = 0

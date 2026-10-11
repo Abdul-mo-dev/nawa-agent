@@ -10,7 +10,9 @@ export const EDITOR_KINDS = {
   '.docx': 'docs',
   '.xlsx': 'sheets',
   '.xlsm': 'sheets',
+  '.xls': 'sheets',
   '.csv': 'sheets',
+  '.tsv': 'sheets',
   '.pptx': 'slides',
   '.pdf': 'pdf',
   '.md': 'markdown',
@@ -400,16 +402,16 @@ export async function createBrowserServer({
         const ext = path.extname(data.path ?? '').toLowerCase()
         const kind = EDITOR_KINDS[ext]
         let bytes
-        if (['docs', 'sheets', 'slides', 'pdf'].includes(kind) && ext !== '.csv') {
+        if (['docs', 'sheets', 'slides', 'pdf'].includes(kind) && !['.csv', '.tsv'].includes(ext)) {
           requireValue(
             engine?.kinds.includes(kind),
             501,
             'The native editor service is not built. Run setup-windows.cmd.',
           )
           requireValue(
-            ext !== '.xlsm',
+            ext !== '.xlsm' && ext !== '.xls',
             400,
-            'Create an .xlsx workbook, not a macro-enabled workbook.',
+            'Create new workbooks in .xlsx format.',
           )
           bytes = await engine.blank(kind)
         } else {
@@ -432,7 +434,7 @@ export async function createBrowserServer({
         requireValue(
           engine,
           501,
-          'The native editor service is not running. Use the source editor or run Start Nawa.cmd.',
+          'The native editor service is not running. Use the source editor or run Start-Nawa.cmd.',
         )
         const data = await jsonBody(req, 16384)
         const kind = EDITOR_KINDS[path.extname(data.path ?? '').toLowerCase()]

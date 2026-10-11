@@ -22,6 +22,7 @@ import type {
   ArrowEndRender,
   RenderReflection,
 } from '@genoffice/pptx-render'
+import { extrusionFrontFace } from '@genoffice/pptx-render'
 import {
   featheredImage,
   featheredShapeCanvas,
@@ -55,6 +56,7 @@ import {
 import { ChartBody } from './ChartBody'
 import { needsTextFrameHitArea } from './text-hit-area'
 import { warpGlyphs, measureGlyph } from './text-warp'
+import { CANVAS_COLORS } from './canvas-colors'
 
 export interface NodeBodyProps {
   node: RenderNode
@@ -266,6 +268,7 @@ export const NodeBody = React.memo(function NodeBody({
           {'stroke' in strokeProps && outline({ ...strokeProps, fillEnabled: false })}
           {picShadowOv && !picShadowOv.under ? picShadowImg : null}
           {pic.media && <MediaBadge kind={pic.media} w={box.w} h={box.h} />}
+          {pic.redact && <RedactFrame label={pic.redact} w={box.w} h={box.h} />}
         </>
       )
     }
@@ -287,6 +290,7 @@ export const NodeBody = React.memo(function NodeBody({
         {image}
         {picShadowOv && !picShadowOv.under ? picShadowImg : null}
         {pic.media && <MediaBadge kind={pic.media} w={box.w} h={box.h} />}
+        {pic.redact && <RedactFrame label={pic.redact} w={box.w} h={box.h} />}
       </>
     )
   }
@@ -378,7 +382,7 @@ export const NodeBody = React.memo(function NodeBody({
                   rotation={g.rotation ?? 0}
                   letterSpacing={g.letterSpacing ?? 0}
                   fill={g.fill}
-                  direction={g.direction ?? 'inherit'}
+                  direction={g.direction ?? 'ltr'}
                   {...(g.stroke
                     ? { stroke: g.stroke, strokeWidth: g.strokeWidth, fillAfterStrokeEnabled: true }
                     : {})}
@@ -544,9 +548,18 @@ export const NodeBody = React.memo(function NodeBody({
 
   let geom: React.ReactNode
   if (shape.extrusion) {
-    // scene3d/sp3d extrusion: pre-projected shaded faces in painter order replace the flat geometry
+    // scene3d/sp3d extrusion: pre-projected shaded faces in painter order replace the flat
+    // geometry; the shadow/glow is cast by the silhouette underneath them
+    const front = extrusionFrontFace(shape.extrusion.faces)
     geom = (
       <>
+        {shape.extrusion.shadowPath && front && 'shadowColor' in shadowProps && (
+          <Path
+            data={shape.extrusion.shadowPath}
+            {...(front.front ? fillProps : { fill: normalizeColor(front.color) })}
+            {...shadowProps}
+          />
+        )}
         {shape.extrusion.faces.map((f, i) => (
           <Path
             key={i}
@@ -693,7 +706,7 @@ export const NodeBody = React.memo(function NodeBody({
   // Inner/perspective shadows draw as an offscreen overlay (canvas shadow props can't express them)
   let shapeShadowUnder: React.ReactNode = null
   let shapeShadowOver: React.ReactNode = null
-  if (isOverlayShadow(shape.shadow) && !shape.extrusion && !shape.line) {
+  if (isOverlayShadow(shape.shadow) && (!shape.extrusion || shape.extrusion.flat) && !shape.line) {
     const sg: ShadowGeom =
       shape.fillPathData || shape.pathData
         ? { kind: 'path', data: (shape.fillPathData ?? shape.pathData)! }
@@ -815,7 +828,7 @@ export const NodeBody = React.memo(function NodeBody({
                   ? normalizeColor(shadeHex(shape.text.extrusion.color, 0.35))
                   : g.fill
               }
-              direction={g.direction ?? 'inherit'}
+              direction={g.direction ?? 'ltr'}
               {...(g.fillPriority && !shape.text?.extrusion
                 ? {
                     fillPriority: g.fillPriority,
@@ -1129,6 +1142,57 @@ function MediaBadge({ kind, w, h }: { kind: 'video' | 'audio'; w: number; h: num
           fill="#ffffff"
         />
       )}
+    </Group>
+  )
+}
+
+/**
+ * A shape withheld from the model: a dashed frame plus the reader's own label in the
+ * corner. Drawn the way MediaBadge is — a `listening={false}` group over the node — so
+ * it rides along in thumbnails and group children without a second code path, and
+ * without covering the picture: the reader still has to see what they chose to hide.
+ */
+function RedactFrame({ label, w, h }: { label: string; w: number; h: number }) {
+  const pad = 2
+  const fontSize = Math.max(9, Math.min(13, Math.min(w, h) * 0.12))
+  const chipH = fontSize * 1.9
+  // The label is the reader's own, so it is shown as they wrote it (capped: a long one
+  // would swallow the picture it is standing on)
+  const text = `{{${label.length > 22 ? `${label.slice(0, 22)}…` : label}}}`
+  return (
+    <Group listening={false}>
+      <Rect
+        x={-pad}
+        y={-pad}
+        width={w + pad * 2}
+        height={h + pad * 2}
+        stroke={CANVAS_COLORS.redactFrame.stroke}
+        strokeWidth={1.5}
+        dash={[6, 4]}
+        cornerRadius={3}
+        listening={false}
+      />
+      <Rect
+        x={0}
+        y={0}
+        width={Math.min(w, fontSize * 0.62 * text.length + 8)}
+        height={chipH}
+        fill={CANVAS_COLORS.redactFrame.chip}
+        cornerRadius={3}
+        listening={false}
+      />
+      <Text
+        text={text}
+        x={4}
+        y={chipH / 2}
+        width={w - 8}
+        height={fontSize}
+        align="left"
+        fontSize={fontSize}
+        fill={CANVAS_COLORS.redactFrame.label}
+        ellipsis
+        listening={false}
+      />
     </Group>
   )
 }

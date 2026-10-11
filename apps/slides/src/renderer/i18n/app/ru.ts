@@ -1,6 +1,16 @@
 import type { zh } from './zh'
 
 export const ru = {
+  redactMenuLabel: 'Скрыть выделение от ИИ',
+  redactDialogDesc:
+    'Выбранное остается в документе и в файле, а модель видит только метку. Дайте ей имя, чтобы было понятно, что она обозначает.',
+  redactDialogScope:
+    'Это касается только ИИ в этом приложении. CLI, инструменты MCP и экспорт без интерфейса читают файл напрямую и по-прежнему видят эти слова.',
+  redactDialogPlaceholder: 'Имя метки, напр. телефон клиента',
+  redactCancel: 'Отмена',
+  redactInsert: 'Скрыть',
+  redactEnable: 'Правый клик по выделению скрывает его от модели.',
+
   appPhPromptTitle: 'Щелкните, чтобы добавить заголовок',
   appPhPromptSubtitle: 'Щелкните, чтобы добавить подзаголовок',
   appPhPromptBody: 'Щелкните, чтобы добавить текст',
@@ -116,6 +126,7 @@ export const ru = {
   appPasteOptSource: 'Сохранить исходное форматирование',
   appPasteOptTheme: 'Использовать конечную тему',
   appStatusPasteOptionsExpired: 'Параметры вставки больше недоступны',
+  appStatusPasteTruncated: 'Вставленный текст слишком длинный и был обрезан',
   appCtxHideSlide: 'Скрыть слайд',
   appCtxUnhideSlide: 'Показать слайд',
   appCtxAddSectionBefore: 'Добавить раздел (перед этим слайдом)',

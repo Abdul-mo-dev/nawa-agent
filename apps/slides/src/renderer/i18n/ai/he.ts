@@ -129,6 +129,7 @@ export const he = {
   aiClarifyOther: 'אחר (הקלד)',
   aiClarifySkip: 'דלג על השאלון',
   aiClarifyNext: 'הבא',
+  aiClarifyPrev: 'הקודם',
   aiClarifySubmit: 'צור',
   aiSumReadAttachment: 'קריאת קובץ מצורף',
   aiSumReadAttachmentName: 'קריאת הקובץ המצורף {name}',
@@ -217,4 +218,5 @@ export const he = {
   aiSumSaveTemplate: 'תבנית הסגנון "{name}" נשמרה',
   aiSumTemplatesEmpty: 'תבניות סגנון (ריק)',
   aiSumListTemplates: 'הוצגו {count} תבניות סגנון',
+  aiPageCloudToLocal: 'הענן לא זמין — נוצר מקומית',
 } satisfies Record<keyof typeof zh, string>

@@ -1,4 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { DEFAULT_RAG_SETTINGS } from '../src/shared/rag-api'
 
 const mocks = vi.hoisted(() => ({
@@ -59,13 +61,15 @@ vi.mock('../src/main/rag/myagent', () => ({
   },
 }))
 import { RagService } from '../src/main/rag/service'
+const workspace = join(tmpdir(), 'nawa-rag-service-fixture', 'Documents')
+const selectedFile = join(workspace, 'file.txt')
+const outsideFile = join(tmpdir(), 'nawa-rag-service-fixture', 'Elsewhere', 'file.txt')
 const settings = { ...DEFAULT_RAG_SETTINGS, backend: 'myagent' as const, model: '', enabled: true }
 const saved = (backend: 'local' | 'myagent' = 'myagent') => ({
   settings: { ...settings, backend, model: backend === 'local' ? 'embedding-model' : '' },
   encryptedKey: Buffer.from('private-service-key').toString('base64'),
 })
-const service = () =>
-  new RagService({ roots: async () => ['C:\\Documents'], isHomeSender: () => true })
+const service = () => new RagService({ roots: async () => [workspace], isHomeSender: () => true })
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.readFile.mockResolvedValue(JSON.stringify(saved()))
@@ -83,23 +87,39 @@ beforeEach(() => {
     nextOffset: null,
   })
   mocks.search.mockResolvedValue({
-    hits: [{ path: 'C:\\Documents\\file.txt', sourceHash: 'verified-hash' }],
+    hits: [{ path: selectedFile, sourceHash: 'verified-hash' }],
     warnings: [],
     total: 1,
   })
 })
 it('discovers local models using the protected endpoint credential and rejects an unapproved remote endpoint', async () => {
   mocks.readFile.mockResolvedValue(JSON.stringify(saved('local')))
-  const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ data: [{ id: 'embedding-model' }] })))
+  const fetcher = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValue(new Response(JSON.stringify({ data: [{ id: 'embedding-model' }] })))
   try {
     const s = service()
     expect(await s.models({ ...DEFAULT_RAG_SETTINGS })).toEqual(['embedding-model'])
-    expect(fetcher).toHaveBeenCalledWith(expect.any(URL), expect.objectContaining({ method: 'GET', headers: expect.objectContaining({ Authorization: 'Bearer private-service-key' }) }))
-    await expect(s.models({ ...DEFAULT_RAG_SETTINGS, baseUrl: 'http://192.168.1.2:8081/v1' })).rejects.toThrow(/loopback|remote/i)
-    await expect(s.models({ ...DEFAULT_RAG_SETTINGS, backend: 'myagent' })).rejects.toThrow(/llama.cpp endpoint/)
-    await expect(s.models({ ...DEFAULT_RAG_SETTINGS, baseUrl: 'http://127.0.0.1:8082/v1' })).rejects.toThrow(/endpoint changed/)
+    expect(fetcher).toHaveBeenCalledWith(
+      expect.any(URL),
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({ Authorization: 'Bearer private-service-key' }),
+      }),
+    )
+    await expect(
+      s.models({ ...DEFAULT_RAG_SETTINGS, baseUrl: 'http://192.168.1.2:8081/v1' }),
+    ).rejects.toThrow(/loopback|remote/i)
+    await expect(s.models({ ...DEFAULT_RAG_SETTINGS, backend: 'myagent' })).rejects.toThrow(
+      /llama.cpp endpoint/,
+    )
+    await expect(
+      s.models({ ...DEFAULT_RAG_SETTINGS, baseUrl: 'http://127.0.0.1:8082/v1' }),
+    ).rejects.toThrow(/endpoint changed/)
     expect(fetcher).toHaveBeenCalledOnce()
-  } finally { fetcher.mockRestore() }
+  } finally {
+    fetcher.mockRestore()
+  }
 })
 it('routes MyAgent operations without starting embedding workers or returning credentials', async () => {
   const s = service(),
@@ -108,19 +128,13 @@ it('routes MyAgent operations without starting embedding workers or returning cr
   expect(JSON.stringify(view)).not.toContain('private-service-key')
   await s.test(settings)
   expect(mocks.test).toHaveBeenCalledWith(settings, 'private-service-key')
-  await s.index(1, 'C:\\Documents', true, true)
+  await s.index(1, workspace, true, true)
   await s.cancel(1)
-  await s.statuses(['C:\\Documents\\file.txt'])
-  await s.clear('C:\\Documents')
+  await s.statuses([selectedFile])
+  await s.clear(workspace)
   const fallback = vi.fn()
   expect(
-    await s.searchSelected(
-      1,
-      ['C:\\Documents\\file.txt'],
-      'question',
-      new AbortController().signal,
-      fallback,
-    ),
+    await s.searchSelected(1, [selectedFile], 'question', new AbortController().signal, fallback),
   ).toMatchObject({ backend: 'myagent' })
   expect(mocks.search).toHaveBeenCalled()
   expect(fallback).not.toHaveBeenCalled()
@@ -138,7 +152,7 @@ it('does not forward a stored embedding credential to MyAgent when switching bac
 })
 it('requires directory consent and uses the original fallback when RAG is disabled', async () => {
   const s = service()
-  await expect(s.index(1, 'C:\\Documents', true, false)).rejects.toThrow('Confirm')
+  await expect(s.index(1, workspace, true, false)).rejects.toThrow('Confirm')
   await s.save({ ...settings, enabled: false })
   const fallback = vi.fn().mockResolvedValue({ hits: [], total: 0, warnings: [] })
   expect(
@@ -149,19 +163,17 @@ it('requires directory consent and uses the original fallback when RAG is disabl
 })
 it('routes only explicit selected files with consent and protects against empty or expanded scopes', async () => {
   const s = service(),
-    paths = ['C:\\Documents\\file.txt']
-  await expect(s.indexSelected(1, 'C:\\Documents', paths, false)).rejects.toThrow('Confirm')
-  await expect(s.indexSelected(1, 'C:\\Documents', [], true)).rejects.toThrow('1–256')
-  await expect(
-    s.indexSelected(1, 'C:\\Documents', ['C:\\Elsewhere\\file.txt'], true),
-  ).rejects.toThrow('inside')
+    paths = [selectedFile]
+  await expect(s.indexSelected(1, workspace, paths, false)).rejects.toThrow('Confirm')
+  await expect(s.indexSelected(1, workspace, [], true)).rejects.toThrow('1–256')
+  await expect(s.indexSelected(1, workspace, [outsideFile], true)).rejects.toThrow('inside')
   expect(mocks.indexSelected).not.toHaveBeenCalled()
-  await s.indexSelected(1, 'C:\\Documents', paths, true)
+  await s.indexSelected(1, workspace, paths, true)
   await s.cancel(1)
   expect(mocks.indexSelected).toHaveBeenCalledWith(
     settings,
     'private-service-key',
-    'C:\\Documents',
+    workspace,
     paths,
     expect.any(AbortSignal),
     expect.any(Function),
@@ -174,16 +186,16 @@ it('routes only explicit selected files with consent and protects against empty 
 it('routes selected-file refresh to the native worker for local RAG', async () => {
   mocks.readFile.mockResolvedValue(JSON.stringify(saved('local')))
   const s = service(),
-    paths = ['C:\\Documents\\file.txt']
+    paths = [selectedFile]
   const request = vi
     .spyOn(s as never, 'request')
     .mockResolvedValue({ running: false, embedded: 1 } as never)
-  await s.indexSelected(1, 'C:\\Documents', paths, true)
+  await s.indexSelected(1, workspace, paths, true)
   expect(request).toHaveBeenCalledWith(
     expect.anything(),
     expect.objectContaining({
       action: 'index',
-      folder: 'C:\\Documents',
+      folder: workspace,
       paths,
       recursive: false,
     }),

@@ -29,12 +29,24 @@ test.describe('sheets: filter criteria survive save and reopen', () => {
     const scratch = await mkdtemp(join(tmpdir(), 'genoffice-filter-reopen-'))
     const launched = await launchShell({
       onboardingSeen: true,
-      settings: { defaultSaveDir: join(scratch, 'GenOffice') },
+      settings: { defaultSaveDir: join(scratch, 'Nawa') },
       videoDir: 'sheets-filter-reopen',
     })
     let savedPath = ''
     try {
       const { app, page } = launched
+      await app.evaluate(({ app: electronApp }, dir) => {
+        electronApp.setPath('documents', dir)
+      }, scratch)
+      const saveDir = join(scratch, 'Nawa')
+      // the workbook has no file yet: Save answers the Save As picker (genoffice#1036)
+      await app.evaluate(
+        ({ dialog }, target) => {
+          dialog.showSaveDialog = async () => ({ canceled: false, filePath: target })
+        },
+        join(saveDir, 'filtered.xlsx'),
+      )
+
       await createNewFile(page, 'Spreadsheet')
 
       const sheets = await waitForPageWithUrl(app, '://sheets/')
@@ -79,7 +91,6 @@ test.describe('sheets: filter criteria survive save and reopen', () => {
         wc?.send('menu:action', 'save')
       })
 
-      const saveDir = join(scratch, 'GenOffice')
       await expect(async () => {
         const files = (await readdir(saveDir)).filter((f) => f.endsWith('.xlsx'))
         expect(files).toHaveLength(1)

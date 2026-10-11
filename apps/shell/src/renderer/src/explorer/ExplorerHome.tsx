@@ -10,6 +10,8 @@ import type { FolderRoot, HomeApi, RecentPage } from '../../../shared/home-api'
 import type { TabSummary } from '../../../shared/tabs-api'
 import type { ExplorerLayout } from '../../../shared/explorer-layout'
 import { useI18n } from '../locale'
+import type { HomeTarget } from '../Home'
+import type { SettingsSection } from '../SettingsModal'
 import { WorkspaceChat } from '../WorkspaceChat'
 import '../workspace.css'
 import { DirectoryTree } from './Tree'
@@ -48,7 +50,7 @@ declare global {
 }
 interface Props {
   editorTab?: TabSummary
-  onOpenLegacy: () => void
+  onOpenLegacy: (target?: HomeTarget) => void
 }
 type DialogState =
   | { kind: 'newFolder'; parent: string }
@@ -60,7 +62,7 @@ const PAGE_SIZE = 200
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
 export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
-  const { lang, dateLocale } = useI18n()
+  const { lang, dateLocale, t: homeText } = useI18n()
   const { s } = useSidebarText()
   const [panelActivity, setPanelActivity] = useState<PanelActivity | undefined>()
   const t = explorerText(lang)
@@ -92,8 +94,19 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
   const [dialogError, setDialogError] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [fileTools, setFileTools] = useState<'search' | 'tables' | null>(null)
-  const [settingsSection, setSettingsSection] = useState<'account' | 'knowledge' | 'aiModel'>('account')
-  const openSettings = (section: typeof settingsSection = 'account') => { setSettingsSection(section); setSettingsOpen(true) }
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('account')
+  const openSettings = (section: typeof settingsSection = 'account') => {
+    setSettingsSection(section)
+    setSettingsOpen(true)
+  }
+  useEffect(
+    () =>
+      window.aiOffice.onOpenSettings?.((target) => {
+        setSettingsSection(target.section as SettingsSection)
+        setSettingsOpen(true)
+      }),
+    [],
+  )
   const [cutItems, setCutItems] = useState<Item[]>([])
   const [clipboardMode, setClipboardMode] = useState<'copy' | 'cut'>('cut')
   const [page, setPage] = useState<RecentPage>({ entries: [], total: 0, totalAll: 0 })
@@ -226,7 +239,7 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
     }
   }, [location, rootsLoading])
   useEffect(() => {
-    if (folder && currentFolderRoot?.usable) {
+    if (folder && (currentFolderRoot?.readable ?? currentFolderRoot?.usable)) {
       void loadDirectory(folder)
       setActiveRoot(currentFolderRoot.path)
     }
@@ -853,12 +866,12 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
       : null
   const itemCount = allItems.length
   const loading = folder
-    ? !!state?.loading || (!state && !!currentFolderRoot?.usable)
+    ? !!state?.loading || (!state && !!(currentFolderRoot?.readable ?? currentFolderRoot?.usable))
     : pageLoading || rootsLoading
   const listError = folder
     ? !currentRootPath && !rootsLoading
       ? t('notMounted')
-      : currentFolderRoot?.usable === false
+      : (currentFolderRoot?.readable ?? currentFolderRoot?.usable) === false
         ? t('unavailable')
         : state?.error
     : pageError
@@ -1108,7 +1121,7 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
               {
                 label: s('Index selected files'),
                 icon: 'search',
-                disabled: !folder || !selectedItems.some(item => item.kind === 'file'),
+                disabled: !folder || !selectedItems.some((item) => item.kind === 'file'),
                 action: () => setFileTools('search'),
               },
               {
@@ -1124,6 +1137,23 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
                 action: () => openSettings(),
               },
               { label: 'Original home', icon: 'home', action: onOpenLegacy },
+              {
+                label: homeText('searchFilesPlaceholder'),
+                icon: 'search',
+                action: () => onOpenLegacy({ mode: 'search', query: search }),
+              },
+              {
+                label: homeText('navAsk'),
+                icon: 'sparkles',
+                action: () => onOpenLegacy({ mode: 'ask' }),
+              },
+              {
+                label: homeText('navUserGuide'),
+                icon: 'info',
+                action: () => {
+                  void act(() => window.aiOffice.openHelp())
+                },
+              },
             ])
           }
         >
@@ -1179,6 +1209,17 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
                     <span>{t(kind)}</span>
                   </button>
                 ))}
+                <button
+                  className="ex-nav-item"
+                  onClick={() => onOpenLegacy({ mode: 'search', query: search })}
+                >
+                  <Icon name="search" size={18} />
+                  <span>{homeText('searchFilesPlaceholder')}</span>
+                </button>
+                <button className="ex-nav-item" onClick={() => onOpenLegacy({ mode: 'ask' })}>
+                  <Icon name="sparkles" size={18} />
+                  <span>{homeText('navAsk')}</span>
+                </button>
               </nav>
               <div className="ex-nav-section">
                 <h2>{t('folders')}</h2>
@@ -1251,6 +1292,15 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
                 )}
               </div>
               <div className="ex-nav-footer">
+                <button
+                  className="ex-nav-item"
+                  onClick={() => {
+                    void act(() => window.aiOffice.openHelp())
+                  }}
+                >
+                  <Icon name="info" />
+                  <span>{homeText('navUserGuide')}</span>
+                </button>
                 <button className="ex-nav-item" onClick={() => openSettings()}>
                   <Icon name="settings" />
                   <span>{t('settings')}</span>
@@ -1461,7 +1511,9 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
           onActivity={setPanelActivity}
           closeLabel={t('close')}
           folder={folder && currentRootPath ? folder : null}
-          selectedFiles={selectedItems.filter(item => item.kind === 'file').map(item => item.path)}
+          selectedFiles={selectedItems
+            .filter((item) => item.kind === 'file')
+            .map((item) => item.path)}
           onOpenSettings={() => openSettings('knowledge')}
           onClose={() => changePrefs({ pane: 'none' })}
           assistant={
@@ -1652,12 +1704,29 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
           )}
         </Dialog>
       )}
-      <PanelDialog open={!!fileTools} title={s(fileTools === 'search' ? 'Index selected files' : 'Review table data')} onClose={() => setFileTools(null)}>
-        {fileTools === 'search' && <RagToolbar folder={folder} selectedFiles={selectedItems.filter(item => item.kind === 'file').map(item => item.path)} inSidebar
-          onSetup={() => { setFileTools(null); openSettings('knowledge') }} />}
+      <PanelDialog
+        open={!!fileTools}
+        title={s(fileTools === 'search' ? 'Index selected files' : 'Review table data')}
+        onClose={() => setFileTools(null)}
+      >
+        {fileTools === 'search' && (
+          <RagToolbar
+            folder={folder}
+            selectedFiles={selectedItems
+              .filter((item) => item.kind === 'file')
+              .map((item) => item.path)}
+            inSidebar
+            onSetup={() => {
+              setFileTools(null)
+              openSettings('knowledge')
+            }}
+          />
+        )}
         {fileTools === 'tables' && <AnalyticsToolbar folder={folder} inSidebar />}
       </PanelDialog>
-      {settingsOpen && <ExplorerSettings initialSection={settingsSection} onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && (
+        <ExplorerSettings initialSection={settingsSection} onClose={() => setSettingsOpen(false)} />
+      )}
     </div>
   )
 }

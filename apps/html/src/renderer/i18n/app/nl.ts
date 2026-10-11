@@ -1,12 +1,24 @@
 import type { zh } from './zh'
 
 export const nl = {
+  redactMenuLabel: 'Selectie verbergen voor de AI',
+  redactDialogDesc:
+    'De woorden blijven in het document en het bestand; het model ziet alleen de placeholder. Geef hem een naam.',
+  redactDialogScope:
+    'Verbergen geldt alleen voor de AI in deze app. De CLI, MCP-tools en de export zonder venster lezen het bestand rechtstreeks en zien deze woorden nog steeds.',
+  redactDialogPlaceholder: 'Naam van placeholder, bv. telefoonnummer klant',
+  redactCancel: 'Annuleren',
+  redactInsert: 'Verbergen',
+
   loading: 'Laden…',
   loadFailed: 'Kan het bestand niet openen',
   untitled: 'Naamloos',
   saveFailed: 'Opslaan mislukt: {error}',
   saveFailedStatus: 'Opslaan mislukt',
   exportFailed: 'Exporteren mislukt',
+  printFailed: 'Afdrukken mislukt: {error}',
+  exportHtmlSkipped:
+    'Geëxporteerd, maar {count} bron(nen) konden niet worden ingesloten (bijv. {first})',
   viewPreview: 'Voorbeeld',
   viewSplit: 'Gesplitst',
   viewSource: 'Bron',
@@ -55,7 +67,6 @@ export const nl = {
   save: 'Opslaan (⌘S)',
   saveAs: 'Opslaan als…',
   ribbonCollapse: 'Het lint samenvouwen',
-  ribbonPin: 'Het lint vastmaken',
   ribbonExpand: 'Het lint uitvouwen',
   ribbonGroupInsert: 'Invoegen',
   editText: 'Tekst bewerken',
@@ -121,6 +132,7 @@ export const nl = {
   insertImageUrl: 'Afbeelding van URL…',
   insertConfirm: 'Invoegen',
   insertMore: 'Meer',
+  insertSkeleton: 'Skelet invoegen',
   insertTableSize: 'Tabel van {r}×{c}',
   insertTablePickSize: 'Tabelgrootte kiezen',
   insertPlaceholderTableHeader: 'Kop {n}',

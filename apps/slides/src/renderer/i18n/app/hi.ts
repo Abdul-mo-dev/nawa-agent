@@ -1,6 +1,16 @@
 import type { zh } from './zh'
 
 export const hi = {
+  redactMenuLabel: 'चयन को AI से छिपाएँ',
+  redactDialogDesc:
+    'चुनी हुई सामग्री दस्तावेज़ और फ़ाइल में बनी रहती है; मॉडल को केवल नीचे वाला प्लेसहोल्डर दिखता है। नाम दें ताकि उसे पता चले कि यह किसका स्थान है।',
+  redactDialogScope:
+    'यह छिपाना केवल इस ऐप के AI पर लागू होता है। CLI, MCP टूल और बिना इंटरफ़ेस वाला निर्यात फ़ाइल को सीधे पढ़ते हैं, इसलिए ये शब्द उन्हें अब भी दिखते हैं।',
+  redactDialogPlaceholder: 'प्लेसहोल्डर का नाम, जैसे ग्राहक का फ़ोन',
+  redactCancel: 'रद्द करें',
+  redactInsert: 'छिपाएँ',
+  redactEnable: 'चयनित पाठ पर राइट-क्लिक करके इसे मॉडल से छिपाएँ।',
+
   appPhPromptTitle: 'शीर्षक जोड़ने के लिए क्लिक करें',
   appPhPromptSubtitle: 'उपशीर्षक जोड़ने के लिए क्लिक करें',
   appPhPromptBody: 'टेक्स्ट जोड़ने के लिए क्लिक करें',
@@ -120,6 +130,7 @@ export const hi = {
   appPasteOptSource: 'स्रोत स्वरूपण बनाए रखें',
   appPasteOptTheme: 'गंतव्य थीम का उपयोग करें',
   appStatusPasteOptionsExpired: 'चिपकाने के विकल्प अब उपलब्ध नहीं हैं',
+  appStatusPasteTruncated: 'चिपकाया गया टेक्स्ट बहुत लंबा था और उसे छोटा कर दिया गया',
   appCtxHideSlide: 'स्लाइड छिपाएँ',
   appCtxUnhideSlide: 'स्लाइड फिर से दिखाएँ',
   appCtxAddSectionBefore: 'अनुभाग जोड़ें (इस स्लाइड से पहले)',

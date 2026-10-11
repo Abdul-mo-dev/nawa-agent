@@ -4,7 +4,19 @@
 /// [Content_Types].xml entries. Non-note VML shapes (checkboxes, buttons)
 /// survive a rewrite untouched.
 
+import { encodeXlsxEscapes } from './xlsx-escapes'
+import { resolveRelTarget } from './xlsx-drawing-add'
 import { ensureRelationshipNamespace } from './xlsx-namespace'
+import { nextFreeRelationshipId } from './xlsx-sheets'
+import {
+  parseLegacyComments,
+  syncThreadedComments,
+  THREADED_COMMENTS_REL_TYPE,
+  type LegacyCommentEntry,
+  type SheetThread,
+} from './xlsx-threaded-comments'
+
+export type { SheetThread, SheetThreadReply } from './xlsx-threaded-comments'
 
 export class NoteEditError extends Error {}
 
@@ -13,6 +25,9 @@ export interface SheetNote {
   readonly column: number
   readonly author: string
   readonly text: string
+  /// Threaded comment metadata (text is the root text); `null` turns a
+  /// threaded cell back into a plain note.
+  readonly thread?: SheetThread | null | undefined
 }
 
 interface MutableNotePackage {
@@ -60,22 +75,6 @@ function relTarget(relsXml: string, type: string): string | null {
   return target?.[1] ?? null
 }
 
-/// "../comments1.xml" or "/xl/comments1.xml" → package path.
-function resolveRelTarget(worksheetPath: string, target: string): string {
-  if (target.startsWith('/')) return target.slice(1)
-  const base = worksheetPath.split('/').slice(0, -1)
-  for (const part of target.split('/')) {
-    if (part === '..') base.pop()
-    else if (part !== '.') base.push(part)
-  }
-  return base.join('/')
-}
-
-function nextFreeRid(relsXml: string): string {
-  const ids = [...relsXml.matchAll(/ Id="rId(\d+)"/g)].map((match) => Number(match[1]))
-  return `rId${ids.length === 0 ? 1 : Math.max(...ids) + 1}`
-}
-
 async function nextFreePath(
   pkg: MutableNotePackage,
   template: (index: number) => string,
@@ -87,7 +86,14 @@ async function nextFreePath(
   throw new NoteEditError('No free part name for the comments part.')
 }
 
-function buildCommentsXml(notes: readonly SheetNote[]): string {
+function cellRef(note: SheetNote): string {
+  return `${columnName(note.column)}${note.row + 1}`
+}
+
+function buildCommentsXml(
+  notes: readonly SheetNote[],
+  overrides: ReadonlyMap<string, LegacyCommentEntry>,
+): string {
   const authors: string[] = []
   const authorId = (author: string): number => {
     const existing = authors.indexOf(author)
@@ -97,17 +103,18 @@ function buildCommentsXml(notes: readonly SheetNote[]): string {
   }
   const comments = notes
     .map((note) => {
-      const ref = `${columnName(note.column)}${note.row + 1}`
+      const ref = cellRef(note)
+      const entry = overrides.get(ref) ?? note
       return (
-        `<comment ref="${ref}" authorId="${authorId(note.author)}">` +
-        `<text><t xml:space="preserve">${escapeXml(note.text)}</t></text></comment>`
+        `<comment ref="${ref}" authorId="${authorId(entry.author)}">` +
+        `<text><t xml:space="preserve">${escapeXml(encodeXlsxEscapes(entry.text))}</t></text></comment>`
       )
     })
     .join('')
   return (
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
     '<comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
-    `<authors>${authors.map((author) => `<author>${escapeXml(author)}</author>`).join('')}</authors>` +
+    `<authors>${authors.map((author) => `<author>${escapeXml(encodeXlsxEscapes(author))}</author>`).join('')}</authors>` +
     `<commentList>${comments}</commentList></comments>`
   )
 }
@@ -122,11 +129,22 @@ const VML_HEADER =
   '<v:stroke joinstyle="miter"/><v:path gradientshapeok="t" o:connecttype="rect"/>' +
   '</v:shapetype>'
 
-function noteShape(note: SheetNote, index: number): string {
+const FIRST_NOTE_SHAPE_ID = 1025
+
+function nextShapeId(vmlXml: string): number {
+  let next = FIRST_NOTE_SHAPE_ID
+  for (const match of vmlXml.matchAll(/\bid="_x0000_s(\d+)"/g)) {
+    const id = Number(match[1])
+    if (id >= next) next = id + 1
+  }
+  return next
+}
+
+function noteShape(note: SheetNote, index: number, firstId: number): string {
   // Anchor: from one column right of the cell, spanning ~3 columns / 4 rows.
   const anchor = [note.column + 1, 15, note.row, 2, note.column + 4, 15, note.row + 4, 2].join(',')
   return (
-    `<v:shape id="_x0000_s${1025 + index}" type="#_x0000_t202"` +
+    `<v:shape id="_x0000_s${firstId + index}" type="#_x0000_t202"` +
     ' style="position:absolute;margin-left:80pt;margin-top:2pt;width:108pt;height:60pt;' +
     `z-index:${index + 1};visibility:hidden" fillcolor="#ffffe1" o:insetmode="auto">` +
     '<v:fill color2="#ffffe1"/><v:shadow on="t" color="black" obscured="t"/>' +
@@ -142,7 +160,7 @@ function noteShape(note: SheetNote, index: number): string {
 
 /// Drops every Note-typed shape, keeping other legacy objects verbatim.
 function stripNoteShapes(vmlXml: string): string {
-  return vmlXml.replace(/<v:shape\b[\s\S]*?<\/v:shape>/g, (shape) =>
+  return vmlXml.replace(/<v:shape\b(?![^>]*\/>)[\s\S]*?<\/v:shape>/g, (shape) =>
     shape.includes('ObjectType="Note"') ? '' : shape,
   )
 }
@@ -173,6 +191,24 @@ function appendRel(relsXml: string, id: string, type: string, target: string): s
 
 function removeRel(relsXml: string, type: string): string {
   return relsXml.replace(new RegExp(`<Relationship\\b[^>]*Type="${type}"[^>]*/?>`), '')
+}
+
+async function removeContentTypeOverride(
+  pkg: MutableNotePackage,
+  partPath: string,
+  touchedEntries: Set<string>,
+): Promise<void> {
+  const contentTypes = await pkg.readText(CONTENT_TYPES_PATH)
+  const stripped = contentTypes.replace(
+    new RegExp(
+      `<Override\\b[^>]*PartName="/${partPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"[^>]*/>`,
+    ),
+    '',
+  )
+  if (stripped !== contentTypes) {
+    pkg.write(CONTENT_TYPES_PATH, stripped)
+    touchedEntries.add(CONTENT_TYPES_PATH)
+  }
 }
 
 const EMPTY_RELS =
@@ -215,22 +251,40 @@ export async function applySheetNotes(
     existingVmlTarget === null ? null : resolveRelTarget(worksheetPath, existingVmlTarget)
   let relsChanged = false
 
+  const existingLegacy =
+    existingCommentsPath !== null && (await pkg.has(existingCommentsPath))
+      ? parseLegacyComments(await pkg.readText(existingCommentsPath))
+      : new Map<string, LegacyCommentEntry>()
+  const threaded = await syncThreadedComments(
+    pkg,
+    worksheetPath,
+    relsXml,
+    new Map(notes.map((note) => [cellRef(note), note])),
+    existingLegacy,
+    touchedEntries,
+  )
+  if (threaded.relsXml !== relsXml) {
+    relsXml = threaded.relsXml
+    relsChanged = true
+  }
+  if (threaded.partRemoved && threaded.partPath !== null) {
+    relsXml = removeRel(relsXml, THREADED_COMMENTS_REL_TYPE)
+    relsChanged = true
+    await removeContentTypeOverride(pkg, threaded.partPath, touchedEntries)
+  }
+
   if (notes.length === 0) {
-    if (existingCommentsPath === null) return
+    if (existingCommentsPath === null) {
+      if (relsChanged) {
+        pkg.write(relsPath, relsXml)
+        touchedEntries.add(relsPath)
+      }
+      return
+    }
     pkg.remove(existingCommentsPath)
     touchedEntries.add(existingCommentsPath)
     relsXml = removeRel(relsXml, COMMENTS_REL_TYPE)
-    const contentTypes = await pkg.readText(CONTENT_TYPES_PATH)
-    const stripped = contentTypes.replace(
-      new RegExp(
-        `<Override\\b[^>]*PartName="/${existingCommentsPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"[^>]*/>`,
-      ),
-      '',
-    )
-    if (stripped !== contentTypes) {
-      pkg.write(CONTENT_TYPES_PATH, stripped)
-      touchedEntries.add(CONTENT_TYPES_PATH)
-    }
+    await removeContentTypeOverride(pkg, existingCommentsPath, touchedEntries)
     if (existingVmlPath !== null && (await pkg.has(existingVmlPath))) {
       const remaining = stripNoteShapes(await pkg.readText(existingVmlPath))
       if (/<v:shape\b/.test(remaining)) {
@@ -256,29 +310,31 @@ export async function applySheetNotes(
   let commentsPath = existingCommentsPath
   if (commentsPath === null) {
     commentsPath = await nextFreePath(pkg, (index) => `xl/comments${index}.xml`)
-    const rid = nextFreeRid(relsXml)
+    const rid = nextFreeRelationshipId(relsXml)
     const target = `../${commentsPath.replace(/^xl\//, '')}`
     relsXml = appendRel(relsXml, rid, COMMENTS_REL_TYPE, target)
     relsChanged = true
-    pkg.add(commentsPath, buildCommentsXml(notes))
+    pkg.add(commentsPath, buildCommentsXml(notes, threaded.legacy))
   } else {
-    pkg.write(commentsPath, buildCommentsXml(notes))
+    pkg.write(commentsPath, buildCommentsXml(notes, threaded.legacy))
   }
   touchedEntries.add(commentsPath)
 
   // VML part: keep foreign shapes, replace the note shapes.
-  const shapes = notes.map((note, index) => noteShape(note, index)).join('')
   if (existingVmlPath !== null && (await pkg.has(existingVmlPath))) {
     const vml = stripNoteShapes(await pkg.readText(existingVmlPath))
     const end = vml.lastIndexOf('</xml>')
     if (end === -1) throw new NoteEditError(`${existingVmlPath} is not a VML drawing.`)
+    const firstId = nextShapeId(vml)
+    const shapes = notes.map((note, index) => noteShape(note, index, firstId)).join('')
     pkg.write(existingVmlPath, vml.slice(0, end) + shapes + vml.slice(end))
     touchedEntries.add(existingVmlPath)
   } else {
     const vmlPath = await nextFreePath(pkg, (index) => `xl/drawings/vmlDrawing${index}.vml`)
-    const rid = nextFreeRid(relsXml)
+    const rid = nextFreeRelationshipId(relsXml)
     relsXml = appendRel(relsXml, rid, VML_REL_TYPE, `../drawings/${vmlPath.split('/').pop()}`)
     relsChanged = true
+    const shapes = notes.map((note, index) => noteShape(note, index, FIRST_NOTE_SHAPE_ID)).join('')
     pkg.add(vmlPath, `${VML_HEADER}${shapes}</xml>`)
     touchedEntries.add(vmlPath)
     const worksheetXml = await pkg.readText(worksheetPath)

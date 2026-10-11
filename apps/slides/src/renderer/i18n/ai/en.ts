@@ -134,6 +134,7 @@ export const en = {
   aiClarifyOther: 'Other (type in)',
   aiClarifySkip: 'Skip survey',
   aiClarifyNext: 'Next',
+  aiClarifyPrev: 'Previous',
   aiClarifySubmit: 'Generate',
   aiSumReadAttachment: 'Read attachment',
   aiSumReadAttachmentName: 'Read attachment {name}',
@@ -222,4 +223,5 @@ export const en = {
   aiSumSaveTemplate: 'Saved style template "{name}"',
   aiSumTemplatesEmpty: 'Style templates (empty)',
   aiSumListTemplates: 'Listed {count} style templates',
+  aiPageCloudToLocal: 'cloud unavailable — generated locally',
 } satisfies Record<keyof typeof zh, string>

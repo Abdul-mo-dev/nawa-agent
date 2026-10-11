@@ -60,12 +60,20 @@ export function FileList({
     .slice(first, last)
     .filter(
       (item) =>
-        item.kind === 'file' && roots.some((root) => root.usable && isWithin(item.path, root.path)),
+        item.kind === 'file' &&
+        roots.some((root) => (root.readable ?? root.usable) && isWithin(item.path, root.path)),
     )
   const statusPaths = new Set(statusFiles.map((item) => item.path))
-  const { statuses: ragStatuses, error: ragStatusError, progress: ragProgress } = useRagStatuses(statusFiles)
-  const { statuses: analyticsStatuses, error: analyticsStatusError, progress: analyticsProgress } =
-    useAnalyticsStatuses(statusFiles)
+  const {
+    statuses: ragStatuses,
+    error: ragStatusError,
+    progress: ragProgress,
+  } = useRagStatuses(statusFiles)
+  const {
+    statuses: analyticsStatuses,
+    error: analyticsStatusError,
+    progress: analyticsProgress,
+  } = useAnalyticsStatuses(statusFiles)
   useEffect(() => {
     const el = scroll.current
     if (!el) return
@@ -284,7 +292,12 @@ export function FileList({
                   {item.name}
                 </span>
                 {tile && statusPaths.has(item.path) && (
-                  <RagBadge path={item.path} value={ragStatuses[item.path]} error={ragStatusError} progress={ragProgress} />
+                  <RagBadge
+                    path={item.path}
+                    value={ragStatuses[item.path]}
+                    error={ragStatusError}
+                    progress={ragProgress}
+                  />
                 )}
                 {tile && statusPaths.has(item.path) && (
                   <AnalyticsBadge
@@ -301,7 +314,12 @@ export function FileList({
                 <>
                   <div role="gridcell" className="ex-column-indexed">
                     {statusPaths.has(item.path) ? (
-                      <RagBadge path={item.path} value={ragStatuses[item.path]} error={ragStatusError} progress={ragProgress} />
+                      <RagBadge
+                        path={item.path}
+                        value={ragStatuses[item.path]}
+                        error={ragStatusError}
+                        progress={ragProgress}
+                      />
                     ) : (
                       <span className="ex-column-empty">—</span>
                     )}

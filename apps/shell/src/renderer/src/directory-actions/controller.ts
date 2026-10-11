@@ -123,9 +123,8 @@ export class ApprovalController {
 export class DirectoryActionClient {
   private inspections = new Map<string, DirectoryInspection>()
   private evidenceOmitted = 0
-  private usedAnalytics = false
-  private usedMyAgent = false
-  private evidence: { path: string; sourceHash?: string; text: string }[] = []
+  private evidence: { path: string; sourceHash?: string; text: string; sourcePaths?: string[] }[] =
+    []
   private runPromise: Promise<string> | null = null
   private child: AgentLoop | null = null
   private stopWorkflowPoll: (() => void) | null = null
@@ -197,10 +196,10 @@ export class DirectoryActionClient {
     if (value && typeof value === 'object') {
       const result = value as Partial<AnalyticsResult>
       if (result.id && Array.isArray(result.sources) && result.sources[0]) {
-        this.usedAnalytics = true
         this.addEvidence({
           path: result.sources[0].path,
           sourceHash: result.sources[0].hash,
+          sourcePaths: result.sources.map((source) => source.path),
           text: JSON.stringify({
             resultId: result.id,
             operation: result.operation,
@@ -292,10 +291,10 @@ export class DirectoryActionClient {
     if (key && 'available' in result && !result.available) this.catalogCache.delete(key)
     this.check()
     if ('succeeded' in result && result.succeeded && result.sources[0]) {
-      this.usedMyAgent = true
       this.addEvidence({
         path: result.sources[0].path,
         sourceHash: result.sources[0].contentHash,
+        sourcePaths: result.sources.map((source) => source.path),
         text: JSON.stringify({
           tool: result.tool,
           sources: result.sources,
@@ -445,7 +444,12 @@ export class DirectoryActionClient {
     this.check()
     return result
   }
-  private addEvidence(value: { path: string; sourceHash?: string; text: string }): void {
+  private addEvidence(value: {
+    path: string
+    sourceHash?: string
+    text: string
+    sourcePaths?: string[]
+  }): void {
     this.evidence.push({
       ...value,
       text:
@@ -743,12 +747,12 @@ export class DirectoryActionClient {
       }
       this.catalogCache.clear()
       const affected = (path: string) =>
-        pathKey(path) === pathKey(result.path) ||
-        (result.operation === 'delete-folder' && isWithin(path, result.path))
-      this.evidence =
-        this.usedAnalytics || this.usedMyAgent ? [] : this.evidence.filter((e) => !affected(e.path))
-      this.usedAnalytics = false
-      this.usedMyAgent = false
+        result.operation !== 'copy' &&
+        (pathKey(path) === pathKey(result.path) ||
+          (result.operation === 'delete-folder' && isWithin(path, result.path)))
+      this.evidence = this.evidence.filter(
+        (e) => !affected(e.path) && !e.sourcePaths?.some(affected),
+      )
       for (const [key, inspection] of this.inspections)
         if (affected(inspection.path)) this.inspections.delete(key)
       for (const [key, citation] of this.citations)

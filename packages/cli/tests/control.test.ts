@@ -43,7 +43,13 @@ async function fakeShell(
     })
   })
   servers.push(server)
-  await new Promise<void>((r) => server.listen(endpoint, r))
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(endpoint, () => {
+      server.removeListener('error', reject)
+      resolve()
+    })
+  })
   writeFileSync(
     join(dir, 'control.json'),
     JSON.stringify({ protocol: 1, pid: process.pid, endpoint, token: 'secret' }),
@@ -80,6 +86,13 @@ describe('open targets', () => {
     expect(() => target(['--page', '0'], '/d.pdf')).toThrow(/integer >= 1/)
     expect(() => target(['--el', 'e_1'], '/d.pptx')).toThrow(/--el needs --slide/)
     expect(() => target(['--page', '1'], '/notes.md')).toThrow(/pptx, docx, xlsx and pdf/)
+  })
+
+  it('takes a slide target on every presentation extension and nothing that merely looks like one', () => {
+    for (const ext of ['.pptx', '.pptm', '.ppsx', '.potx']) {
+      expect(target(['--slide', '0'], `/d${ext}`), ext).toEqual({ kind: 'slide', slide: 0 })
+    }
+    expect(() => target(['--slide', '0'], '/d.pptxm')).toThrow(/pptx, docx, xlsx and pdf/)
   })
 })
 

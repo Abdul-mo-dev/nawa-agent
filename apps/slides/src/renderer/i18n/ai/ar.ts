@@ -132,6 +132,7 @@ export const ar = {
   aiClarifyOther: 'أخرى (يمكن الكتابة)',
   aiClarifySkip: 'تخطي الاستبيان',
   aiClarifyNext: 'التالي',
+  aiClarifyPrev: 'السابق',
   aiClarifySubmit: 'إنشاء',
   aiSumReadAttachment: 'قراءة المرفق',
   aiSumReadAttachmentName: 'قراءة المرفق {name}',
@@ -220,4 +221,5 @@ export const ar = {
   aiSumSaveTemplate: 'حفظ قالب النمط "{name}"',
   aiSumTemplatesEmpty: 'قوالب الأنماط (فارغ)',
   aiSumListTemplates: 'سرد {count} من قوالب الأنماط',
+  aiPageCloudToLocal: 'السحابة غير متاحة — تم التوليد محليًا',
 } satisfies Record<keyof typeof zh, string>

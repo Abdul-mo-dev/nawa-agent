@@ -27,7 +27,7 @@
  */
 
 const { execFileSync } = require('node:child_process')
-const { existsSync, rmSync } = require('node:fs')
+const { existsSync, readFileSync, rmSync, statSync } = require('node:fs')
 const { join } = require('node:path')
 
 function normalizeHttpsBaseUrl(name, value) {
@@ -54,10 +54,8 @@ const fontCdnUrl = normalizeHttpsBaseUrl(
 // GENOFFICE_MAC_X64=1 — opt into packaging the Intel (x64) dmg/zip alongside
 // arm64. Off by default: Intel packages must only ever ship signed with the
 // company certificate (planned dual-track pipeline), so the current release
-// pipeline stays arm64-only and never produces a personally-signed Intel
-// artifact. The downstream layout (feed archive name, GenOffice-intel.dmg
-// alias) keys off which dmgs exist, so flipping this flag is the single
-// switch.
+// pipeline stays arm64-only. A Nawa distributor must configure its own
+// signing identity before publishing either architecture.
 const includeMacX64 = process.env.GENOFFICE_MAC_X64 === '1'
 
 // GENOFFICE_WIN_ARM64=1 — package the Windows ARM64 installer instead of x64.
@@ -94,35 +92,38 @@ const winSidecarTarget = winArm64 ? 'aarch64-pc-windows-msvc' : 'x86_64-pc-windo
 const WIN_SIDECAR = winArm64
   ? `../sheets/native/xlsx-engine/target/${winSidecarTarget}/release/xlsx-sidecar.exe`
   : '../sheets/native/xlsx-engine/target/release/xlsx-sidecar.exe'
+const UNIX_SIDECAR = '../sheets/native/xlsx-engine/target/release/xlsx-sidecar'
 
-// The gsk CLI tree below is copied verbatim from node_modules, and the
-// nested commander path depends on npm's current hoisting layout — fail the
-// build with a clear message if an install ever changes it, instead of
-// shipping an installer with a broken gsk runtime.
-// LICENSES.chromium.html only exists after the Electron binary download —
-// since Electron 42 that no longer happens during `npm ci` (the postinstall
-// script was replaced by the lazy `install-electron` bin), and electron-builder
-// exits 0 on a missing extraResources source, so without this check the
-// installer would silently ship without the Chromium license.
-for (const rel of [
-  '../../node_modules/@genspark/cli',
-  '../../node_modules/@genspark/cli/node_modules/commander',
-  '../../node_modules/ws',
-  '../../node_modules/electron/dist/LICENSES.chromium.html',
-  '../../node_modules/@embedpdf/pdfium/dist/pdfium.wasm',
-  '../../node_modules/@huggingface/transformers/dist/transformers.node.mjs',
-  '../../node_modules/onnxruntime-node/dist',
-  ...embeddingRuntimeTargets.map(
-    (target) => `../../node_modules/onnxruntime-node/bin/napi-v3/${target}`,
-  ),
-  ...sharpRuntimePackages.map((name) => `../../node_modules/${name}`),
-  '../../node_modules/@img',
-  '../pdf/node_modules/harfbuzzjs/hb-subset.wasm',
-]) {
-  if (!existsSync(join(__dirname, rel))) {
-    throw new Error(
-      `electron-builder extraResources source missing: ${rel} (npm hoisting changed?)`,
-    )
+function assertExtraResourceSources() {
+  // The gsk CLI tree below is copied verbatim from node_modules, and the
+  // nested commander path depends on npm's current hoisting layout — fail the
+  // build with a clear message if an install ever changes it, instead of
+  // shipping an installer with a broken gsk runtime.
+  // LICENSES.chromium.html only exists after the Electron binary download —
+  // since Electron 42 that no longer happens during `npm ci` (the postinstall
+  // script was replaced by the lazy `install-electron` bin), and electron-builder
+  // exits 0 on a missing extraResources source, so without this check the
+  // installer would silently ship without the Chromium license.
+  for (const rel of [
+    '../../node_modules/@genspark/cli',
+    '../../node_modules/@genspark/cli/node_modules/commander',
+    '../../node_modules/ws',
+    '../../node_modules/electron/dist/LICENSES.chromium.html',
+    '../../node_modules/@embedpdf/pdfium/dist/pdfium.wasm',
+    '../../node_modules/@huggingface/transformers/dist/transformers.node.mjs',
+    '../../node_modules/onnxruntime-node/dist',
+    ...embeddingRuntimeTargets.map(
+      (target) => `../../node_modules/onnxruntime-node/bin/napi-v3/${target}`,
+    ),
+    ...sharpRuntimePackages.map((name) => `../../node_modules/${name}`),
+    '../../node_modules/@img',
+    '../pdf/node_modules/harfbuzzjs/hb-subset.wasm',
+  ]) {
+    if (!existsSync(join(__dirname, rel))) {
+      throw new Error(
+        `electron-builder extraResources source missing: ${rel} (npm hoisting changed?)`,
+      )
+    }
   }
 }
 
@@ -158,23 +159,22 @@ function compileVisionOcr({ universalOnly } = { universalOnly: false }) {
   }
 }
 
-if (process.platform === 'darwin' && !existsSync(join(__dirname, VISION_OCR_HELPER))) {
-  compileVisionOcr()
-}
-
-// Windows local-OCR helper (Windows.Media.Ocr): compiled by the in-box .NET
-// Framework csc via build-win.mjs — same on-demand policy as the mac helper,
-// and Windows installers must not silently ship without it.
 const WIN_OCR_HELPER = '../../packages/pdf2docx/ocr-helper/win-ocr.exe'
-if (process.platform === 'win32' && !existsSync(join(__dirname, WIN_OCR_HELPER))) {
-  try {
-    execFileSync(
-      process.execPath,
-      [join(__dirname, '../../packages/pdf2docx/ocr-helper/build-win.mjs')],
-      { stdio: 'inherit' },
-    )
-  } catch (err) {
-    throw new Error(`win-ocr helper compile failed: ${err}`, { cause: err })
+
+function ensurePlatformHelpers() {
+  if (process.platform === 'darwin' && !existsSync(join(__dirname, VISION_OCR_HELPER))) {
+    compileVisionOcr()
+  }
+  if (process.platform === 'win32' && !existsSync(join(__dirname, WIN_OCR_HELPER))) {
+    try {
+      execFileSync(
+        process.execPath,
+        [join(__dirname, '../../packages/pdf2docx/ocr-helper/build-win.mjs')],
+        { stdio: 'inherit' },
+      )
+    } catch (err) {
+      throw new Error(`win-ocr helper compile failed: ${err}`, { cause: err })
+    }
   }
 }
 
@@ -236,22 +236,138 @@ function assertUniversalSidecar() {
   }
 }
 
+function builtFileExists(rel) {
+  try {
+    return existsSync(join(__dirname, rel)) && statSync(join(__dirname, rel)).isFile()
+  } catch {
+    return false
+  }
+}
+
 function assertModuleTreesPresent() {
+  const moduleFiles = ['docs', 'sheets', 'slides', 'pdf', 'markdown', 'html'].flatMap((name) =>
+    ['main/index.js', 'preload/index.js', 'renderer/index.html'].map(
+      (entry) => `../${name}/out/${entry}`,
+    ),
+  )
   for (const rel of [
-    '../docs/out',
-    '../sheets/out',
-    '../slides/out',
-    '../pdf/out',
-    '../markdown/out',
-    '../html/out',
+    ...moduleFiles,
+    'out/main/index.js',
+    'out/preload/index.js',
+    'out/preload/update.js',
+    'out/preload/pdf-password.js',
+    'out/renderer/index.html',
+    'out/renderer/update.html',
+    'out/renderer/pdf-password.html',
     '../../packages/cli/dist/genoffice.cjs',
-    '../../packages/cli/dist/node_modules/jsdom',
+    '../../packages/cli/dist/node_modules/jsdom/package.json',
   ]) {
-    if (!existsSync(join(__dirname, rel))) {
+    if (!builtFileExists(rel)) {
       throw new Error(
         `electron-builder extraResources source missing: ${rel} (run npm run build:all first)`,
       )
     }
+  }
+}
+
+function assertNativeSidecar(platform) {
+  const rel = platform === 'win32' ? WIN_SIDECAR : UNIX_SIDECAR
+  if (!builtFileExists(rel)) {
+    throw new Error(
+      `${platform} native spreadsheet engine missing: ${rel} (run npm run native:build -w @genoffice/sheets for the target platform first)`,
+    )
+  }
+}
+
+function assertPackagedSharpVersion() {
+  // extraResources copies the root runtime. A nested, patched shell dependency
+  // cannot protect a stale root installation left behind by npm hoisting.
+  const rel = '../../node_modules/sharp/package.json'
+  const expected = require('./package.json').dependencies.sharp
+  let actual
+  try {
+    if (builtFileExists(rel))
+      actual = JSON.parse(readFileSync(join(__dirname, rel), 'utf8')).version
+  } catch {
+    // Report missing and unreadable manifests through the same actionable gate.
+  }
+  if (actual !== expected) {
+    throw new Error(
+      `packaged root sharp ${actual ?? 'missing'} does not match the shell pin ${expected} ` +
+        '(run npm ci and verify npm ls sharp before packaging)',
+    )
+  }
+}
+
+const CLI_BUNDLE_REL = '../../packages/cli/dist/genoffice.cjs'
+const CLI_BUILD_REL = '../../packages/cli/build.mjs'
+const CLI_VERSION_ENV = 'GENOFFICE_APP_VERSION'
+const CLI_VERSION_BANNER = /^const __cliAppVersion = ("(?:[^"\\]|\\.)*");$/m
+
+/**
+ * The version the packaged app reports: CI's -c.extraMetadata.version deep-merges
+ * into the block below, and without it electron-builder ships apps/shell/package.json.
+ */
+function packagedAppVersion() {
+  const injected = config.extraMetadata && config.extraMetadata.version
+  if (typeof injected === 'string' && injected.trim()) return injected.trim()
+  return require('./package.json').version
+}
+
+function bundledCliVersion(bundlePath) {
+  const baked = CLI_VERSION_BANNER.exec(readFileSync(bundlePath, 'utf-8'))
+  if (!baked) return null
+  try {
+    return JSON.parse(baked[1])
+  } catch {
+    return null
+  }
+}
+
+/**
+ * `genoffice --version` is baked into the CLI bundle, which is built before
+ * electron-builder runs and therefore before a release version is known. Rebuild
+ * it here with the app version whenever the two disagree, so the packaged
+ * command line can never answer with the workspace CLI version.
+ */
+function ensureCliBundleCarriesAppVersion() {
+  const bundlePath = join(__dirname, CLI_BUNDLE_REL)
+  const appVersion = packagedAppVersion()
+  if (bundledCliVersion(bundlePath) === appVersion) return
+  execFileSync(process.execPath, [join(__dirname, CLI_BUILD_REL)], {
+    stdio: 'inherit',
+    env: { ...process.env, [CLI_VERSION_ENV]: appVersion },
+  })
+  const baked = bundledCliVersion(bundlePath)
+  if (baked !== appVersion) {
+    throw new Error(
+      `packaged genoffice CLI reports ${baked ?? 'no version'} but the app ships ${appVersion} ` +
+        `(rebuild it with ${CLI_VERSION_ENV}=${appVersion})`,
+    )
+  }
+}
+
+const NOTICE_PATH = join(__dirname, 'build/THIRD-PARTY-NOTICES.txt')
+const PDFIUM_NOTICE_TERMS = ['@embedpdf/pdfium', 'Copyright 2014 PDFium Authors', 'Apache License']
+
+function hasValidThirdPartyNotice() {
+  if (!existsSync(NOTICE_PATH)) return false
+  try {
+    const text = readFileSync(NOTICE_PATH, 'utf8')
+    return PDFIUM_NOTICE_TERMS.every((term) => text.includes(term))
+  } catch {
+    return false
+  }
+}
+
+function ensureThirdPartyNotices() {
+  if (!hasValidThirdPartyNotice()) {
+    execFileSync(process.execPath, [join(__dirname, '../../tools/gen-third-party-notices.mjs')], {
+      stdio: 'inherit',
+    })
+  }
+  if (!hasValidThirdPartyNotice()) {
+    throw new Error('third-party notice missing PDFium redistribution terms')
   }
 }
 
@@ -450,6 +566,14 @@ const config = {
       mimeType: 'text/csv',
     },
     {
+      // opens as a converted copy and saves as .xlsx (genoffice#1146)
+      ext: 'tsv',
+      name: 'TSV Document',
+      role: 'Editor',
+      icon: 'xlsx',
+      mimeType: 'text/tab-separated-values',
+    },
+    {
       ext: 'pdf',
       name: 'PDF Document',
       role: 'Editor',
@@ -471,6 +595,22 @@ const config = {
       mimeType: 'text/markdown',
     },
     {
+      ext: 'txt',
+      name: 'Text Document',
+      description: 'Text Document',
+      role: 'Editor',
+      icon: 'txt',
+      mimeType: 'text/plain',
+    },
+    {
+      ext: 'json',
+      name: 'JSON Document',
+      description: 'JSON Document',
+      role: 'Editor',
+      icon: 'json',
+      mimeType: 'application/json',
+    },
+    {
       ext: 'html',
       name: 'HTML Document',
       role: 'Editor',
@@ -490,8 +630,8 @@ const config = {
     // Two separate arch packages (NOT universal): arm64 keeps the exact
     // artifact names and update-feed entries it always had, x64 (opt-in via
     // GENOFFICE_MAC_X64=1, see includeMacX64 above) adds Intel support with
-    // electron-builder's default arch-less names (GenOffice-<v>.dmg /
-    // GenOffice-<v>-mac.zip). Both zips land in one latest-mac.yml and
+    // electron-builder's default arch-less names (Nawa-<v>.dmg /
+    // Nawa-<v>-mac.zip). Both zips land in one latest-mac.yml and
     // electron-updater picks by process.arch. Dual-arch packs ship the same
     // lipo fat xlsx-sidecar (see assertUniversalSidecar above).
     target: [
@@ -506,7 +646,7 @@ const config = {
     notarize: true,
     extraResources: [
       {
-        from: '../sheets/native/xlsx-engine/target/release/xlsx-sidecar',
+        from: UNIX_SIDECAR,
         to: 'native/xlsx-sidecar',
       },
     ],
@@ -531,32 +671,25 @@ const config = {
     ],
   },
   // Linux takes the sidecar from cargo's host-native target/release/, as do
-  // macOS and Windows x64. No `arch` is pinned here: electron-builder
-  // defaults to the build host's architecture, which is the only one the
-  // sidecar was actually built for. Packaging arm64 on an x64 host, or the
-  // reverse, needs a matching `cargo build --target` first.
+  // macOS and Windows x64. These Linux targets are x64; build on an x64 host
+  // so the copied sidecar and embedding runtime match the packaged app.
   linux: {
     // AppImage (self-contained, any distro) + deb (apt install, pulls in the
     // GTK/NSS runtime deps) + rpm (dnf/zypper install on Fedora / RHEL /
-    // openSUSE). Default artifact names are kept on purpose —
-    // GenOffice-<v>.AppImage / genoffice_<v>_amd64.deb — because the public
-    // README download links and the already-published linux-v0.5.149 release
-    // use them.
+    // openSUSE). Product and package names below identify this Nawa build.
     target: [
       { target: 'AppImage', arch: ['x64'] },
       { target: 'deb', arch: ['x64'] },
       { target: 'rpm', arch: ['x64'] },
     ],
-    // deb control metadata; values match the manually published 0.5.149 deb
-    // so apt sees the new packages as the same lineage. Homepage comes from
-    // package.json "homepage"; the Package field is pinned in the deb block
-    // below (packageName is a per-target option, rejected here by the schema).
-    maintainer: 'Mainfunc, Inc. <team@genspark.ai>',
-    vendor: 'Mainfunc, Inc. <team@genspark.ai>',
+    // The repository owner is known; no Nawa contact email is asserted.
+    // Release distributors may supply their verified maintainer identity.
+    maintainer: process.env.NAWA_LINUX_MAINTAINER?.trim() || 'Abdul-mo-dev',
+    vendor: 'Nawa',
     category: 'Office',
     // Icon SET directory, not the single 1024px png: electron-builder does
     // not resize a lone png, so deb/rpm would install only
-    // hicolor/1024x1024/apps/genoffice.png — a size absent from the hicolor
+    // hicolor/1024x1024/apps/nawa.png — a size absent from the hicolor
     // theme index, leaving GNOME/KDE launchers on the generic fallback icon
     // (genspark-ai/genoffice#90). The set ships every standard raster size.
     icon: 'build/icons',
@@ -576,19 +709,15 @@ const config = {
     syncDesktopName: true,
     extraResources: [
       {
-        from: '../sheets/native/xlsx-engine/target/release/xlsx-sidecar',
+        from: UNIX_SIDECAR,
         to: 'native/xlsx-sidecar',
       },
     ],
   },
   // Same "@genoffice/shell" problem as executableName above: the default deb
   // artifact name derives from package.json "name", and the scope's "/" makes
-  // fpm treat "@genoffice" as a directory. Spell the published name out
-  // (genoffice_<version>_amd64.deb, matching the linux-v0.5.149 release).
-  // packageName pins the control Package field to the same value the 0.5.149
-  // deb shipped with — apt treats a different Package name as an unrelated
-  // install, breaking upgrades. Without it, fpm receives productName
-  // "GenOffice" and only happens to downcase it to the right value.
+  // fpm treat "@genoffice" as a directory. Pin both the artifact and package
+  // names to Nawa so successive Nawa packages upgrade the same application.
   deb: {
     artifactName: 'nawa_${version}_${arch}.deb',
     packageName: 'nawa',
@@ -613,21 +742,30 @@ const config = {
     publish: null,
     afterInstall: 'build/linux-after-install.sh',
     afterRemove: 'build/linux-after-remove.sh',
+    // rpmbuild links every packaged ELF file into /usr/lib/.build-id/<hash>.
+    // Two Electron apps built on the same Electron release ship identical
+    // binaries, so the links are identical too and dnf refuses the install
+    // with a file conflict against the other app (genoffice#1145). The links exist only
+    // to locate detached debuginfo, which this package does not ship, so turn
+    // them off. rpm-level `fpm` (not linux-level) keeps it away from the deb.
+    fpm: ['--rpm-rpmbuild-define=_build_id_links none'],
   },
   nsis: {
+    artifactName: winArm64 ? 'Nawa-Setup-${version}-arm64.${ext}' : 'Nawa-Setup-${version}.${ext}',
     oneClick: false,
     allowToChangeInstallationDirectory: true,
   },
   beforePack: async (context) => {
+    ensurePlatformHelpers()
+    assertExtraResourceSources()
+    ensureThirdPartyNotices()
     assertModuleTreesPresent()
+    assertNativeSidecar(context.electronPlatformName)
+    assertPackagedSharpVersion()
+    ensureCliBundleCarriesAppVersion()
     if (context.electronPlatformName === 'darwin' && includeMacX64) {
       assertUniversalSidecar()
       assertUniversalVisionOcr()
-    }
-    if (context.electronPlatformName === 'win32' && !existsSync(join(__dirname, WIN_SIDECAR))) {
-      throw new Error(
-        `win extraResources source missing: ${WIN_SIDECAR} (run npm run native:build -w @genoffice/sheets first)`,
-      )
     }
   },
   dmg: {

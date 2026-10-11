@@ -4,11 +4,11 @@ import JSZip from 'jszip'
 import { describe, expect, it } from 'vitest'
 import { xlsxSidecarPath } from '../src/resources'
 import { run, tempDir, writeMinimalPdf } from './helpers'
+import { book } from './xlsx-helpers'
 
 const REPO = resolve(__dirname, '../../..')
 const DOCX = join(REPO, 'apps/docs/tests/pagination-corpus/docx/01-simple-english.docx')
 const PPTX = join(REPO, 'packages/pptx-engine/tests/fixtures/01_standard_business.pptx')
-const XLSX = join(REPO, 'apps/sheets/fixtures/generated/compatibility-basic.xlsx')
 
 describe('genoffice cli', () => {
   it('prints help and usage errors with the documented exit codes', async () => {
@@ -107,15 +107,26 @@ describe('genoffice cli', () => {
   })
 
   it.skipIf(!xlsxSidecarPath())('info reads workbook sheets through the xlsx sidecar', async () => {
-    const r = await run(['info', XLSX, '--json'])
+    const file = await book(tempDir(), [
+      ['item', 'qty'],
+      ['Apple', 3],
+    ])
+    const r = await run(['info', file, '--json'])
     expect(r.code).toBe(0)
     expect(r.json().detail.sheets.length).toBeGreaterThan(0)
     expect(r.json().detail.sheets[0]).toMatchObject({ name: expect.any(String) })
   })
 
   it('open fails with exit code 4 when no app binary is available', async () => {
+    // A GenOffice already running on this machine publishes its control endpoint in the
+    // user-data dir; `open` would then hand the file to that live instance and exit 0,
+    // never reaching the missing-binary path. Isolate the lookup like control.test.ts does.
     const r = await run(['open', DOCX, '--json'], {
-      env: { GENOFFICE_APP_BIN: '/nonexistent/GenOffice' },
+      env: {
+        GENOFFICE_APP_BIN: '/nonexistent/GenOffice',
+        GENOFFICE_USER_DATA: tempDir(),
+        GENOFFICE_AUDIT_LOG: 'off',
+      },
     })
     expect(r.code).toBe(4)
   })

@@ -1,12 +1,24 @@
 import type { zh } from './zh'
 
 export const ru = {
+  redactMenuLabel: 'Скрыть выделение от ИИ',
+  redactDialogDesc:
+    'Слова остаются в документе и в файле, а модель видит только метку. Дайте ей имя, чтобы было понятно, что она обозначает.',
+  redactDialogScope:
+    'Это касается только ИИ в этом приложении. CLI, инструменты MCP и экспорт без интерфейса читают файл напрямую и по-прежнему видят эти слова.',
+  redactDialogPlaceholder: 'Имя метки, напр. телефон клиента',
+  redactCancel: 'Отмена',
+  redactInsert: 'Скрыть',
+
   loading: 'Загрузка…',
   loadFailed: 'Не удалось открыть файл',
   untitled: 'Без названия',
   saveFailed: 'Не удалось сохранить: {error}',
   saveFailedStatus: 'Не удалось сохранить',
   exportFailed: 'Не удалось экспортировать',
+  printFailed: 'Не удалось напечатать: {error}',
+  exportHtmlSkipped:
+    'Экспортировано, но {count} ресурс(ов) не удалось встроить (например, {first})',
   viewPreview: 'Просмотр',
   viewSplit: 'Разделить',
   viewSource: 'Исходник',
@@ -52,7 +64,6 @@ export const ru = {
   save: 'Сохранить (⌘S)',
   saveAs: 'Сохранить как…',
   ribbonCollapse: 'Свернуть ленту',
-  ribbonPin: 'Закрепить ленту',
   ribbonExpand: 'Развернуть ленту',
   ribbonGroupInsert: 'Вставка',
   editText: 'Изменить текст',
@@ -118,6 +129,7 @@ export const ru = {
   insertImageUrl: 'Изображение по URL…',
   insertConfirm: 'Вставить',
   insertMore: 'Ещё',
+  insertSkeleton: 'Вставить каркас',
   insertTableSize: 'Таблица {r}×{c}',
   insertTablePickSize: 'Выберите размер таблицы',
   insertPlaceholderTableHeader: 'Заголовок {n}',

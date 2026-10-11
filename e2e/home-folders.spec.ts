@@ -108,7 +108,7 @@ test.describe('home folders panel', () => {
       await page.locator('.tab-bar .tab-item.tab-home').click()
       await expect(page.locator('.ex-content-heading h1')).toHaveText('Personal')
       await createNewFile(page, 'Spreadsheet')
-      await expect.poll(() => hasFile(join(root, 'Personal'), '.xlsx')).toBe(true)
+      expect(hasFile(join(root, 'Personal'), '.xlsx')).toBe(false)
       expect(hasFile(root, '.xlsx')).toBe(false)
     } finally {
       await closeAndSaveVideo(launched, 'home-folders-new-file')

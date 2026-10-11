@@ -3,15 +3,11 @@
 .SYNOPSIS
   Build the Nawa shell and launch it with Electron.
 .DESCRIPTION
-  Builds @genoffice/shell (Home, directory chat, shell chrome) into
-  apps/shell/out, then starts Electron on apps/shell.
-
-  Editor renderers (apps/*/out) are NOT rebuilt here: the docs rebuild is
-  currently broken upstream (generated-images import via ai-search), so a
-  full build would fail. Rebuild individual editors only when needed and
-  when their build passes.
+  Builds the shell, all six editors, the spreadsheet sidecar, and the CLI,
+  then starts Electron on apps/shell. Requires Node.js, Rust and the Microsoft
+  C++ Build Tools for a source build.
 .PARAMETER SkipBuild
-  Skip the build and just launch Electron with the existing apps/shell/out.
+  Skip the build and launch using complete, existing build outputs.
 .EXAMPLE
   .\Start-NawaShell.ps1
 .EXAMPLE
@@ -19,6 +15,7 @@
 #>
 [CmdletBinding()]
 param(
+  [Alias('NoBuild')]
   [switch]$SkipBuild
 )
 
@@ -31,22 +28,45 @@ function Fail([string]$message) {
   exit 1
 }
 
-where.exe node 2>$null | Out-Null
-if ($LASTEXITCODE -ne 0) { Fail 'Node.js is missing. Install Node.js 22.12 or newer first.' }
+$node = (Get-Command node.exe -ErrorAction Stop).Source
+$npm = (Get-Command npm.cmd -ErrorAction Stop).Source
+$nodeVersionText = (& $node --version).TrimStart('v')
+if ($LASTEXITCODE -ne 0 -or [version]$nodeVersionText -lt [version]'22.12.0') {
+  Fail 'Node.js 22.12 or newer is required.'
+}
+if (-not $SkipBuild) {
+  & $node tools/browser/check-prerequisites.mjs
+  if ($LASTEXITCODE -ne 0) { Fail 'Build prerequisites are missing.' }
+}
 
 if (-not (Test-Path 'node_modules/.bin/electron.cmd')) {
   Write-Host 'node_modules missing or incomplete. Running npm ci...' -ForegroundColor Yellow
-  npm ci
+  & $npm ci
   if ($LASTEXITCODE -ne 0) { Fail 'npm ci failed.' }
 }
 
 if (-not $SkipBuild) {
-  Write-Host 'Building @genoffice/shell...' -ForegroundColor Cyan
-  npm run build -w @genoffice/shell
-  if ($LASTEXITCODE -ne 0) { Fail 'Shell build failed.' }
-} else {
-  if (-not (Test-Path 'apps/shell/out/main/index.js')) {
-    Fail 'apps/shell/out is missing. Run without -SkipBuild first.'
+  Write-Host 'Building Nawa and all editor, spreadsheet and CLI prerequisites...' -ForegroundColor Cyan
+  & $npm run build:all
+  if ($LASTEXITCODE -ne 0) { Fail 'Nawa build failed.' }
+}
+
+$requiredFiles = @(
+  'apps/shell/out/main/index.js',
+  'apps/shell/out/preload/update.js',
+  'apps/shell/out/preload/pdf-password.js',
+  'apps/shell/out/renderer/update.html',
+  'apps/shell/out/renderer/pdf-password.html',
+  'apps/sheets/native/xlsx-engine/target/release/xlsx-sidecar.exe',
+  'packages/cli/dist/genoffice.cjs'
+)
+foreach ($module in @('shell', 'docs', 'sheets', 'slides', 'pdf', 'markdown', 'html')) {
+  $requiredFiles += "apps/$module/out/preload/index.js"
+  $requiredFiles += "apps/$module/out/renderer/index.html"
+}
+foreach ($file in $requiredFiles) {
+  if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
+    Fail "Required build output is missing: $file. Run without -SkipBuild first."
   }
 }
 

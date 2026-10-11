@@ -13,26 +13,31 @@ interface WorkspaceIpcOptions {
   getWindow: () => BrowserWindow | null
   readFile: (path: string, maxChars: number, offset?: number) => Promise<WorkspaceFileText>
   starredPaths: () => ReadonlySet<string>
+  rootsChanged?: () => void
+  contentsChanged?: () => void
 }
 
 export function registerWorkspaceIpc(options: WorkspaceIpcOptions): {
   contains: (path: unknown) => path is string
   isRoot: (path: string) => boolean
+  paths: () => readonly string[]
 } {
   let store: WorkspaceFolderStore | null = null
-  const getStore = () => store ??= new WorkspaceFolderStore({
-    statePath: join(app.getPath('userData'), 'workspace-folders.json'),
-    initialRoot: options.initialRoot,
-  })
+  const getStore = () =>
+    (store ??= new WorkspaceFolderStore({
+      statePath: join(app.getPath('userData'), 'workspace-folders.json'),
+      initialRoot: options.initialRoot,
+    }))
   registerHistoryIpc({
     isHomeSender: options.isHomeSender,
-    roots: async () => (await getStore().list()).map(root => root.path),
+    roots: async () => (await getStore().list()).map((root) => root.path),
   })
   const clients = new Set<WebContents>()
   const watchers = new Map<string, FSWatcher>()
   const pending = new Set<string>()
   let timer: ReturnType<typeof setTimeout> | null = null
   let picking = false
+  let rootsKey: string | undefined
 
   const send = (channel: string, payload?: unknown) => {
     for (const client of clients) {
@@ -42,8 +47,13 @@ export function registerWorkspaceIpc(options: WorkspaceIpcOptions): {
   }
   const rootsChanged = () => {
     for (const [dir, watcher] of watchers) {
-      if (!getStore().contains(dir)) { watcher.close(); watchers.delete(dir) }
+      if (!getStore().contains(dir)) {
+        watcher.close()
+        watchers.delete(dir)
+      }
     }
+    rootsKey = getStore().registeredRoots().join('\0')
+    options.rootsChanged?.()
     send('home:workspace-roots-changed')
   }
   const watchDirectory = (dir: string) => {
@@ -56,14 +66,23 @@ export function registerWorkspaceIpc(options: WorkspaceIpcOptions): {
           timer = null
           send(HOME_CHANNELS.folderChanged, [...pending])
           pending.clear()
+          options.contentsChanged?.()
         }, 200)
       })
-      watcher.on('error', () => { watcher.close(); watchers.delete(dir) })
+      watcher.on('error', () => {
+        watcher.close()
+        watchers.delete(dir)
+      })
       watchers.set(dir, watcher)
-    } catch { /* Focus/manual refresh still works when watching is unsupported. */ }
+    } catch {
+      /* Focus/manual refresh still works when watching is unsupported. */
+    }
   }
 
-  const handle = (channel: string, callback: (sender: WebContents, ...args: unknown[]) => unknown) => {
+  const handle = (
+    channel: string,
+    callback: (sender: WebContents, ...args: unknown[]) => unknown,
+  ) => {
     ipcMain.handle(channel, (event, ...args: unknown[]) => {
       if (event.senderFrame !== event.sender.mainFrame || !options.isHomeSender(event.sender)) {
         throw new Error('Workspace access is only available from the Nawa home page.')
@@ -77,17 +96,28 @@ export function registerWorkspaceIpc(options: WorkspaceIpcOptions): {
   }
 
   registerDirectoryActionsIpc({
-    roots: async () => (await getStore().list()).map(root => root.path),
+    roots: async () => (await getStore().list()).map((root) => root.path),
     isHomeSender: options.isHomeSender,
     readText: options.readFile,
-    extract: async path => {
+    extract: async (path) => {
       const result = await options.readFile(path, 12000, 0)
       if (!result.ok) throw new Error(result.error || 'Text extraction failed.')
       return result.text || ''
     },
-    changed: dirs => send(HOME_CHANNELS.folderChanged, dirs),
+    changed: (dirs) => {
+      send(HOME_CHANNELS.folderChanged, dirs)
+      options.contentsChanged?.()
+    },
   })
-  handle('home:workspace-roots', () => getStore().list())
+  handle('home:workspace-roots', async () => {
+    const roots = await getStore().list()
+    const nextKey = roots.map((root) => root.path).join('\0')
+    if (rootsKey !== nextKey) {
+      rootsKey = nextKey
+      options.rootsChanged?.()
+    }
+    return roots
+  })
   handle('home:workspace-pick-folder', async (sender) => {
     if (picking) return null
     picking = true
@@ -103,7 +133,9 @@ export function registerWorkspaceIpc(options: WorkspaceIpcOptions): {
       const root = await getStore().add(result.filePaths[0])
       rootsChanged()
       return root
-    } finally { picking = false }
+    } finally {
+      picking = false
+    }
   })
   handle('home:workspace-remove-folder', async (_sender, path) => {
     if (typeof path !== 'string') throw new Error('Invalid workspace folder.')
@@ -134,10 +166,12 @@ export function registerWorkspaceIpc(options: WorkspaceIpcOptions): {
     }
     try {
       const canonical = await getStore().authorizeFile(folder, path)
-      const limit = typeof maxChars === 'number' && Number.isFinite(maxChars)
-        ? Math.max(1, Math.min(12_000, Math.floor(maxChars))) : 12_000
-      const start = typeof offset === 'number' && Number.isFinite(offset)
-        ? Math.max(0, Math.floor(offset)) : 0
+      const limit =
+        typeof maxChars === 'number' && Number.isFinite(maxChars)
+          ? Math.max(1, Math.min(12_000, Math.floor(maxChars)))
+          : 12_000
+      const start =
+        typeof offset === 'number' && Number.isFinite(offset) ? Math.max(0, Math.floor(offset)) : 0
       const result = await options.readFile(canonical, limit, start)
       // A removal while extraction was running must not deliver newly unauthorized content.
       await getStore().authorizeFile(folder, canonical)
@@ -156,5 +190,6 @@ export function registerWorkspaceIpc(options: WorkspaceIpcOptions): {
   return {
     contains: (path: unknown): path is string => getStore().contains(path),
     isRoot: (path: string) => getStore().isRoot(path),
+    paths: () => getStore().registeredRoots(),
   }
 }

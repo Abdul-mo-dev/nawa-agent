@@ -57,6 +57,15 @@ export {
 } from './providers'
 export { isLoopbackApiUrl, usesLocalOpenAi } from './local-endpoint'
 export {
+  activeCustomEndpoint,
+  customEndpointLabel,
+  newCustomEndpointId,
+  removeCustomEndpoint,
+  resolveCustomEndpoints,
+  selectCustomEndpoint,
+  upsertCustomEndpoint,
+} from './custom-endpoints'
+export {
   AI_MEDIA_PROVIDERS,
   GEMINI_MEDIA_BASE_URL,
   OPENAI_IMAGES_BASE_URL,
@@ -90,13 +99,19 @@ export type {
   GenerateImageInput,
   MediaBlob,
 } from './media-protocols'
-export { AI_PROVIDER_ADAPTERS, getProviderAdapter, modelLacksVision } from './registry'
+export {
+  AI_PROVIDER_ADAPTERS,
+  getProviderAdapter,
+  modelLacksVision,
+  normalizeBaseUrl,
+} from './registry'
 export type {
   AiProtocol,
   ProviderAdapter,
   ProviderCapabilities,
   ResolvedEndpoint,
 } from './registry'
+export { sanitizeAiSettings, sanitizeCliPath, validCliPath } from './ai-settings-guard'
 export { chatForProvider } from './chat'
 export { setAiUserAgent, setRescueFetch } from './fetch'
 export { isAiNetworkError } from './network-error'

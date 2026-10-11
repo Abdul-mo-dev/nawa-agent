@@ -1,136 +1,173 @@
 import { randomBytes } from 'node:crypto'
-import { chmodSync, existsSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { rename, rm, writeFile } from 'node:fs/promises'
+import {
+  closeSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs'
+import { copyFile, open, rename, unlink, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 
+/** Transient Windows codes: antivirus/indexer briefly locks the rename target. */
 const RETRYABLE_RENAME_CODES = new Set(['EPERM', 'EACCES', 'EBUSY'])
-const RENAME_RETRIES = 4
+const RENAME_RETRY_DELAYS_MS = [50, 100, 200, 400]
 
+/**
+ * Codes a refused fsync may surface with inside cloud-sync folders, under AV
+ * locks or on filesystems without fsync. The bytes are already written, so a
+ * refused flush only weakens power-loss durability and must not fail the save.
+ */
+const TOLERATED_SYNC_CODES = new Set(['EPERM', 'EACCES', 'EBUSY', 'EINVAL', 'ENOSYS'])
+
+const errorCode = (error: unknown) => (error as NodeJS.ErrnoException).code ?? ''
+const isRetryableRename = (error: unknown) => RETRYABLE_RENAME_CODES.has(errorCode(error))
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+const sleepSync = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
 
-const stagedPathFor = (filePath: string) =>
+const tempPathBeside = (filePath: string) =>
   join(dirname(filePath), `.${basename(filePath)}.${randomBytes(6).toString('hex')}.tmp`)
 
-export interface StagedSaveOptions {
-  /** Keep the existing Windows save fallback for editors that already use it. */
-  onLockedRename?: 'fail' | 'write-in-place'
-  /** Restrict a newly created settings file, and tighten an existing one on replacement. */
-  mode?: number
+async function syncFileBestEffort(path: string): Promise<void> {
+  let handle
+  try {
+    handle = await open(path, 'r+')
+  } catch (error) {
+    if (TOLERATED_SYNC_CODES.has(errorCode(error))) return
+    throw error
+  }
+  try {
+    await handle.sync()
+  } catch (error) {
+    if (!TOLERATED_SYNC_CODES.has(errorCode(error))) throw error
+  } finally {
+    await handle.close()
+  }
 }
 
-/** The completed staged copy remains on disk if committing the save fails. */
-export class StagedSaveError extends Error {
-  constructor(
-    readonly stagedPath: string,
-    cause: unknown,
-  ) {
-    super(`Save failed; a complete staged copy remains at ${stagedPath}: ${String(cause)}`, {
-      cause,
-    })
-    this.name = 'StagedSaveError'
+function syncFileBestEffortSync(path: string): void {
+  let descriptor: number
+  try {
+    descriptor = openSync(path, 'r+')
+  } catch (error) {
+    if (TOLERATED_SYNC_CODES.has(errorCode(error))) return
+    throw error
+  }
+  try {
+    fsyncSync(descriptor)
+  } catch (error) {
+    if (!TOLERATED_SYNC_CODES.has(errorCode(error))) throw error
+  } finally {
+    closeSync(descriptor)
   }
 }
 
 /**
- * Stage bytes beside the destination and retry transient Windows rename locks.
- * Callers that previously used an in-place fallback can retain that behavior.
+ * Same-dir temp file, best-effort fsync, then rename. Rename-over-existing fails
+ * transiently on Windows (Defender/indexer locks: retry) and permanently on some
+ * network mounts (gvfs SMB refuses with EEXIST, genoffice#1877); either way the
+ * save falls back to an in-place write rather than failing.
  */
-export async function saveFileWithStaging(
-  filePath: string,
-  data: Uint8Array,
-  options: StagedSaveOptions = {},
-): Promise<void> {
-  const stagedPath = stagedPathFor(filePath)
-
+export async function atomicWriteFile(filePath: string, data: Buffer): Promise<void> {
+  const tmp = tempPathBeside(filePath)
   try {
-    await writeFile(stagedPath, data, { flag: 'wx', flush: true })
+    await writeFile(tmp, data)
+    await syncFileBestEffort(tmp)
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
-      await rm(stagedPath, { force: true }).catch(() => {})
-    }
+    await unlink(tmp).catch(() => {})
     throw error
   }
+  try {
+    await renameWithRetry(tmp, filePath)
+    return
+  } catch {
+    // fall through to the in-place write
+  }
+  // Keep the completed temp until the fallback lands: if that write fails
+  // or the process dies, the new bytes still exist somewhere on disk.
+  await writeFile(filePath, data)
+  await unlink(tmp).catch(() => {})
+}
 
+async function renameWithRetry(tmp: string, filePath: string): Promise<void> {
   for (let attempt = 0; ; attempt += 1) {
     try {
-      await rename(stagedPath, filePath)
+      await rename(tmp, filePath)
       return
     } catch (error) {
-      const retryable = RETRYABLE_RENAME_CODES.has((error as NodeJS.ErrnoException).code ?? '')
-      if (retryable && attempt < RENAME_RETRIES) {
-        await sleep(50 * 2 ** attempt)
-        continue
-      }
-
-      if (retryable && options.onLockedRename === 'write-in-place') {
-        try {
-          await writeFile(filePath, data, { flush: true })
-        } catch (fallbackError) {
-          throw new StagedSaveError(stagedPath, fallbackError)
-        }
-        await rm(stagedPath, { force: true }).catch(() => {})
-        return
-      }
-
-      throw new StagedSaveError(stagedPath, error)
+      if (!isRetryableRename(error) || attempt >= RENAME_RETRY_DELAYS_MS.length) throw error
+      await sleep(RENAME_RETRY_DELAYS_MS[attempt] ?? 0)
     }
   }
 }
 
-/** Synchronous variant for CLI output; keeps the target's existing file mode. */
-export function saveFileWithStagingSync(
-  filePath: string,
-  data: Uint8Array | string,
-  options: StagedSaveOptions = {},
-): void {
-  const stagedPath = stagedPathFor(filePath)
-  const mode = options.mode ?? (existsSync(filePath) ? statSync(filePath).mode & 0o7777 : undefined)
-
+/** copyFile stays in the kernel, so a multi-hundred-MB file is never read into RAM */
+export async function atomicCopyFile(source: string, filePath: string): Promise<void> {
+  const tmp = tempPathBeside(filePath)
   try {
-    writeFileSync(stagedPath, data, {
-      flag: 'wx',
-      flush: true,
-      ...(mode === undefined ? {} : { mode }),
-    })
-    if (mode !== undefined) chmodSync(stagedPath, mode)
+    await copyFile(source, tmp)
+    await syncFileBestEffort(tmp)
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+    await unlink(tmp).catch(() => {})
+    throw error
+  }
+  try {
+    await renameWithRetry(tmp, filePath)
+    return
+  } catch {
+    // fall through to the in-place write
+  }
+  // Keep the completed temp until the fallback lands, as atomicWriteFile does.
+  await copyFile(source, filePath)
+  await unlink(tmp).catch(() => {})
+}
+
+/**
+ * Atomic replacement for small userData JSON state files (recents, stars, AI
+ * settings). Same retry + in-place fallback as atomicWriteFile; the retry
+ * sleeps block the caller, which is acceptable for a few KB under a transient
+ * Windows lock.
+ */
+export function writeJsonAtomic(filePath: string, value: unknown): void {
+  mkdirSync(dirname(filePath), { recursive: true })
+  const json = JSON.stringify(value, null, 2)
+  const tmp = tempPathBeside(filePath)
+  const removeTemp = () => {
+    try {
+      unlinkSync(tmp)
+    } catch {
+      /* temp never created */
+    }
+  }
+  try {
+    writeFileSync(tmp, json, { encoding: 'utf8', flag: 'wx' })
+    syncFileBestEffortSync(tmp)
+    for (let attempt = 0; ; attempt += 1) {
       try {
-        rmSync(stagedPath, { force: true })
-      } catch {
-        // Keep the original write error.
+        renameSync(tmp, filePath)
+        return
+      } catch (error) {
+        if (!isRetryableRename(error) || attempt >= RENAME_RETRY_DELAYS_MS.length) throw error
+        sleepSync(RENAME_RETRY_DELAYS_MS[attempt] ?? 0)
       }
     }
+  } catch (error) {
+    if (isRetryableRename(error)) {
+      writeFileSync(filePath, json, 'utf8')
+      removeTemp()
+      return
+    }
+    removeTemp()
     throw error
   }
-
-  const waitCell = new Int32Array(new SharedArrayBuffer(4))
-  for (let attempt = 0; ; attempt += 1) {
-    try {
-      renameSync(stagedPath, filePath)
-      return
-    } catch (error) {
-      const retryable = RETRYABLE_RENAME_CODES.has((error as NodeJS.ErrnoException).code ?? '')
-      if (retryable && attempt < RENAME_RETRIES) {
-        Atomics.wait(waitCell, 0, 0, 50 * 2 ** attempt)
-        continue
-      }
-
-      if (retryable && options.onLockedRename === 'write-in-place') {
-        try {
-          writeFileSync(filePath, data, { flush: true })
-        } catch (fallbackError) {
-          throw new StagedSaveError(stagedPath, fallbackError)
-        }
-        try {
-          rmSync(stagedPath, { force: true })
-        } catch {
-          // The destination has the complete bytes; a stale temp can be cleaned later.
-        }
-        return
-      }
-
-      throw new StagedSaveError(stagedPath, error)
-    }
-  }
 }
+
+// Nawa settings and CLI callers retain their stricter opt-in fallback policy.
+export {
+  saveFileWithStaging,
+  saveFileWithStagingSync,
+  StagedSaveError,
+  type StagedSaveOptions,
+} from './staged-save'

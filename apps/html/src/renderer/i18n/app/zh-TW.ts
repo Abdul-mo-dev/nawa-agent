@@ -1,12 +1,23 @@
 import type { zh } from './zh'
 
 export const zhTW = {
+  redactMenuLabel: '把選中的內容對 AI 隱藏',
+  redactDialogDesc:
+    '這段文字會留在文件裡，AI 讀到的卻是下面的標記。給它起個名字，AI 才知道它是什麼。',
+  redactDialogScope:
+    '這只針對本應用的 AI。命令列、MCP 工具和無介面匯出會直接讀取文件，仍然看得到這些文字。',
+  redactDialogPlaceholder: '佔位名稱，例如：客戶電話',
+  redactCancel: '取消',
+  redactInsert: '隱藏',
+
   loading: '載入中…',
   loadFailed: '無法開啟檔案',
   untitled: '未命名文件',
   saveFailed: '儲存失敗：{error}',
   saveFailedStatus: '儲存失敗',
   exportFailed: '匯出失敗',
+  printFailed: '列印失敗：{error}',
+  exportHtmlSkipped: '已匯出，但有 {count} 個資源無法內嵌（如 {first}）',
   viewPreview: '預覽',
   viewSplit: '分欄',
   viewSource: '原始碼',
@@ -51,7 +62,6 @@ export const zhTW = {
   save: '儲存 (⌘S)',
   saveAs: '另存新檔…',
   ribbonCollapse: '摺疊功能區',
-  ribbonPin: '固定功能區',
   ribbonExpand: '展開功能區',
   ribbonGroupInsert: '插入',
   editText: '編輯文字',
@@ -117,6 +127,7 @@ export const zhTW = {
   insertImageUrl: '圖片連結…',
   insertConfirm: '插入',
   insertMore: '更多',
+  insertSkeleton: '插入骨架',
   insertTableSize: '{r}×{c} 表格',
   insertTablePickSize: '選擇表格大小',
   insertPlaceholderTableHeader: '標題 {n}',

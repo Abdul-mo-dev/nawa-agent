@@ -96,7 +96,7 @@ describe('local OpenAI-compatible policy', () => {
         Promise.resolve(
           okResponse(
             sseStream([
-              'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"show_number","arguments":"{\\\"number\\\":"}}]}}]}',
+              'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"show_number","arguments":"{\\"number\\":"}}]}}]}',
               'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"7}"}}]},"finish_reason":"tool_calls"}]}',
               'data: [DONE]',
             ]),

@@ -8,4 +8,6 @@ if errorlevel 1 (
   exit /b 1
 )
 node apps\browser\server\start.mjs %*
-if errorlevel 1 pause
+set "NAWA_EXIT_CODE=%errorlevel%"
+if not "%NAWA_EXIT_CODE%"=="0" pause
+exit /b %NAWA_EXIT_CODE%

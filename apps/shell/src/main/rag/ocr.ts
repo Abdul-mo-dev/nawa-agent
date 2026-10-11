@@ -3,16 +3,17 @@ import { renderPagePng } from '../../../../../packages/pdf2docx/src/extract'
 import { withPdfDocument } from '../../../../../packages/pdf2docx/src/extract/pdfium'
 import { ensureOcrEngine, ensurePdfium } from '../pdf2docx-local'
 import { existsSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 async function imagePng(bytes: Uint8Array): Promise<Buffer> {
   const packaged = process.resourcesPath
-    ? join(process.resourcesPath, 'embedding', 'node_modules', 'sharp', 'lib', 'index.js')
+    ? join(process.resourcesPath, 'embedding', 'node_modules', 'sharp', 'package.json')
     : ''
   const sharpModule =
     packaged && existsSync(packaged)
-      ? await import(pathToFileURL(packaged).href)
+      ? await import(pathToFileURL(createRequire(packaged).resolve('sharp')).href)
       : await import('sharp')
   const sharp = sharpModule.default as unknown as (
     input: Uint8Array,

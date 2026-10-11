@@ -6,14 +6,48 @@ import type { AiChatResponse, AiProviderConfig } from '../types'
 import { createStreamWatchdog, type StreamWatchdog } from '../watchdog'
 import { toGeminiSchema } from './gemini-schema'
 import {
+  endpointUrl,
+  isPlainObject,
   jsonBodyInsteadOfSse,
+  readCappedResponseText,
   sseErrorText,
-  sseLines,
+  sseDataEvents,
   throwIfCreditsNotice,
+  throwIfToolCountOverBudget,
   type StreamCallbacks,
 } from './shared'
 
 export const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta'
+
+// Gemini 3 rejects a model turn whose first functionCall lacks its thoughtSignature;
+// calls that never had one (other provider's history) go back with Google's bypass sentinel.
+const SKIP_SIGNATURE = 'skip_thought_signature_validator'
+
+interface GeminiPart {
+  text?: string
+  thought?: boolean
+  functionCall?: { id?: string; name?: string; args?: Record<string, unknown> }
+  thoughtSignature?: string
+  /** snake_case spelling some gateways forward verbatim */
+  thought_signature?: string
+  [key: string]: unknown
+}
+
+function geminiToolCall(part: GeminiPart): AgentToolCall {
+  const signature = part.thoughtSignature ?? part.thought_signature
+  const args: unknown = part.functionCall?.args
+  const inputError =
+    args === undefined || isPlainObject(args)
+      ? undefined
+      : `tool input must be a JSON object; raw: ${JSON.stringify(args).slice(0, 500)}`
+  return {
+    id: typeof part.functionCall?.id === 'string' ? part.functionCall.id : crypto.randomUUID(),
+    name: part.functionCall?.name ?? '',
+    input: isPlainObject(args) ? args : {},
+    ...(inputError ? { inputError } : {}),
+    ...(signature ? { signature } : {}),
+  }
+}
 
 function geminiContents(
   messages: AgentMessage[],
@@ -56,8 +90,12 @@ function geminiContents(
       }
       const parts: unknown[] = []
       if (m.text) parts.push({ text: m.text })
-      for (const call of m.toolCalls ?? []) {
-        parts.push({ functionCall: { name: call.name, args: call.input } })
+      for (const [i, call] of (m.toolCalls ?? []).entries()) {
+        const signature = call.signature ?? (i === 0 ? SKIP_SIGNATURE : undefined)
+        parts.push({
+          functionCall: { name: call.name, args: call.input },
+          ...(signature ? { thoughtSignature: signature } : {}),
+        })
       }
       // Gemini rejects model turns with empty parts lists.
       if (parts.length === 0) parts.push({ text: '(no content)' })
@@ -95,14 +133,7 @@ function emitGeminiJsonMessage(
   }
   const events = (Array.isArray(parsed) ? parsed : [parsed]) as Array<{
     candidates?: Array<{
-      content?: {
-        parts?: Array<{
-          text?: string
-          thought?: boolean
-          functionCall?: { id?: string; name?: string; args?: Record<string, unknown> }
-          [key: string]: unknown
-        }>
-      }
+      content?: { parts?: GeminiPart[] }
       finishReason?: string
     }>
     promptFeedback?: { blockReason?: string }
@@ -111,6 +142,7 @@ function emitGeminiJsonMessage(
   let emitted = false
   const parts: Record<string, unknown>[] = []
   const calls: AgentToolCall[] = []
+  let toolCallCount = 0
   let stopReason: string | undefined
   let abnormalFinish: string | undefined
   for (const event of events) {
@@ -130,11 +162,10 @@ function emitGeminiJsonMessage(
       }
       if (part.functionCall?.name) {
         emitted = true
-        calls.push({
-          id: typeof part.functionCall.id === 'string' ? part.functionCall.id : crypto.randomUUID(),
-          name: part.functionCall.name,
-          input: part.functionCall.args ?? {},
-        })
+        // A complete JSON body carries the whole turn at once, so the per-turn
+        // tool budget of the streamed path has to be applied here as well
+        throwIfToolCountOverBudget(++toolCallCount, 'gemini')
+        calls.push(geminiToolCall(part))
       }
     }
   }
@@ -194,7 +225,7 @@ async function geminiTurn(
     wd.touch()
     cb.onActivity?.()
   }
-  const url = `${baseUrl.replace(/\/$/, '')}/models/${config.model}:streamGenerateContent?alt=sse`
+  const url = endpointUrl(baseUrl, `models/${config.model}:streamGenerateContent`, '?alt=sse')
   const response = await aiFetch(url, {
     method: 'POST',
     signal: wd.signal,
@@ -234,9 +265,11 @@ async function geminiTurn(
   // headers arrived: ping the renderer watchdog too, or a slow first chunk could trip it
   onBytes()
   if (!response.ok || !response.body) {
-    throw new Error(`Gemini HTTP ${response.status}: ${httpBodyDetail(await response.text())}`)
+    throw new Error(
+      `Gemini HTTP ${response.status}: ${httpBodyDetail(await readCappedResponseText(response, onBytes))}`,
+    )
   }
-  const jsonBody = await jsonBodyInsteadOfSse(response)
+  const jsonBody = await jsonBodyInsteadOfSse(response, onBytes)
   if (jsonBody !== null) {
     throwIfCreditsNotice(jsonBody)
     return emitGeminiJsonMessage(jsonBody, cb, config, baseUrl)
@@ -247,31 +280,18 @@ async function geminiTurn(
   let emitted = false
   const parts: Record<string, unknown>[] = []
   const calls: AgentToolCall[] = []
-  for await (const line of sseLines(response.body, onBytes)) {
-    if (!line.startsWith('data:')) continue
-    const payload = line.slice(5).trim()
-    if (!payload) continue
-    // A truncated frame or a non-JSON keep-alive from a proxy should skip
-    // that event, not kill the entire AI turn with a parser error.
-    let event
-    try {
-      event = JSON.parse(payload) as {
-        candidates?: Array<{
-          content?: {
-            parts?: Array<{
-              text?: string
-              thought?: boolean
-              functionCall?: { id?: string; name?: string; args?: Record<string, unknown> }
-              [key: string]: unknown
-            }>
-          }
-          finishReason?: string
-        }>
-        promptFeedback?: { blockReason?: string }
-        error?: { message?: string } | string
-      }
-    } catch {
-      continue
+  let toolCallCount = 0
+  for await (const sse of sseDataEvents(response.body, onBytes)) {
+    // A truncated frame or a non-JSON keep-alive from a proxy skips that event
+    // rather than killing the turn.
+    if (sse.json === undefined) continue
+    const event = sse.json as {
+      candidates?: Array<{
+        content?: { parts?: GeminiPart[] }
+        finishReason?: string
+      }>
+      promptFeedback?: { blockReason?: string }
+      error?: { message?: string } | string
     }
     if (event.error) throw new Error(sseErrorText(event.error, 'Gemini stream error'))
     if (event.promptFeedback?.blockReason) {
@@ -290,12 +310,9 @@ async function geminiTurn(
       }
       // Gemini emits function calls whole, never as partial JSON
       if (part.functionCall?.name) {
+        throwIfToolCountOverBudget(++toolCallCount, 'gemini')
         emitted = true
-        calls.push({
-          id: typeof part.functionCall.id === 'string' ? part.functionCall.id : crypto.randomUUID(),
-          name: part.functionCall.name,
-          input: part.functionCall.args ?? {},
-        })
+        calls.push(geminiToolCall(part))
       }
     }
   }
@@ -315,6 +332,9 @@ async function geminiTurn(
   if (!emitted && !sawFinish) {
     throw new Error('Gemini returned no content (empty stream)')
   }
+  if (!sawFinish) {
+    throw new Error('Gemini stream ended before a finishReason')
+  }
   for (const call of calls)
     cb.onToolCall({ ...call, ...(stopReason === 'max_tokens' ? { truncated: true } : {}) })
   if (stopReason) cb.onStopReason?.(stopReason)
@@ -328,7 +348,7 @@ export async function chatGemini(
   baseUrl = GEMINI_BASE_URL,
   options: GeminiRequestOptions = {},
 ): Promise<AiChatResponse> {
-  const url = `${baseUrl.replace(/\/$/, '')}/models/${config.model}:generateContent`
+  const url = endpointUrl(baseUrl, `models/${config.model}:generateContent`)
   const response = await aiFetch(url, {
     method: 'POST',
     signal: wd.signal,
@@ -351,13 +371,13 @@ export async function chatGemini(
   if (!response.ok) {
     return {
       ok: false,
-      error: `Gemini HTTP ${response.status}: ${httpBodyDetail(await response.text())}`,
+      error: `Gemini HTTP ${response.status}: ${httpBodyDetail(await readCappedResponseText(response, () => wd.touch()))}`,
     }
   }
   // A 200 with an HTML shell / empty / truncated body (gateway soft-failure)
   // would make response.json() throw; return ok:false instead of leaking a
   // raw SyntaxError to the caller.
-  const bodyText = await response.text()
+  const bodyText = await readCappedResponseText(response, () => wd.touch())
   let json: {
     candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
   }

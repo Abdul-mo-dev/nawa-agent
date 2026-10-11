@@ -1,5 +1,6 @@
 import type { AiModelPolicy, AiProviderConfig, AiProviderId, AiSettings } from './types'
 import { isLocalModelConnection } from './local-endpoint'
+import { AI_PROVIDER_VISION, modelLacksVision } from './model-vision'
 
 export function normalizeModelPolicy(raw: unknown): AiModelPolicy | undefined {
   if (!raw || typeof raw !== 'object') return undefined
@@ -126,12 +127,14 @@ export function validateModelPolicy(
 
 export function modelSupportsVision(settings: AiSettings): boolean {
   const config = settings.providers[settings.provider]
+  if (!config) return false
   const policy = config && modelPolicyOf(settings.provider, config)
   if (policy?.vision !== undefined) return policy.vision
   // Custom servers require an explicit capability or successful vision test.
   if (settings.provider === 'custom') return false
-  if (['anthropic', 'gemini', 'openai', 'codex'].includes(settings.provider)) return true
-  return /^(gpt-|o[134](?:-|$)|claude-|gemini-|grok-|deep-seek-v4\.1-flash|qwen.*vl)/i.test(
-    config?.model ?? '',
+  if (modelLacksVision(config.model)) return false
+  return (
+    AI_PROVIDER_VISION[settings.provider] ||
+    /^(gpt-|o[134](?:-|$)|claude-|gemini-|grok-|deep-seek-v4\.1-flash|qwen.*vl)/i.test(config.model)
   )
 }

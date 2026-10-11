@@ -3,6 +3,8 @@
 /// `<dataValidations>` section from it (mirroring the CF/filter recipe).
 /// Mappings are the exact inverse of the read-side install in App.tsx.
 
+import { MAX_GRID_COLUMNS, MAX_GRID_ROWS } from '../shared/grid-bounds'
+
 export class DvEditError extends Error {}
 
 export interface DvCellArea {
@@ -98,7 +100,9 @@ function appendDvRules(
     kept.push(
       remaining.length === areas.length
         ? entry
-        : entry.replace(/\bsqref="[^"]*"/, `sqref="${remaining.join(' ')}"`),
+        : // function replacer: a surviving area's text is document-controlled and a
+          // a string replacement would expand $& / $1 in the surviving area
+          entry.replace(/\bsqref="[^"]*"/, () => `sqref="${remaining.join(' ')}"`),
     )
   }
   const entries = [...kept, ...rules.map(serializeRule)]
@@ -109,9 +113,14 @@ function appendDvRules(
   return insertBeforeTail(xml, body)
 }
 
-/** `A1:A1` and `$A$1` name the same cell as `A1`. */
+/** `A1:A1` and `$A$1` name the same cell as `A1`; `A:A` / `1:1` expand to the full grid. */
 function normalizeRef(ref: string): string {
   const [a, b] = ref.replace(/\$/g, '').split(':')
+  if (b !== undefined) {
+    if (/^[A-Z]+$/.test(a!) && /^[A-Z]+$/.test(b)) return `${a}1:${b}${MAX_GRID_ROWS}`
+    if (/^\d+$/.test(a!) && /^\d+$/.test(b))
+      return `A${a}:${columnToLetters(MAX_GRID_COLUMNS - 1)}${b}`
+  }
   return b === undefined || b === a ? a! : `${a}:${b}`
 }
 
@@ -226,7 +235,7 @@ function formulaText(type: string | undefined, raw: unknown): string | undefined
   const text = String(raw)
   if (text === '') return undefined
   if (type === 'list') {
-    return text.startsWith('=') ? text.slice(1) : `"${text}"`
+    return text.startsWith('=') ? text.slice(1) : `"${text.replaceAll('"', '""')}"`
   }
   if (type === 'custom') {
     return text.startsWith('=') ? text.slice(1) : text
@@ -245,7 +254,10 @@ function formulaText(type: string | undefined, raw: unknown): string | undefined
 /// 'YYYY-MM-DD[ HH:mm[:ss]]' (or slashes) → Excel serial (days since
 /// 1899-12-30). Plain numbers and references pass through untouched.
 /// Impossible calendar dates or clock times return undefined so the caller
-/// keeps the original text instead of writing a silently wrong serial.
+/// keeps the original text instead of writing a silently wrong serial; a
+/// pre-1900 year throws DvEditError, because it has no serial to write.
+/// Serials 1-59 sit one day before the linear rule (Excel's phantom 1900-02-29);
+/// formatSerial in @genoffice/file-parse reverses the same shift.
 function dateToSerial(text: string): number | undefined {
   const match =
     /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[T ](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$/.exec(
@@ -256,6 +268,15 @@ function dateToSerial(text: string): number | undefined {
   const yearNum = Number(year)
   const monthNum = Number(month)
   const dayNum = Number(day)
+  // Excel's 1900 date system has no serial before 1900-01-01, so such a date
+  // cannot be written at all. Date.UTC also maps a 0..99 year onto 19xx
+  // (0099 -> 1999), which would otherwise store a plausible, silently wrong
+  // serial; reject the year outright instead.
+  if (yearNum < 1900) {
+    throw new DvEditError(
+      `Data-validation date "${text.trim()}" is before 1900, which Excel cannot store.`,
+    )
+  }
   if (monthNum < 1 || monthNum > 12) return undefined
   if (dayNum < 1 || dayNum > daysInMonth(yearNum, monthNum)) return undefined
   let seconds = 0
@@ -269,7 +290,8 @@ function dateToSerial(text: string): number | undefined {
     seconds = hourNum * 3600 + minuteNum * 60 + secondNum
   }
   const days = (Date.UTC(yearNum, monthNum - 1, dayNum) - Date.UTC(1899, 11, 30)) / 86_400_000
-  return seconds === 0 ? days : days + seconds / 86_400
+  const serial = days < 61 ? days - 1 : days
+  return seconds === 0 ? serial : serial + seconds / 86_400
 }
 
 /// Days in a 1-based month, with the Gregorian leap-year rule for February.
@@ -298,6 +320,16 @@ function timeToFraction(text: string): number | undefined {
 }
 
 function toRef(range: DvCellArea): string {
+  if (
+    range.startRow < 0 ||
+    range.startColumn < 0 ||
+    range.endRow < range.startRow ||
+    range.endColumn < range.startColumn ||
+    range.endRow >= MAX_GRID_ROWS ||
+    range.endColumn >= MAX_GRID_COLUMNS
+  ) {
+    throw new DvEditError('A data-validation range lies outside the worksheet grid.')
+  }
   const start = `${columnToLetters(range.startColumn)}${range.startRow + 1}`
   return range.startRow === range.endRow && range.startColumn === range.endColumn
     ? start

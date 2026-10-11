@@ -4,6 +4,7 @@ import {
   extractDocumentImageSources,
   resolveSafeRelativeImagePath,
   rewriteDocumentImageSources,
+  scanCssUrls,
 } from './asset-lifecycle'
 import { ASSET_SNIFF_BYTES, sniffBinaryAssetMime } from './asset-mime'
 
@@ -55,30 +56,6 @@ async function readAsDataUrl(documentPath: string, source: string): Promise<stri
   return `data:${mime};base64,${bytes.toString('base64')}`
 }
 
-interface CssUrlMatch {
-  start: number
-  end: number
-  source: string
-  quote: '"' | "'" | ''
-}
-
-/** Every CSS url(...) reference: <style> rules and inline style attributes alike. */
-function scanCssUrls(text: string): CssUrlMatch[] {
-  const out: CssUrlMatch[] = []
-  const re = /url\(\s*(?:"([^"\n]*)"|'([^'\n]*)'|([^)"'\s]+))\s*\)/gi
-  for (const match of text.matchAll(re)) {
-    const source = match[1] ?? match[2] ?? match[3] ?? ''
-    if (!source) continue
-    out.push({
-      start: match.index,
-      end: match.index + match[0].length,
-      source,
-      quote: match[1] !== undefined ? '"' : match[2] !== undefined ? "'" : '',
-    })
-  }
-  return out
-}
-
 /** Base64 data URLs contain no spaces, quotes or parens, so the original quoting form stays valid. */
 function rewriteCssUrls(
   text: string,
@@ -99,7 +76,9 @@ function rewriteCssUrls(
 
 /** Shared discovery for approval-gated directory copies; uses the same HTML/CSS scanners. */
 export function singleFileImageSources(text: string): string[] {
-  return [...new Set([...extractDocumentImageSources(text), ...scanCssUrls(text).map(m => m.source)])]
+  return [
+    ...new Set([...extractDocumentImageSources(text), ...scanCssUrls(text).map((m) => m.source)]),
+  ]
 }
 
 export async function inlineImagesForSingleFile(

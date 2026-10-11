@@ -1,4 +1,5 @@
 import { normalizeChatModels } from './chat-models'
+import { resolveCustomEndpoints } from './custom-endpoints'
 import { defaultAiMediaSettings, resolveAiMediaSettings } from './media'
 import { defaultAiSearchSettings, resolveAiSearchSettings } from './search-settings'
 import type { AiProviderId, AiProviderMeta, AiSettings, LegacyAiSettings } from './types'
@@ -53,17 +54,20 @@ export const AI_PROVIDERS: AiProviderMeta[] = [
     // bare gpt-5.6 and the gemini family dropped off it (verified 2026-08-31).
     // DeepSeek goes by the proxy's hyphenated pool id; V4.1 Flash takes images
     // (live-verified 2026-09-15). gpt-6-astra: chat, tool call and image
-    // input all live-verified through the proxy 2026-09-17
+    // input all live-verified through the proxy 2026-09-17; claude-opus-5-5,
+    // gpt-6-sol and gpt-6-luna the same way 2026-09-24. Opus 4.7/4.8 dropped
+    // 2026-10-09: 5.5 is cheaper and supersedes both.
     models: [
-      'claude-opus-4-7',
-      'claude-opus-4-8',
+      'claude-opus-5-5',
       'claude-sonnet-4-6',
       'gpt-6-astra',
+      'gpt-6-sol',
+      'gpt-6-luna',
       'gpt-5.6-terra',
       'gpt-5.6-luna',
       DEEPSEEK_V41_FLASH,
     ],
-    defaultModel: 'claude-opus-4-7',
+    defaultModel: 'claude-opus-5-5',
     keyPlaceholder: 'Not required - sign in',
   },
   {
@@ -79,15 +83,17 @@ export const AI_PROVIDERS: AiProviderMeta[] = [
   {
     id: 'anthropic',
     label: 'Claude',
-    // current-generation ids per platform.claude.com models overview (2026-08)
+    // current-generation ids per platform.claude.com models overview (2026-10-09).
+    // Fable needs data retention enabled on the org, otherwise the API answers
+    // model_not_available; every other id is served to any key.
     models: [
-      'claude-opus-5',
+      'claude-opus-5-5',
       'claude-sonnet-5',
+      'claude-fable-5-1',
+      'claude-opus-5',
       'claude-fable-5',
-      'claude-opus-4-8',
-      'claude-opus-4-7',
       'claude-sonnet-4-6',
-      'claude-haiku-4-5-20251001',
+      'claude-haiku-5-5',
     ],
     defaultModel: 'claude-sonnet-5',
     keyPlaceholder: 'sk-ant-api03-...',
@@ -95,15 +101,17 @@ export const AI_PROVIDERS: AiProviderMeta[] = [
   {
     id: 'gemini',
     label: 'Gemini',
-    // 3.x lineup per ai.google.dev/gemini-api/docs/models (2026-08). 3.7 Flash is
-    // the current stable Flash; 3.1 Pro is still preview-only.
+    // 3.x lineup per ai.google.dev/gemini-api/docs/models (2026-09-23). 3.8 Flash
+    // is the current stable Flash Google recommends; 3.1 Pro is still preview-only.
     models: [
+      'gemini-3.8-flash',
       'gemini-3.7-flash',
       'gemini-3.1-pro-preview',
       'gemini-3.6-flash',
       'gemini-3.5-flash-lite',
+      'gemini-3.1-flash-lite',
     ],
-    defaultModel: 'gemini-3.7-flash',
+    defaultModel: 'gemini-3.8-flash',
     keyPlaceholder: 'AIza...',
   },
   {
@@ -123,9 +131,10 @@ export const AI_PROVIDERS: AiProviderMeta[] = [
     label: 'OpenAI',
     // GPT-5.6 naming: sol is the flagship (the bare `gpt-5.6` alias resolves to
     // it, but spell it out so the picker says which tier it is), terra balances
-    // cost/intelligence, luna is the high-volume tier (2026-08). gpt-6-astra
-    // is deliberately absent: OpenAI serves its tool calls only through the
-    // Responses API, which has no protocol here (2026-09-17)
+    // cost/intelligence, luna is the high-volume tier (2026-08). The GPT-6
+    // family (astra, sol, luna) is deliberately absent: Chat Completions
+    // supports its function calling only with reasoning_effort none, full
+    // tool use needs the Responses API, which has no protocol here (2026-09-24)
     models: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini'],
     defaultModel: 'gpt-5.6-terra',
     keyPlaceholder: 'sk-...',
@@ -140,9 +149,13 @@ export const AI_PROVIDERS: AiProviderMeta[] = [
   {
     id: 'glm',
     label: 'GLM',
-    // bigmodel.cn text-model lineup (2026-08); 5.3 and 5.2 share a base model,
-    // 5-Turbo is the cheap tier
-    models: ['glm-5.3', 'glm-5.2', 'glm-5-turbo'],
+    // bigmodel.cn text-model lineup (2026-08); 5.3 and 5.2 share a base model.
+    // 5.3-Flash is the first multimodal GLM-5 and the documented successor to
+    // 5-Turbo, which Z.ai delisted from its price card in late August and
+    // Tencent CloudBase retires on 2026-10-30 with migration advice pointing
+    // here. 5.2 is marked deprecated on third-party catalogues but is still
+    // sold pay-as-you-go, so it stays listed.
+    models: ['glm-5.3', 'glm-5.3-flash', 'glm-5.2'],
     defaultModel: 'glm-5.3',
     keyPlaceholder: 'xxxxxxxx.xxxxxxxx',
   },
@@ -150,8 +163,10 @@ export const AI_PROVIDERS: AiProviderMeta[] = [
     id: 'qwen',
     label: 'Qwen',
     // Versioned DashScope ids: the bare qwen-max alias still points at a
-    // Qwen2.5-era snapshot, so name the 3.x tiers explicitly (2026-08)
-    models: ['qwen3.8-max', 'qwen3.7-plus', 'qwen3.7-flash'],
+    // Qwen2.5-era snapshot, so name the 3.x tiers explicitly (2026-08).
+    // 3.8 ships as Max and Flash only — there is no 3.8-Plus tier, and
+    // 3.7-Flash is still the listed high-volume option.
+    models: ['qwen3.8-max', 'qwen3.8-flash', 'qwen3.7-plus', 'qwen3.7-flash'],
     defaultModel: 'qwen3.8-max',
     keyPlaceholder: 'sk-...',
   },
@@ -165,6 +180,61 @@ export const AI_PROVIDERS: AiProviderMeta[] = [
     keyPlaceholder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
   },
   {
+    id: 'mimo',
+    label: 'MiMo',
+    // Xiaomi's open-weight omni-modal pair (released 2026-09-22): Pro is the
+    // trillion-parameter flagship, Flash the efficiency/cost tier. Both take
+    // text, image, video and audio input; a -pro-ultraspeed tier also exists but
+    // is the same weights behind a faster serving path, so it is not a
+    // separate model to pick here.
+    models: ['mimo-v2.6-pro', 'mimo-v2.6-flash'],
+    defaultModel: 'mimo-v2.6-pro',
+    keyPlaceholder: 'sk-...',
+  },
+  {
+    id: 'hunyuan',
+    label: 'Hunyuan',
+    // Tencent's TokenHub chat models (docs 1823/132252, read 2026-09-30).
+    // hy4-preview is the 1M-context flagship and has deep thinking on by
+    // default; hy3 is the 256k balanced tier. Every other provider here
+    // defaults to its flagship, so this does too.
+    models: ['hy4-preview', 'hy3'],
+    defaultModel: 'hy4-preview',
+    keyPlaceholder: 'sk-...',
+  },
+  {
+    id: 'ling',
+    label: 'Ling',
+    // Ids as listed by developer.ant-ling.com (Ring = reasoning line); only
+    // Ling-3.0-flash-VL takes images, see modelLacksVision()
+    models: [
+      'Ling-3.0-flash',
+      'Ling-3.0-flash-VL',
+      'Ling-3.0-tiny',
+      'Ling-2.6-1T',
+      'Ring-2.6-1T',
+      'Ling-2.6-flash',
+    ],
+    defaultModel: 'Ling-3.0-flash',
+    keyPlaceholder: 'API Key',
+  },
+  {
+    id: 'spark',
+    label: 'Spark',
+    // iFlytek MaaS: lower-case model id and ak- key prefix are the vendor's own spelling
+    models: ['spark-x2.5'],
+    defaultModel: 'spark-x2.5',
+    keyPlaceholder: 'ak-...',
+  },
+  {
+    id: 'longcat',
+    label: 'LongCat',
+    // 2.5-Preview is the multimodal tier; 2.0 stays default so a fresh config avoids a preview
+    models: ['LongCat-2.5-Preview', 'LongCat-2.0'],
+    defaultModel: 'LongCat-2.0',
+    keyPlaceholder: 'API Key',
+  },
+  {
     id: 'minimax',
     label: 'MiniMax',
     // M3 is the current agentic/tool-use model; M2.5 moved to the legacy tier
@@ -175,7 +245,11 @@ export const AI_PROVIDERS: AiProviderMeta[] = [
   {
     id: 'xai',
     label: 'Grok',
-    models: ['grok-4.6', 'grok-4.5'],
+    // 4.7 (2026-09-21) is 2.1T / 500K context at 4.6's price. 4.6 stays the
+    // default so a fresh config does not silently move to a model released
+    // this month; say the word and the default follows the flagship like every
+    // other provider here.
+    models: ['grok-4.7', 'grok-4.6', 'grok-4.5'],
     defaultModel: 'grok-4.6',
     keyPlaceholder: 'xai-...',
   },
@@ -195,8 +269,11 @@ export const AI_PROVIDERS: AiProviderMeta[] = [
     // there is no `openai/gpt-5.6` alias there, only the per-tier ids
     models: [
       'openrouter/auto',
+      'anthropic/claude-opus-5.5',
       'anthropic/claude-sonnet-5',
       'openai/gpt-6-astra',
+      'openai/gpt-6-sol',
+      'openai/gpt-6-luna',
       'openai/gpt-5.6-sol',
       'moonshotai/kimi-k3',
     ],
@@ -207,13 +284,16 @@ export const AI_PROVIDERS: AiProviderMeta[] = [
     id: 'requesty',
     label: 'Requesty',
     // Managed policy ids exactly as GET router.requesty.ai/v1/models/managed
-    // lists them (2026-09-11): short stable names Requesty routes across
+    // lists them (2026-09-24): short stable names Requesty routes across
     // providers, used as-is in the model field. The full vendor-prefixed
     // catalog (GET /v1/models, e.g. openai/gpt-4o-mini) works too when typed
     // in. Ids ending "@eu" route through EU providers only.
     models: [
       'claude-sonnet-5',
+      'claude-opus-5-5',
       'claude-opus-4-8',
+      'gpt-6-sol',
+      'gpt-6-luna',
       'gpt-5.6-sol',
       'gpt-5.6-terra',
       'gemini-3.7-flash',
@@ -245,17 +325,54 @@ export const AI_PROVIDERS: AiProviderMeta[] = [
     keyPlaceholder: 'API Key',
   },
   {
+    id: 'cheaperinference',
+    label: 'Cheaper Inference',
+    // Bare model ids as GET api.cheaperinference.com/v1/models lists them (the
+    // chat rows, type "text"): no vendor prefix, one key for every lab. Other
+    // ids from that list work as-is when typed in. Full list at
+    // cheaperinference.com/#models.
+    models: ['gpt-5.4-mini', 'gpt-5.4', 'claude-sonnet-5', 'gemini-3.1-pro'],
+    defaultModel: 'gpt-5.4-mini',
+    keyPlaceholder: 'ci_live_...',
+  },
+  {
+    id: 'atlascloud',
+    label: 'Atlas Cloud',
+    // Lab-namespaced ids exactly as GET api.atlascloud.ai/v1/models lists them
+    // (2026-10-08, public endpoint, no key needed); the rest of the 117-model
+    // catalog works as-is when typed in. Chat, temperature and — for the
+    // multimodal ids — data-URI image input are live-verified. The text-only
+    // ids (deepseek-v4-*, glm-5.3, both MiniMax) are listed in
+    // modelLacksVision(); Atlas Cloud serves MiniMax M3 text-only even though
+    // MiniMax's own API takes images.
+    models: [
+      'deepseek-ai/deepseek-v4-pro',
+      'deepseek-ai/deepseek-v4-flash',
+      'moonshotai/kimi-k3',
+      'moonshotai/kimi-k2.6',
+      'zai-org/glm-5.3',
+      'zai-org/glm-5.3-flash',
+      'qwen/qwen3.8-max',
+      'qwen/qwen3.5-flash',
+      'minimaxai/minimax-m3',
+      'minimaxai/minimax-m2.5',
+    ],
+    defaultModel: 'deepseek-ai/deepseek-v4-pro',
+    keyPlaceholder: 'apikey-...',
+  },
+  {
     id: 'opencode-zen',
     label: 'OpenCode Zen',
     // Pay-as-you-go gateway (opencode.ai/docs/zen); ids exactly as GET
-    // /zen/v1/models lists them (2026-09-03). GPT-5.x, Grok and Muse Spark
+    // /zen/v1/models lists them (2026-10-09). GPT-5.x/6, Grok and Muse Spark
     // are served only through the Responses API, which has no protocol here,
     // so they stay out until one exists.
     models: [
       'claude-sonnet-5',
+      'claude-opus-5-5',
       'claude-opus-5',
       'claude-fable-5-1',
-      'claude-haiku-4-5',
+      'claude-haiku-5-5',
       'gemini-3.7-flash',
       'gemini-3.1-pro',
       'kimi-k3',
@@ -274,20 +391,29 @@ export const AI_PROVIDERS: AiProviderMeta[] = [
     label: 'OpenCode Go',
     // $10/month subscription to open-weight coding models (opencode.ai/docs/go),
     // same key as Zen; ids exactly as GET /zen/go/v1/models lists them
-    // (2026-09-03). GPT-5.6 Luna, Grok and Muse Spark are Responses-only and
-    // left out for the same reason as above.
+    // (re-read 2026-09-30). GPT-5.6 Luna, Grok and Muse Spark are
+    // Responses-only and left out for the same reason as above.
     models: [
       'kimi-k2.7-code',
       'kimi-k3',
+      'kimi-k2.6',
       'glm-5.3',
       'glm-5.3-flash',
+      'glm-5.2',
       'deepseek-v4-pro',
       'deepseek-v4-flash',
+      'deepseek-v4.1-flash',
       'qwen3.8-max',
       'qwen3.8-flash',
       'minimax-m3',
+      'minimax-m2.7',
       'mimo-v2.5-pro',
+      'mimo-v2.6-pro',
+      'mimo-v2.6-flash',
       'longcat-2.0',
+      'longcat-2.5-preview-free',
+      'hy4-preview',
+      'hy3',
     ],
     defaultModel: 'kimi-k2.7-code',
     keyPlaceholder: 'API Key',
@@ -362,11 +488,15 @@ const RETIRED_MODELS: Partial<Record<AiProviderId, Record<string, string>>> = {
   // proxy stopped serving bare gpt-5.6 (400) and removed the gemini route
   // entirely (405), verified 2026-08-31; gemini selections fall back to the
   // provider default since no gemini id is served at all
+  // 5-Turbo left the Z.ai price card late 2026-08; 5.3 Flash is the cheap tier now
+  glm: { 'glm-5-turbo': 'glm-5.3-flash' },
   genspark: {
     'gpt-5.6': 'gpt-5.6-terra',
-    'gemini-3.1-pro-preview': 'claude-opus-4-7',
-    'gemini-3-flash-preview': 'claude-opus-4-7',
-    'gemini-3.7-flash': 'claude-opus-4-7',
+    'gemini-3.1-pro-preview': 'claude-opus-5-5',
+    'gemini-3-flash-preview': 'claude-opus-5-5',
+    'gemini-3.7-flash': 'claude-opus-5-5',
+    'claude-opus-4-7': 'claude-opus-5-5',
+    'claude-opus-4-8': 'claude-opus-5-5',
   },
 }
 
@@ -411,20 +541,38 @@ export function maxOutputTokensOf(
     : clampMaxOutputTokens(settings.maxOutputTokens)
 }
 
+const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '')
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function mergeProviderConfigs(
+  defaults: AiSettings['providers'],
+  stored: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...defaults }
+  for (const [id, config] of Object.entries(stored)) {
+    if (isRecord(config)) merged[id] = config
+  }
+  return merged
+}
+
 /** pasted keys/URLs/model ids often carry stray whitespace, which turns into a 401 with a valid key */
-function trimConfigs(providers: AiSettings['providers']): AiSettings['providers'] {
-  const trimmed = { ...providers }
-  for (const [id, config] of Object.entries(trimmed)) {
-    trimmed[id as AiProviderId] = {
+function trimConfigs(providers: Record<string, unknown>): AiSettings['providers'] {
+  const trimmed: Record<string, unknown> = {}
+  for (const [id, config] of Object.entries(providers)) {
+    if (!isRecord(config)) continue
+    trimmed[id] = {
       ...config,
       ...(config.policy ? { policy: normalizeModelPolicy(config.policy) } : {}),
-      apiKey: config.apiKey?.trim() ?? '',
-      model: config.model?.trim() ?? '',
-      ...(config.baseUrl !== undefined ? { baseUrl: config.baseUrl.trim() } : {}),
-      ...(config.cliPath !== undefined ? { cliPath: config.cliPath.trim() } : {}),
+      apiKey: str(config.apiKey),
+      model: str(config.model),
+      ...(config.baseUrl !== undefined ? { baseUrl: str(config.baseUrl) } : {}),
+      ...(config.cliPath !== undefined ? { cliPath: str(config.cliPath) } : {}),
     }
   }
-  return trimmed
+  return trimmed as AiSettings['providers']
 }
 
 function migrateRetiredModels(providers: AiSettings['providers']): AiSettings['providers'] {
@@ -443,47 +591,52 @@ function migrateRetiredModels(providers: AiSettings['providers']): AiSettings['p
  * "custom" provider slot. `stored` is whatever the caller read from its
  * settings file (already JSON-parsed); this function does no file I/O.
  */
-export function resolveAiSettings(
-  stored: Partial<AiSettings> & LegacyAiSettings,
-  defaults: AiSettings,
-): AiSettings {
-  if (!stored.providers) {
-    if (stored.apiKey || stored.baseUrl || stored.model) {
+export function resolveAiSettings(stored: unknown, defaults: AiSettings): AiSettings {
+  const settings = (isRecord(stored) ? stored : {}) as Partial<AiSettings> & LegacyAiSettings
+  const storedProviders = isRecord(settings.providers) ? settings.providers : undefined
+  if (!storedProviders) {
+    if (settings.apiKey || settings.baseUrl || settings.model) {
       const custom = {
-        apiKey: stored.apiKey?.trim() ?? '',
-        model: stored.model?.trim() ?? '',
-        baseUrl: (stored.baseUrl ?? 'https://api.openai.com/v1').trim(),
+        apiKey: str(settings.apiKey),
+        model: str(settings.model),
+        baseUrl: str(settings.baseUrl) || 'https://api.openai.com/v1',
       }
-      return {
+      return resolveCustomEndpoints({
         ...defaults,
-        provider: stored.provider ?? 'custom',
+        provider: settings.provider ?? 'custom',
         providers: { ...defaults.providers, custom },
-      }
+      })
     }
-    return { ...defaults, provider: stored.provider ?? defaults.provider }
+    return resolveCustomEndpoints({ ...defaults, provider: settings.provider ?? defaults.provider })
   }
-  return {
+  return resolveCustomEndpoints({
     chatModels: normalizeChatModels(
-      stored.chatModels ?? defaults.chatModels,
+      settings.chatModels ?? defaults.chatModels,
       Object.keys(defaults.providers),
     ),
     defaultChatModelId:
-      typeof stored.defaultChatModelId === 'string'
-        ? stored.defaultChatModelId
+      typeof settings.defaultChatModelId === 'string'
+        ? settings.defaultChatModelId
         : defaults.defaultChatModelId,
-    provider: stored.provider ?? defaults.provider,
+    provider: settings.provider ?? defaults.provider,
+    customEndpoints: settings.customEndpoints,
+    customEndpoint: settings.customEndpoint,
     // Trim before migrating: a pasted " deepseek-reasoner " must still hit
     // the retired-id remap instead of being sent to the API verbatim.
-    providers: migrateRetiredModels(trimConfigs({ ...defaults.providers, ...stored.providers })),
-    gskToolsEnabled: stored.gskToolsEnabled ?? defaults.gskToolsEnabled ?? true,
-    media: resolveAiMediaSettings(stored.media ?? defaults.media),
-    search: resolveAiSearchSettings(stored.search ?? defaults.search),
+    providers: migrateRetiredModels(
+      trimConfigs(mergeProviderConfigs(defaults.providers, storedProviders)),
+    ),
+    gskToolsEnabled: settings.gskToolsEnabled ?? defaults.gskToolsEnabled ?? true,
+    media: resolveAiMediaSettings(settings.media ?? defaults.media),
+    search: resolveAiSearchSettings(settings.search ?? defaults.search),
     // clamped on read: a hand-edited settings file with an absurd cap must not be
     // forwarded to the endpoint verbatim
-    ...(stored.maxOutputTokens !== undefined || defaults.maxOutputTokens !== undefined
+    ...(settings.maxOutputTokens !== undefined || defaults.maxOutputTokens !== undefined
       ? {
-          maxOutputTokens: clampMaxOutputTokens(stored.maxOutputTokens ?? defaults.maxOutputTokens),
+          maxOutputTokens: clampMaxOutputTokens(
+            settings.maxOutputTokens ?? defaults.maxOutputTokens,
+          ),
         }
       : {}),
-  }
+  })
 }

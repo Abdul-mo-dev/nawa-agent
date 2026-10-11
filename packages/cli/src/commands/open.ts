@@ -63,9 +63,7 @@ export const openCommand: CommandDef = {
       ...(target ? { target } : {}),
     })
     return {
-      summary: target
-        ? `${path}: showing ${describe(target)} in Nawa`
-        : `opened ${path} in Nawa`,
+      summary: target ? `${path}: showing ${describe(target)} in Nawa` : `opened ${path} in Nawa`,
       detail: { ...result, gui_pid: endpoint.pid },
     }
   },
@@ -130,7 +128,7 @@ export function parseTarget(args: ParsedArgs, path: string): ControlTarget | und
     }
     return n
   }
-  if (/^\.pptxm?$|^\.ppsx$|^\.potx$/.test(ext) || ext === '.pptx') {
+  if (/^\.ppt[xm]$|^\.ppsx$|^\.potx$/.test(ext)) {
     expect(['slide', 'el'], 'presentation')
     if (args.flags.slide === undefined) {
       throw new CliError(EXIT.usage, '--el needs --slide', undefined, {

@@ -134,6 +134,7 @@ export const hi = {
   aiClarifyOther: 'अन्य (स्वयं लिखें)',
   aiClarifySkip: 'सर्वेक्षण छोड़ें',
   aiClarifyNext: 'अगला',
+  aiClarifyPrev: 'पिछला',
   aiClarifySubmit: 'जनरेट करें',
   aiSumReadAttachment: 'अटैचमेंट पढ़ा गया',
   aiSumReadAttachmentName: 'अटैचमेंट {name} पढ़ा गया',
@@ -222,4 +223,5 @@ export const hi = {
   aiSumSaveTemplate: 'स्टाइल टेम्पलेट "{name}" सहेजा गया',
   aiSumTemplatesEmpty: 'स्टाइल टेम्पलेट (खाली)',
   aiSumListTemplates: '{count} स्टाइल टेम्पलेट सूचीबद्ध किए गए',
+  aiPageCloudToLocal: 'क्लाउड अनुपलब्ध — स्थानीय रूप से जनरेट',
 } satisfies Record<keyof typeof zh, string>

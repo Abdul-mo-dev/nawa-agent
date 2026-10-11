@@ -1,3 +1,4 @@
+import { mcpLaunch, type McpLaunch } from '@genoffice/cli/mcp-launch'
 import { useCallback, useEffect, useState } from 'react'
 import type { TFunc } from './locale'
 import { McpServerSection } from './McpServerSection'
@@ -35,29 +36,7 @@ export const skillUpdateDue = (s: IntegrationsStatus): boolean =>
 
 const EXAMPLE_KEYS = ['intgExample1', 'intgExample2', 'intgExample3'] as const
 
-export interface McpLaunch {
-  command: string
-  args: string[]
-  env?: Record<string, string>
-}
-
-/**
- * How an MCP client starts `genoffice mcp`. Clients spawn without a shell, so on Windows
- * neither genoffice.cmd nor cmd /c is safe (a path with a space splits); the snippet does
- * what genoffice.cmd does: the app binary as Node on the bundled CLI. Elsewhere it is the
- * bare name once it is on the PATH, else the launcher itself.
- */
-export function mcpLaunch(cli: { status: string; launcherDir: string }): McpLaunch {
-  const dir = cli.launcherDir
-  if (dir.includes('\\')) {
-    return {
-      command: `${dir}\\..\\..\\Nawa.exe`,
-      args: [`${dir}\\genoffice.cjs`, 'mcp'],
-      env: { ELECTRON_RUN_AS_NODE: '1' },
-    }
-  }
-  return { command: cli.status === 'present' ? 'genoffice' : `${dir}/genoffice`, args: ['mcp'] }
-}
+export { mcpLaunch, type McpLaunch }
 
 const shellWord = (w: string) => (/\s/.test(w) ? `"${w}"` : w)
 
@@ -195,6 +174,9 @@ export function IntegrationsPane({
     compare(status.cli.version, status.skillNeedsCli) < 0
   const anyInstalled = status.agents.some((a) => a.state.status !== 'missing')
   const launch = mcpLaunch(status.cli)
+  // a link in ~/.local/bin that the shell does not search is not "ready": show the PATH line instead of the sudo command
+  const cliOnPath = status.cli.status === 'present' && !status.cli.pathHint
+  const cliFix = status.cli.pathHint ?? status.cli.manual
 
   const examples = (
     <div className="set-intg-examples">
@@ -365,14 +347,14 @@ export function IntegrationsPane({
           <div className="set-field-desc set-intg-lead">
             {status.cli.ephemeral
               ? t('intgCliEphemeral')
-              : status.cli.status === 'present'
+              : cliOnPath
                 ? t('intgCliReady', { v: status.cli.version, path: status.cli.location ?? '' })
                 : t('intgCliNotOnPath', { v: status.cli.version })}
           </div>
-          {status.cli.status !== 'present' && status.cli.manual && !status.cli.ephemeral && (
+          {!cliOnPath && cliFix && !status.cli.ephemeral && (
             <div className="set-intg-code">
-              <code>{status.cli.manual}</code>
-              <button className="set-btn" onClick={() => copy(status.cli.manual!, 'manual')}>
+              <code>{cliFix}</code>
+              <button className="set-btn" onClick={() => copy(cliFix, 'manual')}>
                 {copied === 'manual' ? t('intgCopied') : t('intgCopy')}
               </button>
             </div>

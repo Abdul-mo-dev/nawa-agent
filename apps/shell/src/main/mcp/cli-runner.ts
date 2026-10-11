@@ -81,11 +81,16 @@ function parseJson(stdout: string): CliJsonOk | CliJsonError | undefined {
   }
 }
 
+export const MAX_CLI_OUTPUT_BYTES = 64 * 1024 * 1024
+
 export function createCliRunner(paths: CliRunnerPaths): CliRunner {
   return {
     run(args, options = {}) {
-      const timeoutMs = options.timeoutMs ?? 120_000
-      if (options.signal?.aborted) return Promise.resolve({ ok: false, code: -1, stdout: '', stderr: 'Cancelled' })
+      const timeoutMs = Number.isFinite(options.timeoutMs)
+        ? Math.min(600_000, Math.max(1000, Math.floor(options.timeoutMs!)))
+        : 120_000
+      if (options.signal?.aborted)
+        return Promise.resolve({ ok: false, code: -1, stdout: '', stderr: 'Cancelled' })
       return new Promise<CliRunOutcome>((resolve) => {
         let child: ChildProcessWithoutNullStreams
         try {
@@ -116,24 +121,42 @@ export function createCliRunner(paths: CliRunnerPaths): CliRunner {
         const terminate = (): void => {
           if (!child.pid) return
           if (process.platform === 'win32') {
-            const killer = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, shell: false })
-            killer.on('error', () => { child.kill() })
-            killer.on('close', code => { if (code !== 0) child.kill() })
+            const killer = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
+              windowsHide: true,
+              shell: false,
+            })
+            killer.on('error', () => {
+              child.kill()
+            })
+            killer.on('close', (code) => {
+              if (code !== 0) child.kill()
+            })
           } else {
-            try { process.kill(-child.pid, 'SIGKILL') } catch { child.kill('SIGKILL') }
+            try {
+              process.kill(-child.pid, 'SIGKILL')
+            } catch {
+              child.kill('SIGKILL')
+            }
           }
         }
-        const abort = () => { terminate(); finish({ ok: false, code: -1, stdout, stderr: `${stderr}\nNawa cancelled` }) }
+        const abort = () => {
+          terminate()
+          finish({ ok: false, code: -1, stdout, stderr: `${stderr}\nNawa cancelled` })
+        }
         const timer = setTimeout(() => {
           terminate()
           finish({ ok: false, code: -1, stdout, stderr: `${stderr}\nNawa timed out` })
         }, timeoutMs)
-        const max = options.maxOutputBytes ?? 4 * 1024 * 1024
+        const max = Number.isFinite(options.maxOutputBytes)
+          ? Math.min(MAX_CLI_OUTPUT_BYTES, Math.max(1024, Math.floor(options.maxOutputBytes!)))
+          : 4 * 1024 * 1024
         const append = (chunk: Buffer, err: boolean) => {
           if (settled) return
           outputBytes += chunk.length
           if (outputBytes > max) {
-            terminate(); finish({ ok: false, code: -1, stdout, stderr: 'CLI output exceeded its safety limit.' }); return
+            terminate()
+            finish({ ok: false, code: -1, stdout, stderr: 'CLI output exceeded its safety limit.' })
+            return
           }
           if (err) stderr += errorDecoder.write(chunk)
           else stdout += outputDecoder.write(chunk)
@@ -158,7 +181,7 @@ export function createCliRunner(paths: CliRunnerPaths): CliRunner {
             stderr,
           })
         })
-        child.stdin?.on('error', error => {
+        child.stdin?.on('error', (error) => {
           if (!settled && (error as NodeJS.ErrnoException).code !== 'EPIPE') {
             terminate()
             finish({ ok: false, code: -1, stdout, stderr: `${stderr}\n${String(error)}` })

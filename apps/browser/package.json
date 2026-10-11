@@ -8,6 +8,7 @@
   "scripts": {
     "build": "electron-vite build",
     "start": "electron .",
-    "test": "node ../../tools/browser/test.mjs"
+    "test": "node ../../tools/browser/test.mjs",
+    "test:native": "vitest run"
   }
 }

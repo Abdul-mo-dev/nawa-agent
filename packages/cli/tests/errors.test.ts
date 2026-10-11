@@ -4,11 +4,11 @@ import { describe, expect, it } from 'vitest'
 import { classifyOpError } from '../src/op-errors'
 import { xlsxSidecarPath } from '../src/resources'
 import { run, tempDir } from './helpers'
+import { book } from './xlsx-helpers'
 
 const REPO = resolve(__dirname, '../../..')
 const DOCX = join(REPO, 'apps/docs/tests/pagination-corpus/docx/01-simple-english.docx')
 const PPTX = join(REPO, 'packages/pptx-engine/tests/fixtures/01_standard_business.pptx')
-const XLSX = join(REPO, 'apps/sheets/fixtures/generated/compatibility-basic.xlsx')
 
 const TEXT = [{ runs: [{ text: 'x' }] }]
 
@@ -181,7 +181,11 @@ describe('structured errors', () => {
   })
 
   it.skipIf(!xlsxSidecarPath())('reports sheet errors with the sheet list', async () => {
-    const { dir, file } = copyOf(XLSX, 'book.xlsx')
+    const dir = tempDir()
+    const file = await book(dir, [
+      ['item', 'qty'],
+      ['Apple', 3],
+    ])
     const missing = (await run(['sheet', 'read', file, '--sheet', 'Nope', '--json'])).json()
     expect(missing).toMatchObject({ error: 'sheet_not_found' })
     expect(missing.detail.sheets.length).toBeGreaterThan(0)

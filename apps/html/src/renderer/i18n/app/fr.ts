@@ -1,12 +1,23 @@
 import type { zh } from './zh'
 
 export const fr = {
+  redactMenuLabel: 'Masquer la sélection à l’IA',
+  redactDialogDesc:
+    'Les mots restent dans le document et dans le fichier ; le modèle ne voit que le marqueur ci-dessous. Donnez-lui un nom pour qu’il sache ce qu’il désigne.',
+  redactDialogScope:
+    'Le masquage ne concerne que l’IA de cette application. La CLI, les outils MCP et l’exportation sans interface lisent le fichier directement et voient toujours ces mots.',
+  redactDialogPlaceholder: 'Nom du placeholder, ex. : téléphone du client',
+  redactCancel: 'Annuler',
+  redactInsert: 'Masquer',
+
   loading: 'Chargement…',
   loadFailed: "Impossible d'ouvrir le fichier",
   untitled: 'Sans titre',
   saveFailed: "Échec de l'enregistrement : {error}",
   saveFailedStatus: "Échec de l'enregistrement",
   exportFailed: "Échec de l'export",
+  printFailed: "Échec de l'impression : {error}",
+  exportHtmlSkipped: 'Exporté, mais {count} ressource(s) n’ont pas pu être intégrées (ex. {first})',
   viewPreview: 'Aperçu',
   viewSplit: 'Scindé',
   viewSource: 'Source',
@@ -55,7 +66,6 @@ export const fr = {
   save: 'Enregistrer (⌘S)',
   saveAs: 'Enregistrer sous…',
   ribbonCollapse: 'Réduire le ruban',
-  ribbonPin: 'Épingler le ruban',
   ribbonExpand: 'Développer le ruban',
   ribbonGroupInsert: 'Insertion',
   editText: 'Modifier le texte',
@@ -121,6 +131,7 @@ export const fr = {
   insertImageUrl: 'Image depuis une URL…',
   insertConfirm: 'Insérer',
   insertMore: 'Plus',
+  insertSkeleton: 'Insérer la structure',
   insertTableSize: 'Tableau {r}×{c}',
   insertTablePickSize: 'Choisir la taille du tableau',
   insertPlaceholderTableHeader: 'En-tête {n}',

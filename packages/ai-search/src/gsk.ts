@@ -26,6 +26,10 @@ import {
   type WebSearchResult,
 } from './shared'
 import { genofficeApiKey, genofficeAuthPath, reloadGenofficeAuth } from './genoffice-auth'
+// deep import: the package root re-exports Electron-bound modules, and this file also runs in the genoffice CLI
+import { readBodyCapped } from '@genoffice/electron-utils/remote-image'
+import { createStreamWatchdog } from '@genoffice/ai-provider'
+import { fetchWithSsrfGuard } from '@genoffice/electron-utils/safe-remote-url'
 
 const SEARCH_TIMEOUT_MS = 60_000
 const GENERATE_TIMEOUT_MS = 600_000
@@ -168,33 +172,116 @@ export function gskChildEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.Proce
 // ── Low-level execution ─────────────────────────────────────────────
 
 /**
+ * gsk failures can arrive as a full HTML error page (a gateway or CDN
+ * answering for an unavailable service) in the message or on stderr. That text
+ * otherwise lands verbatim in CLI output, logs and agent context, so distill
+ * it to one readable line: the HTTP status plus the page's visible text for an
+ * HTML page, the [ERROR] lines for gsk's own multi-line logs, a plain clip
+ * otherwise. Exported for tests.
+ */
+export function summarizeGskFailure(raw: unknown, fallback = 'unknown error'): string {
+  const text = (typeof raw === 'string' ? raw : raw == null ? '' : String(raw)).trim()
+  if (!text) return fallback
+  const isHtml = /<!doctype|<html[\s>]|<\/html>|<body[\s>]/i.test(text)
+  if (!isHtml) {
+    // gsk logs mix [INFO] progress chatter, [ERROR] failures and crash noise;
+    // prefer the [ERROR] lines, drop [INFO] ones, and keep it to one line
+    const lines = text
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean)
+    const errors = lines.filter((l) => /^\[ERROR\]/i.test(l))
+    const kept = errors.length ? errors : lines.filter((l) => !/^\[INFO\]/i.test(l))
+    const joined = (kept.length ? kept : lines).join(' ')
+    return joined.length > 300 ? `${joined.slice(0, 300)}…` : joined
+  }
+  const plain = text
+    .replace(/<head[\s\S]*?<\/head>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<form[\s\S]*?<\/form>/gi, ' ')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&(?:[a-z][a-z0-9]*|#\d+|#x[0-9a-f]+);/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^HTTP\s+\d{3}\s*:?\s*/i, '')
+    .trim()
+  const head = /HTTP\s+(\d{3})/.exec(text)?.[1]
+  const label = head ? `HTTP ${head} (HTML error page)` : 'an HTML error page'
+  if (!plain) return label
+  return `${label}: ${plain.length > 200 ? `${plain.slice(0, 200)}…` : plain}`
+}
+
+/**
+ * The balanced `{...}` / `[...]` block that starts at `start`, or null when it
+ * never closes. String-aware, so braces and quotes inside string values do not
+ * change the depth, and a block ends at its own closer rather than at the end
+ * of the output (trailing log lines are left out).
+ * `budget` is shared across candidates: each restarts at its own offset, so
+ * without it the recovery pass is quadratic in the number of candidate lines.
+ */
+function jsonBlockAt(text: string, start: number, budget: ScanBudget): string | null {
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let i = start; i < text.length; i++) {
+    if (budget.chars <= 0) return null
+    budget.chars--
+    const c = text[i]!
+    if (inString) {
+      if (escaped) escaped = false
+      else if (c === '\\') escaped = true
+      else if (c === '"') inString = false
+      continue
+    }
+    if (c === '"') inString = true
+    else if (c === '{' || c === '[') depth++
+    else if (c === '}' || c === ']') {
+      depth--
+      if (depth === 0) return text.slice(start, i + 1)
+    }
+  }
+  return null
+}
+
+interface ScanBudget {
+  chars: number
+}
+
+// the output is model-controlled (bounded only by MAX_BUFFER), so the recovery
+// scan gets a fixed total budget across all candidate openers
+const MAX_RECOVERY_SCAN_CHARS = 4 * 1024 * 1024
+
+/**
  * gsk output may have [INFO] log lines mixed in before or after the JSON;
- * scan for a line starting with { or [ and parse the longest valid JSON
- * block from there, shrinking past any trailing logs.
+ * find the first line that opens a JSON block and take that block, so a
+ * pretty-printed payload is located in one linear scan instead of by reparsing
+ * every line-bounded prefix.
  */
 export function parseGskOutput(stdout: string): unknown {
   const trimmed = stdout.trim()
   try {
     return JSON.parse(trimmed)
   } catch {
-    /* fall through to line-by-line scan */
+    /* fall through to the recovery scan */
   }
-  // Pretty-printed output puts inner elements on their own `{` lines, so the
-  // scan must start from the earliest candidate and take the longest parse.
-  const lines = trimmed.split('\n')
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!.trim()
-    if (line.startsWith('{') || line.startsWith('[')) {
-      for (let j = lines.length; j > i; j--) {
+  let offset = 0
+  const budget: ScanBudget = { chars: MAX_RECOVERY_SCAN_CHARS }
+  for (const line of trimmed.split('\n')) {
+    if (budget.chars <= 0) break
+    const opener = line.trimStart()[0]
+    if (opener === '{' || opener === '[') {
+      const block = jsonBlockAt(trimmed, offset + line.indexOf(opener), budget)
+      if (block) {
         try {
-          return JSON.parse(lines.slice(i, j).join('\n'))
+          return JSON.parse(block)
         } catch {
-          continue
+          /* a log line that only looks like JSON; try the next opener */
         }
       }
     }
+    offset += line.length + 1
   }
-  throw new Error(`No JSON found in gsk output: ${stdout.slice(0, 300)}`)
+  throw new Error(`No JSON found in gsk output: ${summarizeGskFailure(stdout, '')}`)
 }
 
 function runGsk(args: string[], timeoutMs: number, signal?: AbortSignal): Promise<unknown> {
@@ -217,16 +304,26 @@ function runGsk(args: string[], timeoutMs: number, signal?: AbortSignal): Promis
       },
       (err, stdout, stderr) => {
         if (err) {
-          // gsk's real failure reason (auth/network/quota) is in stderr; append it to ease debugging
-          const errText = (stderr || '').toString().trim().slice(0, 500)
-          reject(errText ? new Error(`${err.message} | stderr: ${errText}`) : err)
+          // stderr carries gsk's real reason ([ERROR] lines, or a whole HTML
+          // page); err.message only repeats the command line, so use it alone
+          // when stderr has nothing
+          const stderrText = summarizeGskFailure(stderr, '')
+          reject(
+            new Error(
+              stderrText
+                ? `gsk failed: ${stderrText}`
+                : summarizeGskFailure((err as Error).message, 'gsk failed'),
+            ),
+          )
           return
         }
         try {
           const result = parseGskOutput(String(stdout))
           const rec = asRecord(result)
           if (rec.status && rec.status !== 'ok') {
-            reject(new Error(`gsk returned an error: ${rec.message ?? rec.status}`))
+            reject(
+              new Error(`gsk returned an error: ${summarizeGskFailure(rec.message ?? rec.status)}`),
+            )
             return
           }
           resolve(result)
@@ -243,15 +340,16 @@ function runGsk(args: string[], timeoutMs: number, signal?: AbortSignal): Promis
 /** Max search results kept; longest snippet/title chars (prevents MB fields blowing context). */
 export const MAX_GSK_RESULTS = 20
 export const MAX_GSK_SNIPPET_CHARS = 2_000
+const MAX_GSK_URL_CHARS = 8_192
 
 function normalizeMaxResults(n: number): number {
   if (!Number.isFinite(n)) return 6
   return Math.min(20, Math.max(1, Math.floor(n)))
 }
 
-function clipField(v: unknown): string {
+function clipField(v: unknown, max = MAX_GSK_SNIPPET_CHARS): string {
   const s = String(v ?? '')
-  return s.length > MAX_GSK_SNIPPET_CHARS ? s.slice(0, MAX_GSK_SNIPPET_CHARS) : s
+  return s.length > max ? s.slice(0, max) : s
 }
 
 /** Parses the `gsk search` response shape data.organic_results[{title,link,snippet}] (exported for tests) */
@@ -266,7 +364,7 @@ export function parseGskWebSearch(
     const o = asRecord(item)
     return {
       title: clipField(o.title),
-      url: clipField(o.link),
+      url: clipField(o.link, MAX_GSK_URL_CHARS),
       snippet: clipField(o.snippet),
     }
   })
@@ -288,6 +386,7 @@ export async function gskWebSearch(
 
 /** Parses the `gsk img-search` response shape data[{image_url,title,source,link,width,height}] (exported for tests) */
 export function parseGskImageSearch(raw: unknown, maxResults: number): ImageSearchResult[] {
+  const bounded = normalizeMaxResults(maxResults)
   const dataRaw = asRecord(raw).data
   const data: unknown[] = Array.isArray(dataRaw) ? dataRaw : []
   const images: ImageSearchResult[] = []
@@ -307,7 +406,7 @@ export function parseGskImageSearch(raw: unknown, maxResults: number): ImageSear
     if (Number.isFinite(width) && width > 0) entry.width = width
     if (Number.isFinite(height) && height > 0) entry.height = height
     images.push(entry)
-    if (images.length >= maxResults) break
+    if (images.length >= bounded) break
   }
   return images
 }
@@ -392,6 +491,16 @@ export async function gskResolveDownloadUrl(url: string): Promise<string> {
 const GSK_TOOL_CLI_BASE = 'https://www.genspark.ai/api/tool_cli'
 const SLIDE_GENERATE_TIMEOUT_MS = 240_000
 
+/**
+ * tool_cli answers a long call with an NDJSON heartbeat stream, so the body is
+ * read through the capped reader: a gateway that never stops sending must not
+ * grow the main-process buffer for the whole request.
+ */
+export const MAX_TOOL_CLI_NDJSON_BYTES = 8 * 1024 * 1024
+
+/** Cap for a downloaded slide artifact: one page of HTML plus its images. */
+export const MAX_SLIDE_ARTIFACT_BYTES = 64 * 1024 * 1024
+
 export interface GskSlideGenerateOptions {
   /** Content and layout brief for this page */
   brief: string
@@ -433,11 +542,11 @@ async function toolCliPost(
 ): Promise<unknown> {
   const key = gskApiKey()
   if (!key) throw new Error('Not logged in to Genspark (gsk login)')
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-  const onAbort = () => controller.abort()
-  signal?.addEventListener('abort', onAbort, { once: true })
-  try {
+  // A listener added to an already-aborted signal never fires; the billed POST would go out.
+  if (signal?.aborted) throw new DOMException('The operation was aborted', 'AbortError')
+  // The shared watchdog surfaces our own deadline as AiTimeoutError instead of a bare abort.
+  const watchdog = createStreamWatchdog(signal, timeoutMs, timeoutMs)
+  return watchdog.guard(async () => {
     const resp = await fetch(`${GSK_TOOL_CLI_BASE}${path}`, {
       method: 'POST',
       // X-Agent-Type splits genoffice usage out of the proxy's "Claw" billing bucket
@@ -447,19 +556,16 @@ async function toolCliPost(
         'X-Agent-Type': 'genoffice',
       },
       body: JSON.stringify(body),
-      signal: controller.signal,
+      signal: watchdog.signal,
     })
-    const text = await resp.text()
+    const text = new TextDecoder().decode(await readBodyCapped(resp, MAX_TOOL_CLI_NDJSON_BYTES))
     if (!resp.ok) throw new Error(`tool_cli ${path} HTTP ${resp.status}: ${text.slice(0, 200)}`)
     const result = parseToolCliNdjson(text)
     if (result.status !== 'ok') {
       throw new Error(`tool_cli ${path} failed: ${result.message ?? result.status}`)
     }
     return result.data
-  } finally {
-    clearTimeout(timer)
-    signal?.removeEventListener('abort', onAbort)
-  }
+  })
 }
 
 /**
@@ -490,9 +596,16 @@ export async function gskSlideGenerate(
   )
   const downloadUrl = dl.download_url
   if (!downloadUrl) throw new Error('file/download returned no download_url')
-  const resp = await fetch(String(downloadUrl), signal ? { signal } : undefined)
+  // the cloud response picks this URL: same SSRF gate as every other model-influenced download
+  const resp = await fetchWithSsrfGuard(String(downloadUrl), {
+    fetchImpl: (url, init) => fetch(url, signal ? { ...init, signal } : init),
+  })
+  if (!resp) throw new Error('PPTX download blocked: the download URL is not a public address')
   if (!resp.ok) throw new Error(`PPTX download failed: HTTP ${resp.status}`)
-  return { bytes: new Uint8Array(await resp.arrayBuffer()), model: String(data.model ?? '') }
+  return {
+    bytes: await readBodyCapped(resp, MAX_SLIDE_ARTIFACT_BYTES),
+    model: String(data.model ?? ''),
+  }
 }
 
 // ── Media analysis / transcription ──────────────────────────────────

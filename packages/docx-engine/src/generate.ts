@@ -1,5 +1,6 @@
 import { sdtCheckboxGlyphs, sdtCheckboxIsChecked, syncSdtCheckbox } from './checkbox-control'
 import type {
+  CellMargins,
   CharIndents,
   GeneratedBlock,
   ImageWrap,
@@ -19,6 +20,14 @@ export interface GenerateContext {
   listParagraphStyleId?: string
   /** allocate a new relationship id for a hyperlink target; returns rId */
   allocateHyperlinkRel: (href: string) => string
+  /**
+   * Mint the w:bookmarkStart/@w:id for a bookmark name. w:id must be unique in
+   * the part, so a caller writing into an existing document supplies an
+   * allocator seeded above that part's highest id. Without one (a fragment
+   * rendered outside any document) ids come from a process counter, which
+   * keeps them unique among themselves but is not coordinated with a part.
+   */
+  allocateBookmarkId?: (name: string) => number
 }
 
 const EMU_PER_PX = 9525
@@ -55,10 +64,10 @@ export function patchImageParagraphXml(xml: string, patch: ImagePatch): string {
     out = out.replace(/(<pic:spPr[^>]*>[\s\S]*?)<a:xfrm([^>]*)>/, (_whole, prefix, attrs) => {
       let a = attrs as string
       const setAttr = (name: string, value: string | null) => {
-        a = a.replace(new RegExp(`\\s*\\b${name}="[^"]*"`), '')
+        a = a.replace(new RegExp(`\\s*\\b${name}\\s*=\\s*(?:"[^"]*"|'[^']*')`), '')
         if (value != null) a += ` ${name}="${value}"`
       }
-      if (patch.rotDeg !== undefined) {
+      if (patch.rotDeg !== undefined && Number.isFinite(patch.rotDeg)) {
         const norm = ((Math.round(patch.rotDeg) % 360) + 360) % 360
         setAttr('rot', norm ? String(norm * 60000) : null)
       }
@@ -68,12 +77,18 @@ export function patchImageParagraphXml(xml: string, patch: ImagePatch): string {
     })
   }
   if (patch.widthPx && patch.heightPx) {
-    const cx = Math.max(1, Math.round(patch.widthPx * EMU_PER_PX))
-    const cy = Math.max(1, Math.round(patch.heightPx * EMU_PER_PX))
-    const resize = (tag: string) =>
-      tag.replace(/cx="\d+"/, `cx="${cx}"`).replace(/cy="\d+"/, `cy="${cy}"`)
-    out = out.replace(/<wp:extent[^>]*\/?>/, resize)
-    out = out.replace(/<a:ext[^>]*\/>/, resize)
+    // Non-finite dimensions must not land in the XML verbatim (cx="Infinity"
+    // is schema-invalid); skip the resize and keep the original extents.
+    const toEmu = (px: number): number | null =>
+      Number.isFinite(px) ? Math.max(1, Math.round(px * EMU_PER_PX)) : null
+    const cx = toEmu(patch.widthPx)
+    const cy = toEmu(patch.heightPx)
+    if (cx !== null && cy !== null) {
+      const resize = (tag: string) =>
+        tag.replace(/cx="\d+"/, `cx="${cx}"`).replace(/cy="\d+"/, `cy="${cy}"`)
+      out = out.replace(/<wp:extent[^>]*\/?>/, resize)
+      out = out.replace(/<a:ext[^>]*\/>/, resize)
+    }
   }
   // Word lays the drawing out against the unrotated wp:extent plus
   // wp:effectExtent: a 90°/270° turn of a non-square picture needs the extra
@@ -124,24 +139,32 @@ export function patchImageParagraphXml(xml: string, patch: ImagePatch): string {
       }
     }
   }
-  // Rewrite posOffset values inside positionH / positionV (surgical)
+  // Rewrite posOffset values inside positionH / positionV (surgical). Non-finite
+  // offsets would land verbatim (posOffset>NaN<) — skip and keep the original.
+  const finiteOffset = (v: number): number | null => (Number.isFinite(v) ? Math.round(v) : null)
   if (patch.posOffsetX !== undefined) {
-    out = out.replace(
-      /(<wp:positionH[^>]*>[\s\S]*?)<wp:posOffset>-?\d+<\/wp:posOffset>([\s\S]*?<\/wp:positionH>)/,
-      `$1<wp:posOffset>${Math.round(patch.posOffsetX)}</wp:posOffset>$2`,
-    )
+    const x = finiteOffset(patch.posOffsetX)
+    if (x !== null) {
+      out = out.replace(
+        /(<wp:positionH[^>]*>[\s\S]*?)<wp:posOffset>-?\d+<\/wp:posOffset>([\s\S]*?<\/wp:positionH>)/,
+        `$1<wp:posOffset>${x}</wp:posOffset>$2`,
+      )
+    }
   }
   if (patch.posOffsetY !== undefined) {
-    out = out.replace(
-      /(<wp:positionV[^>]*>[\s\S]*?)<wp:posOffset>-?\d+<\/wp:posOffset>([\s\S]*?<\/wp:positionV>)/,
-      `$1<wp:posOffset>${Math.round(patch.posOffsetY)}</wp:posOffset>$2`,
-    )
+    const y = finiteOffset(patch.posOffsetY)
+    if (y !== null) {
+      out = out.replace(
+        /(<wp:positionV[^>]*>[\s\S]*?)<wp:posOffset>-?\d+<\/wp:posOffset>([\s\S]*?<\/wp:positionV>)/,
+        `$1<wp:posOffset>${y}</wp:posOffset>$2`,
+      )
+    }
   }
   return out
 }
 
 const WRAP_ELEMENT_RE =
-  /<wp:wrapNone\s*\/>|<wp:wrapSquare[^>]*\/>|<wp:wrapSquare[\s\S]*?<\/wp:wrapSquare>|<wp:wrapTight[\s\S]*?<\/wp:wrapTight>|<wp:wrapThrough[\s\S]*?<\/wp:wrapThrough>|<wp:wrapTopAndBottom\s*\/>|<wp:wrapTopAndBottom[\s\S]*?<\/wp:wrapTopAndBottom>/g
+  /<wp:wrapNone\s*\/>|<wp:wrapSquare[^>]*\/>|<wp:wrapTight[^>]*\/>|<wp:wrapThrough[^>]*\/>|<wp:wrapTopAndBottom\s*\/>|<wp:wrapSquare[\s\S]*?<\/wp:wrapSquare>|<wp:wrapTight[\s\S]*?<\/wp:wrapTight>|<wp:wrapThrough[\s\S]*?<\/wp:wrapThrough>|<wp:wrapTopAndBottom[\s\S]*?<\/wp:wrapTopAndBottom>/g
 
 /**
  * Re-encode ONLY the stacking rank of an existing wp:anchor as Word's
@@ -238,6 +261,109 @@ export function applyImageWrap(
   // wrap element sits between extent/effectExtent and docPr in CT_Anchor order
   if (/<wp:docPr/.test(out)) return out.replace(/<wp:docPr/, `${wrapElement}<wp:docPr`)
   return out.replace(/<a:graphic[\s>]/, (m) => `${wrapElement}${m}`)
+}
+
+/** The box drawings (wps shapes/textboxes) in a paragraph, in document order — same walk patchShapeStyles uses. */
+function boxDrawingSegments(paragraphXml: string): Array<{ start: number; end: number }> {
+  return xmlSegments(paragraphXml, 'w:drawing', 0, paragraphXml.length).filter((seg) =>
+    isBoxDrawing(paragraphXml.slice(seg.start, seg.end)),
+  )
+}
+
+/** How a caller addresses one shape drawing: by its wps:cNvPr id when known, else by box ordinal. */
+export interface ShapeDrawingLocation {
+  /** wps:cNvPr id of the owning shape (parsed boxes carry it) */
+  shapeId?: string
+  /** fallback ordinal among box drawings (generated shapes have no id) */
+  boxIndex: number
+}
+
+function shapeDrawingSegment(
+  paragraphXml: string,
+  location: ShapeDrawingLocation,
+): { start: number; end: number } | null {
+  if (location.shapeId) {
+    // an id was given: never fall back to a different drawing
+    const found = xmlSegments(paragraphXml, 'w:drawing', 0, paragraphXml.length).find(
+      (seg) =>
+        /<wps:cNvPr\b[^>]*\bid="([^"]+)"/.exec(paragraphXml.slice(seg.start, seg.end))?.[1] ===
+        location.shapeId,
+    )
+    return found ?? null
+  }
+  return boxDrawingSegments(paragraphXml)[location.boxIndex] ?? null
+}
+
+/** Re-encode the rank of the drawing's own wp:anchor tag, never a nested drawing's. */
+function setAnchorRank(drawingXml: string, zOrder: number): string {
+  return drawingXml.replace(/<wp:anchor[^>]*>/, (tag) =>
+    tag.replace(/relativeHeight="\d+"/, `relativeHeight="${251658240 + zOrder}"`),
+  )
+}
+
+/**
+ * Re-encode ONLY the stacking rank of one shape drawing as Word's base + rank
+ * relativeHeight. Everything else keeps its bytes, like applyImageZOrder.
+ */
+export function applyShapeZOrderAt(
+  paragraphXml: string,
+  location: ShapeDrawingLocation,
+  zOrder: number,
+): string {
+  const seg = shapeDrawingSegment(paragraphXml, location)
+  if (!seg) return paragraphXml
+  const next = setAnchorRank(paragraphXml.slice(seg.start, seg.end), zOrder)
+  return paragraphXml.slice(0, seg.start) + next + paragraphXml.slice(seg.end)
+}
+
+/**
+ * Switch one shape drawing's wrap mode in place, preserving its positionH/V
+ * bytes: only the anchor attributes, the wrap element and (when given)
+ * relativeHeight change. `wrap === null` converts the anchor to inline.
+ */
+export function applyShapeWrapAt(
+  paragraphXml: string,
+  location: ShapeDrawingLocation,
+  wrap: ImageWrap | null,
+  zOrder?: number,
+): string {
+  const seg = shapeDrawingSegment(paragraphXml, location)
+  if (!seg) return paragraphXml
+  const drawing = paragraphXml.slice(seg.start, seg.end)
+  const hasAnchor = /<wp:anchor[\s>]/.test(drawing)
+  let next: string
+  if (wrap === null) {
+    if (!hasAnchor) return paragraphXml
+    next = drawing
+      .replace(/<wp:simplePos[^>]*\/>/, '')
+      .replace(/<wp:positionH[\s\S]*?<\/wp:positionH>/, '')
+      .replace(/<wp:positionV[\s\S]*?<\/wp:positionV>/, '')
+      .replace(WRAP_ELEMENT_RE, '')
+      .replace(/<wp:anchor[^>]*>/, '<wp:inline distT="0" distB="0" distL="0" distR="0">')
+      .replace(/<\/wp:anchor>/, '</wp:inline>')
+  } else if (!hasAnchor) {
+    next = applyImageWrap(drawing, wrap, undefined, undefined, zOrder)
+  } else {
+    const behind = wrap === 'behind' ? '1' : '0'
+    const wrapElement =
+      wrap === 'front' || wrap === 'behind'
+        ? '<wp:wrapNone/>'
+        : wrap === 'topBottom'
+          ? '<wp:wrapTopAndBottom/>'
+          : '<wp:wrapSquare wrapText="bothSides"/>'
+    next = drawing
+      .replace(WRAP_ELEMENT_RE, '')
+      .replace(/<wp:anchor[^>]*>/, (tag) =>
+        tag.includes('behindDoc=')
+          ? tag.replace(/behindDoc="[^"]*"/, `behindDoc="${behind}"`)
+          : tag.replace(/<wp:anchor/, `<wp:anchor behindDoc="${behind}"`),
+      )
+    if (zOrder !== undefined) next = setAnchorRank(next, zOrder)
+    next = /<wp:docPr/.test(next)
+      ? next.replace(/<wp:docPr/, `${wrapElement}<wp:docPr`)
+      : next.replace(/<a:graphic[\s>]/, (m) => `${wrapElement}${m}`)
+  }
+  return paragraphXml.slice(0, seg.start) + next + paragraphXml.slice(seg.end)
 }
 
 // ---- protected field / formula token patching ----
@@ -558,11 +684,13 @@ function cellRunContentXml(text: string): string {
     '\n': '<w:br/>',
     '\f': '<w:br w:type="page"/>',
     '\v': '<w:br w:type="column"/>',
+    '\u001e': '<w:br w:type="textWrapping" w:clear="all"/>',
     '\u2011': '<w:noBreakHyphen/>',
     '\u00ad': '<w:softHyphen/>',
   }
-  return text
-    .split(/([\t\n\f\v\u2011\u00ad])/)
+  // eslint-disable-next-line no-control-regex
+  const parts = text.split(/([\t\n\f\v\u001e\u2011\u00ad])/)
+  return parts
     .map((seg) =>
       seg === '' ? '' : (CONTROL[seg] ?? `<w:t xml:space="preserve">${escapeXmlText(seg)}</w:t>`),
     )
@@ -819,6 +947,33 @@ function injectShapeText(
   return paragraphXml
 }
 
+/**
+ * Resize the shape's own a:ext, the one in its wps:spPr/a:xfrm, keeping the dimension
+ * that was not patched. The first a:ext in a drawing is not necessarily the shape's:
+ * a textbox that holds a picture carries that picture's a:ext too, so writing the new
+ * size there resized the picture and left the box at its old size. A shape without an
+ * explicit transform is left alone rather than resized through someone else's a:ext.
+ */
+function setShapeExt(drawingXml: string, size: { cx?: number; cy?: number }): string {
+  const spPr = /<wps:spPr(?:\s[^>]*)?>[\s\S]*?<\/wps:spPr>|<wps:spPr(?:\s[^>]*)?\/>/.exec(
+    drawingXml,
+  )
+  if (!spPr) return drawingXml
+  const tag = /<a:ext\b[^>]*?(?:\/>|><\/a:ext>)/.exec(spPr[0])
+  if (!tag) return drawingXml
+  const cx = size.cx ?? /\bcx="(\d+)"/.exec(tag[0])?.[1]
+  const cy = size.cy ?? /\bcy="(\d+)"/.exec(tag[0])?.[1]
+  if (cx == null || cy == null) return drawingXml
+  const resized = `<a:ext cx="${cx}" cy="${cy}"/>`
+  return (
+    drawingXml.slice(0, spPr.index) +
+    spPr[0].slice(0, tag.index) +
+    resized +
+    spPr[0].slice(tag.index + tag[0].length) +
+    drawingXml.slice(spPr.index + spPr[0].length)
+  )
+}
+
 /** Resize fixed DrawingML textboxes while preserving their anchors and styling. */
 export function patchTextboxHeights(
   paragraphXml: string,
@@ -836,9 +991,10 @@ export function patchTextboxHeights(
     const heightPx = heightsPx[boxIndex]
     if (!heightPx) continue
     const cy = Math.max(1, Math.round(heightPx * EMU_PER_PX))
-    const resized = drawingXml
-      .replace(/(<wp:extent\b[^>]*\bcy=")\d+(")/, `$1${cy}$2`)
-      .replace(/(<a:ext\b[^>]*\bcy=")\d+(")/, `$1${cy}$2`)
+    const resized = setShapeExt(
+      drawingXml.replace(/(<wp:extent\b[^>]*\bcy=")\d+(")/, `$1${cy}$2`),
+      { cy },
+    )
     out += paragraphXml.slice(cursor, drawing.start) + resized
     cursor = drawing.end
   }
@@ -897,17 +1053,20 @@ export function patchTextboxSizes(
     let resized = drawingXml
     if (size.wPx != null) {
       const cx = Math.max(1, Math.round(size.wPx * EMU_PER_PX))
-      resized = resized
-        .replace(/(<wp:extent\b[^>]*\bcx=")\d+(")/, `$1${cx}$2`)
-        .replace(/(<a:ext\b[^>]*\bcx=")\d+(")/, `$1${cx}$2`)
+      resized = setShapeExt(resized.replace(/(<wp:extent\b[^>]*\bcx=")\d+(")/, `$1${cx}$2`), {
+        cx,
+      })
     }
     if (size.hPx != null) {
       const cy = Math.max(1, Math.round(size.hPx * EMU_PER_PX))
-      resized = resized
-        .replace(/(<wp:extent\b[^>]*\bcy=")\d+(")/, `$1${cy}$2`)
-        .replace(/(<a:ext\b[^>]*\bcy=")\d+(")/, `$1${cy}$2`)
-        // a fixed height only sticks if Word stops auto-fitting the shape
-        .replace(/<a:spAutoFit\s*\/>|<a:spAutoFit\s*>\s*<\/a:spAutoFit>/, '<a:noAutofit/>')
+      resized = setShapeExt(resized.replace(/(<wp:extent\b[^>]*\bcy=")\d+(")/, `$1${cy}$2`), {
+        cy,
+      })
+      // a fixed height only sticks if Word stops auto-fitting the shape
+      resized = resized.replace(
+        /<a:spAutoFit\s*\/>|<a:spAutoFit\s*>\s*<\/a:spAutoFit>/,
+        '<a:noAutofit/>',
+      )
     }
     out += paragraphXml.slice(cursor, drawing.start) + resized
     cursor = drawing.end
@@ -1174,6 +1333,10 @@ function formatPPrChildren(format: ParaFormat | undefined): PPrChild[] {
   if (!format) return []
   const out: PPrChild[] = []
   if (format.pageBreakBefore) out.push({ name: 'w:pageBreakBefore', xml: '<w:pageBreakBefore/>' })
+  for (const tag of PPR_FLAG_TAGS) {
+    const v = format[PPR_FLAG_FIELDS[tag]]
+    if (v !== undefined) out.push({ name: tag, xml: v ? `<${tag}/>` : `<${tag} w:val="0"/>` })
+  }
   if (format.borders) {
     const style = format.borderStyle
     const defaultSz = Math.max(2, Math.round(style?.szEighths ?? 4))
@@ -1215,6 +1378,11 @@ function formatPPrChildren(format: ParaFormat | undefined): PPrChild[] {
   // explicit w:left="0" must be written back: it cancels a numbering-level indent
   if (format.indentLeft !== undefined) indAttrs.push(`w:left="${Math.round(format.indentLeft)}"`)
   if (format.indentRight !== undefined) indAttrs.push(`w:right="${Math.round(format.indentRight)}"`)
+  // a character-unit special indent rides along its twips twin (Word writes
+  // both; the *Chars attribute wins and rescales with the first run's size —
+  // CJK "first line: 2 characters", issue #1892)
+  if (format.charIndents?.firstLine)
+    indAttrs.push(`w:firstLineChars="${Math.round(format.charIndents.firstLine)}"`)
   if (format.indentFirstLine !== undefined) {
     if (format.indentFirstLine >= 0)
       indAttrs.push(`w:firstLine="${Math.round(format.indentFirstLine)}"`)
@@ -1278,6 +1446,16 @@ function framePrXml(frame: ParaFrame): string {
   if (frame.anchorLock) attrs.push('w:anchorLock="1"')
   return `<w:framePr ${attrs.join(' ')}/>`
 }
+
+/** tri-state pPr flags: undefined = not edited (raw bytes kept), false = explicit w:val="0" overriding the style */
+const PPR_FLAG_FIELDS = {
+  'w:keepNext': 'keepNext',
+  'w:keepLines': 'keepLines',
+  'w:widowControl': 'widowControl',
+  'w:suppressLineNumbers': 'suppressLineNumbers',
+  'w:contextualSpacing': 'contextualSpacing',
+} as const
+const PPR_FLAG_TAGS = Object.keys(PPR_FLAG_FIELDS) as Array<keyof typeof PPR_FLAG_FIELDS>
 
 const FORMAT_MANAGED_TAGS = new Set([
   'w:pageBreakBefore',
@@ -1478,19 +1656,24 @@ function sameIndent(a: ParaFormat, b: ParaFormat): boolean {
 
 /**
  * Cancel attributes for the character-unit indents a paragraph was laid out
- * with. A rebuilt w:ind carries twips only, and Word keeps preferring a
- * `*Chars` from the style chain over a twips twin (probed) — so an indent edit
- * on a paragraph in a CJK "first line 2 characters" style must write the
- * explicit `w:firstLineChars="0"` Word itself writes for pt indents, or the
- * style's character indent supersedes the edit on reload.
+ * with but the new format no longer carries. A rebuilt w:ind carries twips,
+ * and Word keeps preferring a `*Chars` from the style chain over a twips twin
+ * (probed) — so dropping a character indent must write the explicit
+ * `w:firstLineChars="0"` Word itself writes for pt indents, or the style's
+ * character indent supersedes the edit on reload. Components the new format
+ * still carries are re-emitted in the rebuilt w:ind (the character unit edits
+ * in place) and must NOT be cancelled.
  */
-function charIndentCancelAttrs(chars: CharIndents | undefined): string[] {
-  if (!chars) return []
+function charIndentCancelAttrs(original: CharIndents, format: ParaFormat | undefined): string[] {
+  const kept = format?.charIndents
   const out: string[] = []
-  if (chars.left) out.push('w:leftChars="0"')
-  if (chars.right) out.push('w:rightChars="0"')
-  if (chars.hanging) out.push('w:hangingChars="0"')
-  else if (chars.firstLine) out.push('w:firstLineChars="0"')
+  if (original.left && !kept?.left) out.push('w:leftChars="0"')
+  if (original.right && !kept?.right) out.push('w:rightChars="0"')
+  // firstLineChars and hangingChars are one component (the special indent):
+  // a new character special replaces the old one outright — no cancel
+  if ((original.hanging || original.firstLine) && !kept?.hanging && !kept?.firstLine) {
+    out.push(original.hanging ? 'w:hangingChars="0"' : 'w:firstLineChars="0"')
+  }
   return out
 }
 
@@ -1503,6 +1686,17 @@ function pprGroupUnchanged(
   switch (tag) {
     case 'w:pageBreakBefore':
       return rawBool(raw) === !!f.pageBreakBefore
+    case 'w:keepNext':
+    case 'w:keepLines':
+    case 'w:widowControl':
+    case 'w:suppressLineNumbers':
+    case 'w:contextualSpacing': {
+      const field = PPR_FLAG_FIELDS[tag]
+      const v = f[field]
+      // model lost a flag the parsed paragraph had: the user reset it to the style
+      if (v === undefined) return original?.[field] === undefined
+      return raw !== undefined && rawBool(raw) === v
+    }
     case 'w:bidi':
       return rawBool(raw) === !!f.bidi
     case 'w:jc': {
@@ -1568,17 +1762,21 @@ export function mergePPrFormat(
   const open = /^<w:pPr(?: [^>]*)?>/.exec(rawPPr)?.[0]
   const fresh = formatPPrChildren(format)
   // an indent edit on a paragraph laid out with character-unit indents: the
-  // twips-only rebuild also cancels them (`w:firstLineChars="0"`…), or Word — and
-  // this parser — would keep resolving the character indent over the new value
+  // twips-only rebuild also cancels the components the edit drops
+  // (`w:firstLineChars="0"`…), or Word — and this parser — would keep
+  // resolving the character indent over the new value; components the new
+  // format still carries are re-emitted (with their *Chars attribute) instead
   if (original?.charIndents && !sameIndent(original, format ?? {})) {
-    const cancel = charIndentCancelAttrs(original.charIndents)
-    const at = fresh.findIndex((c) => c.name === 'w:ind')
-    const xml =
-      at === -1
-        ? `<w:ind ${cancel.join(' ')}/>`
-        : fresh[at].xml.replace(/\/>$/, ` ${cancel.join(' ')}/>`)
-    if (at === -1) fresh.push({ name: 'w:ind', xml })
-    else fresh[at] = { name: 'w:ind', xml }
+    const cancel = charIndentCancelAttrs(original.charIndents, format)
+    if (cancel.length > 0) {
+      const at = fresh.findIndex((c) => c.name === 'w:ind')
+      const xml =
+        at === -1
+          ? `<w:ind ${cancel.join(' ')}/>`
+          : fresh[at].xml.replace(/\/>$/, ` ${cancel.join(' ')}/>`)
+      if (at === -1) fresh.push({ name: 'w:ind', xml })
+      else fresh[at] = { name: 'w:ind', xml }
+    }
   }
   if (!open) {
     // '<w:pPr/>' or unrecognized: rebuild from the format model alone, in schema order
@@ -1592,6 +1790,10 @@ export function mergePPrFormat(
   // build set of managed tags for this format (base + conditional)
   const managedTags = new Set(FORMAT_MANAGED_TAGS)
   if (format?.tabStops !== undefined) managedTags.add('w:tabs')
+  for (const tag of PPR_FLAG_TAGS) {
+    const field = PPR_FLAG_FIELDS[tag]
+    if (format?.[field] !== undefined || original?.[field] !== undefined) managedTags.add(tag)
+  }
   if (format?.dropCap !== undefined || format?.frame !== undefined) managedTags.add('w:framePr')
   if (format?.textDirection !== undefined) managedTags.add('w:textDirection')
   // only when the model carries a size: otherwise the paragraph-mark rPr stays unmanaged
@@ -1704,8 +1906,8 @@ export function generateParagraphXml(block: GeneratedBlock, ctx: GenerateContext
     )
     .join('')
   const content =
-    bookmarksXml(block.hiddenBookmarks) +
-    bookmarksXml(block.bookmarks) +
+    bookmarksXml(ctx, block.hiddenBookmarks) +
+    bookmarksXml(ctx, block.bookmarks) +
     crossStarts +
     generateRunsXml(block.runs, ctx) +
     crossEnds
@@ -1743,18 +1945,21 @@ export function generateParagraphXml(block: GeneratedBlock, ctx: GenerateContext
   return `<w:p>${pPr}${content}</w:p>`
 }
 
-/** stable 31-bit id per bookmark name (start/end pair only needs to agree with itself) */
-function bookmarkIdOf(name: string): number {
-  let h = 0
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0
-  return Math.abs(h) % 0x7fffffff
-}
+/**
+ * Fallback id source for a caller that has no document to coordinate with: a
+ * counter, so ids stay unique among themselves. A hash of the name cannot do
+ * that job: w:id is unique per part, the hash space overlaps the small ids
+ * Word itself hands out, and two names collide by birthday at a few tens of
+ * thousands of bookmarks — after which Word mis-pairs the bookmarks and a
+ * cross-reference lands on the wrong target.
+ */
+let standaloneBookmarkSeq = 0
 
-function bookmarksXml(names: string[] | undefined): string {
+function bookmarksXml(ctx: GenerateContext, names: string[] | undefined): string {
   if (!names?.length) return ''
   return names
     .map((name) => {
-      const id = bookmarkIdOf(name)
+      const id = ctx.allocateBookmarkId?.(name) ?? ++standaloneBookmarkSeq
       return `<w:bookmarkStart w:id="${id}" w:name="${escapeXmlAttr(name)}"/><w:bookmarkEnd w:id="${id}"/>`
     })
     .join('')
@@ -1813,7 +2018,7 @@ function setTcPrChild(children: PPrChild[], name: string, xml: string | null): v
 }
 
 function cellBordersXml(borders: NonNullable<TableCell['borders']>): string {
-  const side = (name: 'top' | 'left' | 'bottom' | 'right') => {
+  const side = (name: 'top' | 'left' | 'bottom' | 'right' | 'tl2br' | 'tr2bl') => {
     const b = borders[name]
     if (!b) return ''
     const sz =
@@ -1824,7 +2029,27 @@ function cellBordersXml(borders: NonNullable<TableCell['borders']>): string {
         : ` w:color="${escapeXmlAttr(b.color ?? 'auto')}"`
     return `<w:${name} w:val="${escapeXmlAttr(b.style)}"${sz}${color}/>`
   }
-  return `<w:tcBorders>${side('top')}${side('left')}${side('bottom')}${side('right')}</w:tcBorders>`
+  // CT_TcBorders is a sequence: top, left, bottom, right, tl2br, tr2bl
+  return `<w:tcBorders>${side('top')}${side('left')}${side('bottom')}${side('right')}${side('tl2br')}${side('tr2bl')}</w:tcBorders>`
+}
+
+/** w:tcMar / w:tblCellMar with only the declared sides; null when nothing is declared */
+function cellMarginsXml(tag: string, margins: CellMargins | undefined): string | null {
+  const sides = (['top', 'left', 'bottom', 'right'] as const)
+    .filter((side) => margins?.[side] != null)
+    .map((side) => `<w:${side} w:w="${Math.max(0, Math.round(margins![side]!))}" w:type="dxa"/>`)
+  return sides.length ? `<${tag}>${sides.join('')}</${tag}>` : null
+}
+
+/** colSpan arrives from parsed files/ops models: Infinity would emit
+ *  w:val="Infinity" and blow up the grid build (Array.from({length: Infinity})
+ *  throws). Clamp to 1..1000 at every emit site. */
+function cellSpan(cell: TableCell): number {
+  // colSpan arrives from parsed files/ops models as a number, but XML attr
+  // plumbing can leave a numeric string behind: coerce before validating.
+  const span = Number(cell.colSpan ?? 1)
+  if (!Number.isFinite(span)) return 1
+  return Math.min(Math.max(1, Math.floor(span)), 1000)
 }
 
 function tableCellXml(
@@ -1840,11 +2065,8 @@ function tableCellXml(
   const children: PPrChild[] =
     cell.rawTcPr && cell.rawTcPr.endsWith('</w:tcPr>') ? splitXmlChildren(rawInner) : []
   setTcPrChild(children, 'w:tcW', `<w:tcW w:w="${width}" w:type="dxa"/>`)
-  setTcPrChild(
-    children,
-    'w:gridSpan',
-    cell.colSpan && cell.colSpan > 1 ? `<w:gridSpan w:val="${cell.colSpan}"/>` : null,
-  )
+  const span = cellSpan(cell)
+  setTcPrChild(children, 'w:gridSpan', span > 1 ? `<w:gridSpan w:val="${span}"/>` : null)
   const merge = verticalMerge ?? cell.vMerge
   setTcPrChild(
     children,
@@ -1868,6 +2090,17 @@ function tableCellXml(
     'w:vAlign',
     cell.vAlign && cell.vAlign !== 'top' ? `<w:vAlign w:val="${cell.vAlign}"/>` : null,
   )
+  if (cell.tcPrEdited) {
+    setTcPrChild(
+      children,
+      'w:textDirection',
+      cell.textDirection && cell.textDirection !== 'lrTb'
+        ? `<w:textDirection w:val="${cell.textDirection}"/>`
+        : null,
+    )
+    setTcPrChild(children, 'w:tcMar', cellMarginsXml('w:tcMar', cell.cellMarTwips))
+    setTcPrChild(children, 'w:noWrap', cell.noWrap ? '<w:noWrap/>' : null)
+  }
   const tcPr = children.map((c) => c.xml)
   const paragraphs = cell.richParas?.length
     ? cell.richParas
@@ -1922,6 +2155,8 @@ const TBL_PR_ORDER = [
   'w:tblLayout',
   'w:tblCellMar',
   'w:tblLook',
+  'w:tblCaption',
+  'w:tblDescription',
 ] as const
 
 /** Replace/remove/insert one tblPr child while keeping the OOXML schema order. */
@@ -1959,11 +2194,13 @@ function tableLookXml(look: NonNullable<TableModel['tableLook']>): string {
 }
 
 export function generateTableModelXml(model: TableModel, originalTableXml?: string): string {
-  const columnCount = Math.max(
-    1,
-    model.colWidthsPct?.length ?? 0,
-    ...model.rows.map((row) => row.reduce((sum, cell) => sum + (cell.colSpan ?? 1), 0)),
-  )
+  // the widest row decides the column count; folding it in a loop keeps the
+  // argument count off the call (a spread here blew the stack past ~125k rows)
+  let columnCount = Math.max(1, model.colWidthsPct?.length ?? 0)
+  for (const row of model.rows) {
+    const span = row.reduce((sum, cell) => sum + cellSpan(cell), 0)
+    if (span > columnCount) columnCount = span
+  }
   const percentages =
     model.colWidthsPct?.length === columnCount
       ? model.colWidthsPct
@@ -2012,7 +2249,7 @@ export function generateTableModelXml(model: TableModel, originalTableXml?: stri
       // they advance the grid but are never written as w:tc
       const edges = { before: 0, wBefore: 0, after: 0, wAfter: 0 }
       for (const cell of row) {
-        const span = Math.max(1, cell.colSpan ?? 1)
+        const span = cellSpan(cell)
         const width = widths
           .slice(gridColumn, gridColumn + span)
           .reduce((sum, value) => sum + value, 0)
@@ -2033,15 +2270,23 @@ export function generateTableModelXml(model: TableModel, originalTableXml?: stri
       // replaced/inserted/removed per the model
       let trPr = model.rawTrPrs?.[ri] ?? ''
       if (trPr && !trPr.endsWith('</w:trPr>')) trPr = ''
-      if (!trPr && (edges.before > 0 || edges.after > 0)) {
-        // CT_TrPr schema order: gridBefore, gridAfter, wBefore, wAfter
-        trPr =
-          '<w:trPr>' +
+      // the placeholders are the truth for the grid edges: stale raw edge tags go, the
+      // computed ones lead the trPr (CT_TrPr order: cnfStyle, divId, gridBefore, gridAfter, wBefore, wAfter, …)
+      trPr = trPr.replace(/<w:(?:gridBefore|gridAfter|wBefore|wAfter)\b[^>]*\/>/g, '')
+      if (edges.before > 0 || edges.after > 0) {
+        const edgeXml =
           (edges.before > 0 ? `<w:gridBefore w:val="${edges.before}"/>` : '') +
           (edges.after > 0 ? `<w:gridAfter w:val="${edges.after}"/>` : '') +
           (edges.before > 0 ? `<w:wBefore w:w="${edges.wBefore}" w:type="dxa"/>` : '') +
-          (edges.after > 0 ? `<w:wAfter w:w="${edges.wAfter}" w:type="dxa"/>` : '') +
-          '</w:trPr>'
+          (edges.after > 0 ? `<w:wAfter w:w="${edges.wAfter}" w:type="dxa"/>` : '')
+        if (!trPr) trPr = `<w:trPr>${edgeXml}</w:trPr>`
+        else {
+          const head =
+            /^<w:trPr(?:\s[^>]*)?>(?:<w:cnfStyle\b[^>]*\/>)?(?:<w:divId\b[^>]*\/>)?/.exec(trPr)!
+          trPr = trPr.slice(0, head[0].length) + edgeXml + trPr.slice(head[0].length)
+        }
+      } else if (/^<w:trPr(?:\s[^>]*)?>\s*<\/w:trPr>$/.test(trPr)) {
+        trPr = ''
       }
       const repeatHeader = model.repeatHeaderRows?.[ri]
       if (repeatHeader !== null && repeatHeader !== undefined) {
@@ -2049,6 +2294,18 @@ export function generateTableModelXml(model: TableModel, originalTableXml?: stri
         if (repeatHeader) {
           const tag = '<w:tblHeader/>'
           trPr = trPr ? trPr.replace('</w:trPr>', `${tag}</w:trPr>`) : `<w:trPr>${tag}</w:trPr>`
+        } else if (/^<w:trPr(?:\s[^>]*)?>\s*<\/w:trPr>$/.test(trPr)) {
+          trPr = ''
+        }
+      }
+      const cantSplit = model.rowCantSplit?.[ri]
+      if (cantSplit !== null && cantSplit !== undefined) {
+        trPr = trPr.replace(/<w:cantSplit(?:\s[^>]*)?\/>/g, '')
+        if (cantSplit) {
+          // CT_TrPr: cantSplit precedes trHeight and tblHeader
+          const tag = '<w:cantSplit/>'
+          const at = trPr.search(/<w:trHeight\b|<w:tblHeader\b|<\/w:trPr>/)
+          trPr = trPr ? trPr.slice(0, at) + tag + trPr.slice(at) : `<w:trPr>${tag}</w:trPr>`
         } else if (/^<w:trPr(?:\s[^>]*)?>\s*<\/w:trPr>$/.test(trPr)) {
           trPr = ''
         }
@@ -2162,6 +2419,20 @@ export function generateTableModelXml(model: TableModel, originalTableXml?: stri
       model.align === 'left' ? null : `<w:jc w:val="${model.align}"/>`,
     )
   }
+  if (model.caption !== undefined) {
+    tblPr = setTblPrChild(
+      tblPr,
+      'w:tblCaption',
+      model.caption ? `<w:tblCaption w:val="${escapeXmlAttr(model.caption)}"/>` : null,
+    )
+  }
+  if (model.description !== undefined) {
+    tblPr = setTblPrChild(
+      tblPr,
+      'w:tblDescription',
+      model.description ? `<w:tblDescription w:val="${escapeXmlAttr(model.description)}"/>` : null,
+    )
+  }
   return `<w:tbl>${tblPr}${grid}${rows}</w:tbl>`
 }
 
@@ -2214,7 +2485,11 @@ export interface TocEntry {
  */
 export function generateTocFieldXml(entries: TocEntry[]): string[] {
   if (entries.length === 0) return []
-  const maxLevel = Math.min(Math.max(...entries.map((e) => e.level), 1), 9)
+  let deepest = 1
+  for (const entry of entries) {
+    if (entry.level > deepest) deepest = entry.level
+  }
+  const maxLevel = Math.min(deepest, 9)
   const pPr = (level: number) =>
     `<w:pPr><w:pStyle w:val="TOC${Math.min(Math.max(level, 1), 9)}"/>` +
     '<w:tabs><w:tab w:val="right" w:leader="dot" w:pos="9350"/></w:tabs>' +
@@ -2617,7 +2892,14 @@ const RUN_MANAGED_GROUPS: Array<{ key: string; tags: string[] }> = [
   { key: 'bold', tags: ['w:b', 'w:bCs'] },
   { key: 'italic', tags: ['w:i', 'w:iCs'] },
   { key: 'strike', tags: ['w:strike'] },
+  { key: 'caps', tags: ['w:caps', 'w:smallCaps'] },
+  { key: 'dstrike', tags: ['w:dstrike'] },
+  { key: 'vanish', tags: ['w:vanish'] },
   { key: 'color', tags: ['w:color'] },
+  { key: 'spacing', tags: ['w:spacing'] },
+  { key: 'scale', tags: ['w:w'] },
+  { key: 'kern', tags: ['w:kern'] },
+  { key: 'position', tags: ['w:position'] },
   { key: 'size', tags: ['w:sz', 'w:szCs'] },
   { key: 'highlight', tags: ['w:highlight'] },
   { key: 'underline', tags: ['w:u'] },
@@ -2632,11 +2914,35 @@ const rawAttr = (xml: string | undefined, attr: string): string | undefined =>
 
 /** String version of boolProp: element present means true unless w:val negates it */
 function rawBool(xml: string | undefined): boolean {
-  if (!xml) return false
+  return rawOnOff(xml) === true
+}
+
+/** Tri-state read of a toggle element: undefined when absent */
+function rawOnOff(xml: string | undefined): boolean | undefined {
+  if (!xml) return undefined
   const val = rawAttr(xml, 'w:val')
   if (val === undefined) return true
   return !['0', 'false', 'none', 'off'].includes(val.toLowerCase())
 }
+
+const rawInt = (xml: string | undefined): number | undefined => {
+  const v = rawAttr(xml, 'w:val')
+  if (v === undefined) return undefined
+  const n = parseInt(v, 10)
+  return Number.isNaN(n) ? undefined : n
+}
+
+/** Mirrors the parse side: w:caps wins over w:smallCaps; either explicitly off reads as 'none' */
+function rawCaps(caps: string | undefined, smallCaps: string | undefined): Run['caps'] {
+  const c = rawOnOff(caps)
+  const sc = rawOnOff(smallCaps)
+  if (c) return 'all'
+  if (sc) return 'small'
+  if (c === false || sc === false) return 'none'
+  return undefined
+}
+
+const onOffXml = (tag: string, on: boolean): string => (on ? `<${tag}/>` : `<${tag} w:val="0"/>`)
 
 /** rFonts built from the model alone (no original element to preserve).
  * Latin-only keeps eastAsia empty; a lone primary font fills every slot (legacy behavior);
@@ -2726,7 +3032,7 @@ function revisionRPrChangeXml(run: Run): string | null {
 function modelRPrChildren(run: Run, insideLink: boolean): PPrChild[] {
   const out: PPrChild[] = []
   // a link run keeps the document's own character style (localized ids like "ae")
-  const styleId = run.styleId ?? (insideLink ? 'Hyperlink' : undefined)
+  const styleId = run.styleId ?? (insideLink && !run.link?.plain ? 'Hyperlink' : undefined)
   if (styleId) out.push({ name: 'w:rStyle', xml: `<w:rStyle w:val="${escapeXmlAttr(styleId)}"/>` })
   if (run.font || run.fontAscii || run.fontCs) {
     out.push({
@@ -2743,8 +3049,27 @@ function modelRPrChildren(run: Run, insideLink: boolean): PPrChild[] {
     out.push({ name: 'w:i', xml: '<w:i/>' }, { name: 'w:iCs', xml: '<w:iCs/>' })
   }
   if (run.strike) out.push({ name: 'w:strike', xml: '<w:strike/>' })
+  if (run.caps === 'all') out.push({ name: 'w:caps', xml: '<w:caps/>' })
+  else if (run.caps === 'small') out.push({ name: 'w:smallCaps', xml: '<w:smallCaps/>' })
+  else if (run.caps === 'none') {
+    out.push(
+      { name: 'w:caps', xml: onOffXml('w:caps', false) },
+      { name: 'w:smallCaps', xml: onOffXml('w:smallCaps', false) },
+    )
+  }
+  if (run.dstrike !== undefined)
+    out.push({ name: 'w:dstrike', xml: onOffXml('w:dstrike', run.dstrike) })
+  if (run.vanishOwn !== undefined)
+    out.push({ name: 'w:vanish', xml: onOffXml('w:vanish', run.vanishOwn) })
   if (run.color)
     out.push({ name: 'w:color', xml: `<w:color w:val="${escapeXmlAttr(run.color)}"/>` })
+  if (run.charSpacingTwips !== undefined)
+    out.push({ name: 'w:spacing', xml: `<w:spacing w:val="${run.charSpacingTwips}"/>` })
+  if (run.charScalePct) out.push({ name: 'w:w', xml: `<w:w w:val="${run.charScalePct}"/>` })
+  if (run.kernHalfPoints !== undefined)
+    out.push({ name: 'w:kern', xml: `<w:kern w:val="${run.kernHalfPoints}"/>` })
+  if (run.positionHalfPoints)
+    out.push({ name: 'w:position', xml: `<w:position w:val="${run.positionHalfPoints}"/>` })
   if (run.sizeHalfPoints) {
     out.push({ name: 'w:sz', xml: `<w:sz w:val="${run.sizeHalfPoints}"/>` })
     out.push({ name: 'w:szCs', xml: `<w:szCs w:val="${run.sizeHalfPoints}"/>` })
@@ -2770,7 +3095,7 @@ function modelRPrChildren(run: Run, insideLink: boolean): PPrChild[] {
  * Merge the raw rPr slice with the run model: groups whose model value matches the raw
  * encoding keep their original bytes (double underline/themeColor/all four rFonts slots
  * do not degrade); mismatched (edited) groups are rebuilt from the model; children the
- * model does not cover (caps/vanish/dstrike/bdr/shd/spacing/lang…) are always kept.
+ * model does not cover (bdr/em/lang/effects…) are always kept.
  */
 export function mergeRPrModel(rawRPr: string, run: Run, insideLink: boolean): string {
   const open = /^<w:rPr(?: [^>]*)?>/.exec(rawRPr)?.[0]
@@ -2803,7 +3128,9 @@ export function mergeRPrModel(rawRPr: string, run: Run, insideLink: boolean): st
         const raw = rawAttr(rawOf('w:rStyle'), 'w:val')
         if (run.styleId) return raw === run.styleId
         // a run that already sat in the document's hyperlink (rId) stays unstyled if it was unstyled
-        return raw === undefined ? !insideLink || !!run.link?.rId : raw === 'Hyperlink'
+        return raw === undefined
+          ? !insideLink || !!run.link?.rId || !!run.link?.plain
+          : raw === 'Hyperlink'
       }
       case 'rFonts': {
         // mirrors the parse side: primary = eastAsia ?? ascii ?? hAnsi, latin = ascii ?? hAnsi,
@@ -2833,6 +3160,25 @@ export function mergeRPrModel(rawRPr: string, run: Run, insideLink: boolean): st
         return rawBool(rawOf(cs ? 'w:iCs' : 'w:i')) === !!run.italic
       case 'strike':
         return rawBool(rawOf('w:strike')) === !!run.strike
+      case 'caps':
+        return rawCaps(rawOf('w:caps'), rawOf('w:smallCaps')) === run.caps
+      case 'dstrike':
+        return rawBool(rawOf('w:dstrike')) === !!run.dstrike
+      // `vanish` may be style-inherited; only the run's own value is compared
+      case 'vanish':
+        return run.vanishOwn === undefined || rawOnOff(rawOf('w:vanish')) === run.vanishOwn
+      case 'spacing':
+        return rawInt(rawOf('w:spacing')) === run.charSpacingTwips
+      case 'scale': {
+        const raw = rawInt(rawOf('w:w'))
+        return (raw && raw !== 100 ? raw : undefined) === run.charScalePct
+      }
+      case 'kern': {
+        const raw = rawAttr(rawOf('w:kern'), 'w:val')
+        return (raw === undefined ? undefined : parseInt(raw, 10) || 0) === run.kernHalfPoints
+      }
+      case 'position':
+        return (rawInt(rawOf('w:position')) || undefined) === run.positionHalfPoints
       case 'color': {
         const raw = rawAttr(rawOf('w:color'), 'w:val')
         // a theme-resolved model value never equals the cached literal; rebuilding
@@ -3205,6 +3551,7 @@ export function buildShapeParagraphXml(opts: {
 
   const wsp =
     `<wps:wsp xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">` +
+    `<wps:cNvPr id="${id}" name="${opts.prst} ${id}"/>` +
     `<wps:cNvSpPr/>` +
     spPr +
     style +
@@ -3383,6 +3730,9 @@ function generateRunXml(run: Run, insideLink: boolean): string {
     } else if (ch === '\v') {
       flush()
       segments.push('<w:br w:type="column"/>')
+    } else if (ch === '\u001e') {
+      flush()
+      segments.push('<w:br w:type="textWrapping" w:clear="all"/>')
     } else if (ch === '\u2011') {
       flush()
       segments.push('<w:noBreakHyphen/>')

@@ -1,7 +1,8 @@
+import { realpathSync } from 'node:fs'
 import { basename, dirname, extname, join } from 'node:path'
 import { PdfLoadError } from '@genoffice/pdf2docx'
 import { flagBool, flagString, type ParsedArgs } from '../args'
-import { csvToXlsx } from '../formats/csv'
+import { csvToXlsx, sheetNameFromStem } from '../formats/csv'
 import { convertPdf, type PdfTarget } from '../formats/pdf'
 import { convertLegacyWorkbook, sheetToCsv } from '../formats/xlsx'
 import { exportViaApp, type AppExportTarget } from '../formats/app-export'
@@ -56,6 +57,16 @@ export const convertCommand: CommandDef = {
       force: flagBool(args, 'force'),
       fresh: true,
     })
+    if (samePath(input, output))
+      throw new CliError(
+        EXIT.usage,
+        `output path must differ from the input: ${output}`,
+        undefined,
+        {
+          reason: 'invalid_argument',
+          suggestion: 'pass a different --out',
+        },
+      )
     const result = await run(input, from, to, output, args, ctx)
     if (result.bytes) writeOutput(output, result.bytes)
     return {
@@ -64,6 +75,18 @@ export const convertCommand: CommandDef = {
       detail: result.detail,
     }
   },
+}
+
+function samePath(a: string, b: string): boolean {
+  const real = (p: string) => {
+    try {
+      return realpathSync.native(p)
+    } catch {
+      return join(realpathSync.native(dirname(p)), basename(p))
+    }
+  }
+  const [x, y] = [real(a), real(b)]
+  return process.platform === 'win32' ? x.toLowerCase() === y.toLowerCase() : x === y
 }
 
 interface Produced {
@@ -109,7 +132,7 @@ async function run(
     return { bytes: await markdownToDocx(text, { file: input, ctx }), detail: { title } }
   }
   if (from === 'csv') {
-    const sheet = basename(input, extname(input)).slice(0, 31) || 'Sheet1'
+    const sheet = sheetNameFromStem(basename(input, extname(input)))
     return { bytes: await csvToXlsx(readInput(input), sheet), detail: { sheet } }
   }
   if (to === 'csv') {

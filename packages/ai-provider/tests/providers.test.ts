@@ -81,12 +81,57 @@ describe('provider model catalog', () => {
       expect(model).not.toContain('/')
     }
   })
+
+  it('seeds Atlas Cloud with lab-namespaced model ids', () => {
+    const atlas = AI_PROVIDERS.find((provider) => provider.id === 'atlascloud')!
+    expect(atlas.models).toContain(atlas.defaultModel)
+    expect(atlas.needsBaseUrl).toBeUndefined()
+    for (const model of atlas.models) {
+      expect(model).toMatch(/^[a-z0-9-]+\/[A-Za-z0-9._-]+$/)
+    }
+  })
+
+  it('seeds Cheaper Inference with bare model ids (no vendor prefix)', () => {
+    const ci = AI_PROVIDERS.find((provider) => provider.id === 'cheaperinference')!
+    expect(ci.models).toContain(ci.defaultModel)
+    expect(ci.needsBaseUrl).toBeUndefined()
+    for (const model of ci.models) {
+      expect(model).not.toContain('/')
+    }
+  })
 })
 
 describe('resolveAiSettings', () => {
   it('returns fresh defaults when nothing is stored', () => {
     const defaults = defaultAiSettings({ anthropic: 'sk-ant-preset' })
     expect(resolveAiSettings({}, defaults)).toEqual(defaults)
+  })
+
+  it('falls back to defaults for null and non-object settings roots', () => {
+    for (const stored of [null, 'settings', 7, true, []]) {
+      const defaults = defaultAiSettings()
+      expect(resolveAiSettings(stored, defaults)).toEqual(defaults)
+    }
+  })
+
+  it('falls back to defaults for null and non-object provider maps', () => {
+    for (const providers of [null, 'providers', 7, true, []]) {
+      const defaults = defaultAiSettings()
+      expect(resolveAiSettings({ providers } as never, defaults)).toEqual(defaults)
+    }
+  })
+
+  it('ignores null and non-object provider entries', () => {
+    for (const entry of [null, 'provider', 7, true, []]) {
+      const defaults = defaultAiSettings()
+      const resolved = resolveAiSettings(
+        { provider: 'anthropic', providers: { anthropic: entry } } as never,
+        defaults,
+      )
+      expect(resolved.providers.anthropic).toEqual(defaults.providers.anthropic)
+      // Nawa preserves the selected provider and reports its missing configuration.
+      expect(activeProvider(resolved)).toBe('anthropic')
+    }
   })
 
   it('migrates the pre-provider single-endpoint shape into the custom provider', () => {
@@ -178,7 +223,7 @@ describe('resolveAiSettings', () => {
       },
       defaultAiSettings(),
     )
-    expect(resolved.providers.genspark.model).toBe('claude-opus-4-7')
+    expect(resolved.providers.genspark.model).toBe('claude-opus-5-5')
 
     const gpt = resolveAiSettings(
       {
@@ -189,6 +234,12 @@ describe('resolveAiSettings', () => {
       defaultAiSettings(),
     )
     expect(gpt.providers.genspark.model).toBe('gpt-5.6-terra')
+
+    const glm = resolveAiSettings(
+      { providers: { glm: { apiKey: '', model: 'glm-5-turbo' } } as never },
+      defaultAiSettings(),
+    )
+    expect(glm.providers.glm.model).toBe('glm-5.3-flash')
   })
 
   it('leaves a still-supported model id alone', () => {

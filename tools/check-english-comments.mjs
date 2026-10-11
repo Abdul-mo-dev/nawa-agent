@@ -13,7 +13,9 @@ import { spawnSync } from 'node:child_process'
 
 const HAN = /[\u3400-\u9fff]/
 
-const git = spawnSync('git', ['ls-files'], { encoding: 'utf8' })
+const git = spawnSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
+  encoding: 'utf8',
+})
 if (git.status !== 0) {
   console.error(git.stderr)
   process.exit(git.status ?? 1)
@@ -21,18 +23,29 @@ if (git.status !== 0) {
 const root = spawnSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).stdout.trim()
 
 const violations = []
-for (const file of git.stdout.trim().split('\n')) {
-  const isCode = /\.(ts|tsx|mjs|cjs|js)$/.test(file)
+for (const file of git.stdout.split('\0').filter(Boolean)) {
+  const isCode = /\.(ts|tsx|mjs|cjs|js|rs)$/.test(file)
+  const isHashCode = /\.(py|sh)$/.test(file)
   const isDoc =
     /\.(md|html?)$/.test(file) && !file.includes('/ai/prompts/') && !file.includes('/i18n/')
-  if (!isCode && !isDoc) continue
-  const lines = readFileSync(join(root, file), 'utf8').split('\n')
+  if (!isCode && !isHashCode && !isDoc) continue
+  let source
+  try {
+    source = readFileSync(join(root, file), 'utf8')
+  } catch (error) {
+    // Deleted or moved tracked files may remain in the index until staging.
+    if (error?.code === 'ENOENT') continue
+    throw error
+  }
+  const lines = source.split('\n')
   lines.forEach((line, index) => {
     const text = isDoc
       ? line
-      : (line.match(/(?:^|[^:'"])\/\/(.*)$/) ??
-          line.match(/^\s*\*(.*)$/) ??
-          line.match(/\/\*(.*)$/))?.[1]
+      : isHashCode
+        ? line.match(/(?:^|[^'"])#(.*)$/)?.[1]
+        : (line.match(/(?:^|[^:'"])\/\/(.*)$/) ??
+            line.match(/^\s*\*(.*)$/) ??
+            line.match(/\/\*(.*)$/))?.[1]
     if (text !== undefined && HAN.test(text) && !line.includes('lang-switcher')) {
       violations.push(`  ${file}:${index + 1}: ${line.trim()}`)
     }

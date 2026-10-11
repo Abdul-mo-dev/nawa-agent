@@ -132,6 +132,7 @@ export const th = {
   aiClarifyOther: 'อื่น ๆ (พิมพ์เอง)',
   aiClarifySkip: 'ข้ามแบบสอบถาม',
   aiClarifyNext: 'ถัดไป',
+  aiClarifyPrev: 'ก่อนหน้า',
   aiClarifySubmit: 'สร้าง',
   aiSumReadAttachment: 'อ่านสิ่งที่แนบ',
   aiSumReadAttachmentName: 'อ่านสิ่งที่แนบ {name}',
@@ -220,4 +221,5 @@ export const th = {
   aiSumSaveTemplate: 'บันทึกเทมเพลตสไตล์ "{name}"',
   aiSumTemplatesEmpty: 'รายการเทมเพลตสไตล์ (ว่าง)',
   aiSumListTemplates: 'แสดงเทมเพลตสไตล์ {count} รายการ',
+  aiPageCloudToLocal: 'คลาวด์ไม่พร้อมใช้ — สร้างในเครื่อง',
 } satisfies Record<keyof typeof zh, string>

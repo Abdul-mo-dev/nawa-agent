@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { defaultAiSettings } from '../src/providers'
 import { applyChatModel } from '../src/chat-models'
+import { resolveCustomEndpoints, selectCustomEndpoint } from '../src/custom-endpoints'
 import { REDACTED_AI_KEY, redactAiSettings, restoreRedactedAiKeys } from '../src/credentials'
 
 const settings = () => {
@@ -25,6 +26,55 @@ const settings = () => {
 }
 
 describe('renderer AI settings view', () => {
+  it('redacts every custom endpoint and restores the selected endpoint key without borrowing another server key', () => {
+    const stored = resolveCustomEndpoints({
+      ...settings(),
+      customEndpoint: 'first',
+      customEndpoints: [
+        {
+          id: 'first',
+          name: 'First',
+          apiKey: 'first-server-secret',
+          model: 'first',
+          baseUrl: 'http://localhost:8001/v1',
+        },
+        {
+          id: 'second',
+          name: 'Second',
+          apiKey: 'second-server-secret',
+          model: 'second',
+          baseUrl: 'http://localhost:8002/v1',
+        },
+      ],
+    })
+    const view = redactAiSettings(stored)
+    expect(JSON.stringify(view)).not.toContain('server-secret')
+    expect(view.customEndpoints?.every((endpoint) => endpoint.apiKey === REDACTED_AI_KEY)).toBe(
+      true,
+    )
+    const selected = restoreRedactedAiKeys(selectCustomEndpoint(view, 'second'), stored)
+    expect(selected.providers.custom.apiKey).toBe('second-server-secret')
+    expect(selected.customEndpoints?.[0]?.apiKey).toBe('first-server-secret')
+    expect(selected.customEndpoints?.[1]?.apiKey).toBe('second-server-secret')
+    const profile = restoreRedactedAiKeys(
+      applyChatModel(selectCustomEndpoint(view, 'second'), 'writer'),
+      stored,
+    )
+    expect(profile.providers.custom.apiKey).toBe('profile-secret')
+    view.customEndpoints![1]!.apiKey = ''
+    expect(
+      restoreRedactedAiKeys(selectCustomEndpoint(view, 'second'), stored).providers.custom.apiKey,
+    ).toBe('')
+  })
+
+  it('restores a legacy provider key when its first endpoint list is created in the renderer', () => {
+    const stored = settings()
+    const view = resolveCustomEndpoints(redactAiSettings(stored))
+    const restored = restoreRedactedAiKeys(view, stored)
+    expect(restored.customEndpoints?.[0]?.apiKey).toBe('provider-secret')
+    expect(restored.providers.custom.apiKey).toBe('provider-secret')
+  })
+
   it('hides every saved key while retaining configured-provider and profile selection', () => {
     const stored = settings()
     const view = redactAiSettings(stored)

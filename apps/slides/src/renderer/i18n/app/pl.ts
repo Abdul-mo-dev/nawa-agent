@@ -1,6 +1,16 @@
 import type { zh } from './zh'
 
 export const pl = {
+  redactMenuLabel: 'Ukryj zaznaczenie przed AI',
+  redactDialogDesc:
+    'Zaznaczona zawartość zostaje w dokumencie i w pliku; model widzi tylko symbol. Nadaj mu nazwę, by wiedział, co oznacza.',
+  redactDialogScope:
+    'Ukrywanie dotyczy tylko AI w tej aplikacji. CLI, narzędzia MCP i eksport bez okienka czytują plik bezpośrednio i nadal widzą te słowa.',
+  redactDialogPlaceholder: 'Nazwa symbolu, np. telefon klienta',
+  redactCancel: 'Anuluj',
+  redactInsert: 'Ukryj',
+  redactEnable: 'Kliknij prawym na zaznaczeniu, aby ukryć je przed modelem.',
+
   appPhPromptTitle: 'Kliknij, aby dodać tytuł',
   appPhPromptSubtitle: 'Kliknij, aby dodać podtytuł',
   appPhPromptBody: 'Kliknij, aby dodać tekst',
@@ -120,6 +130,7 @@ export const pl = {
   appPasteOptSource: 'Zachowaj formatowanie źródłowe',
   appPasteOptTheme: 'Użyj motywu docelowego',
   appStatusPasteOptionsExpired: 'Opcje wklejania nie są już dostępne',
+  appStatusPasteTruncated: 'Wklejony tekst był zbyt długi i został przycięty',
   appCtxHideSlide: 'Ukryj slajd',
   appCtxUnhideSlide: 'Odkryj slajd',
   appCtxAddSectionBefore: 'Dodaj sekcję (przed tym slajdem)',

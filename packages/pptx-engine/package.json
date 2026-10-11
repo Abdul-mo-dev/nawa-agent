@@ -19,8 +19,10 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@genoffice/zip-gate": "*",
     "fast-xml-parser": "^5.3.4",
-    "jszip": "^3.10.1"
+    "jszip": "^3.10.1",
+    "@genoffice/agent-core": "*"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",

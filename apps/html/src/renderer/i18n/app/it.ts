@@ -1,12 +1,24 @@
 import type { zh } from './zh'
 
 export const it = {
+  redactMenuLabel: 'Nascondi la selezione all’IA',
+  redactDialogDesc:
+    'Le parole restano nel documento e nel file; il modello vede solo il segnaposto. Dai un nome perché sappia cosa rappresenta.',
+  redactDialogScope:
+    'Nascondere vale solo per l’IA di questa app. La CLI, gli strumenti MCP e l’esportazione senza interfaccia leggono direttamente il file e vedono comunque queste parole.',
+  redactDialogPlaceholder: 'Nome del segnaposto, es. telefono del cliente',
+  redactCancel: 'Annulla',
+  redactInsert: 'Nascondi',
+
   loading: 'Caricamento…',
   loadFailed: 'Impossibile aprire il file',
   untitled: 'Senza titolo',
   saveFailed: 'Salvataggio non riuscito: {error}',
   saveFailedStatus: 'Salvataggio non riuscito',
   exportFailed: 'Esportazione non riuscita',
+  printFailed: 'Stampa non riuscita: {error}',
+  exportHtmlSkipped:
+    'Esportato, ma {count} risorsa/e non è stato possibile incorporarle (es. {first})',
   viewPreview: 'Anteprima',
   viewSplit: 'Diviso',
   viewSource: 'Sorgente',
@@ -55,7 +67,6 @@ export const it = {
   save: 'Salva (⌘S)',
   saveAs: 'Salva con nome…',
   ribbonCollapse: 'Riduci a icona la barra multifunzione',
-  ribbonPin: 'Aggiungi la barra multifunzione',
   ribbonExpand: 'Espandi la barra multifunzione',
   ribbonGroupInsert: 'Inserisci',
   editText: 'Modifica testo',
@@ -121,6 +132,7 @@ export const it = {
   insertImageUrl: 'Immagine da URL…',
   insertConfirm: 'Inserisci',
   insertMore: 'Altro',
+  insertSkeleton: 'Inserisci struttura',
   insertTableSize: 'Tabella {r}×{c}',
   insertTablePickSize: 'Scegli le dimensioni della tabella',
   insertPlaceholderTableHeader: 'Intestazione {n}',

@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { AgentToolCall, AgentToolDef } from '@genoffice/agent-core'
 import {
   copyTargetBounds,
+  describeOperationErrors,
   workbookOperationSchema,
   type WorkbookOperation,
 } from '@genoffice/xlsx-gateway/domain/workbook-dsl'
@@ -413,6 +414,7 @@ export const WORKBOOK_TOOLS: AgentToolDef[] = [
         look_in: {
           type: 'string',
           enum: ['values', 'formulas', 'both'],
+          default: 'both',
           description: 'What to match against (default both)',
         },
         sheetId: {
@@ -1277,14 +1279,18 @@ export function executeWorkbookTool(
       if (typeof summaryInput !== 'string' || !summaryInput.trim()) {
         return fail(t('aiToolPropose'), 'summary must not be empty')
       }
-      let operations: WorkbookOperation[]
-      try {
-        operations = z.array(workbookOperationSchema).parse(rawOps)
-      } catch (e) {
-        return fail(t('aiToolPropose'), e instanceof Error ? e.message : 'Invalid operation format')
+      const parsedOps = z.array(workbookOperationSchema).safeParse(rawOps)
+      if (!parsedOps.success) {
+        return fail(t('aiToolPropose'), describeOperationErrors(rawOps, parsedOps.error))
       }
+      const operations: WorkbookOperation[] = parsedOps.data
       const outcome = deps.proposeOperations(operations, summaryInput.trim())
-      if (!outcome.ok) return fail(t('aiToolPropose'), outcome.error)
+      if (!outcome.ok) {
+        return fail(
+          t('aiToolPropose'),
+          `Rejected — none of the ${operations.length} operation(s) were applied (a batch is all-or-nothing): ${outcome.error}`,
+        )
+      }
       const summary = summaryInput.trim()
       const finish = (
         appliedNotices: readonly string[] = [],

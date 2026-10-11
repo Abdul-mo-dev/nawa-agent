@@ -1,6 +1,7 @@
 import { chatAnthropic } from './protocols/anthropic'
 import { chatGemini } from './protocols/gemini'
 import { chatOpenAiCompatible } from './protocols/openai-compatible'
+import { ResponseBodyTooLargeError } from './protocols/shared'
 import { chatCodexAppServer } from './codex-app-server'
 import { getProviderAdapter, type ResolvedEndpoint } from './registry'
 import { modelPolicyOf } from './model-policy'
@@ -19,7 +20,7 @@ export async function chatForProvider(
   // non-streaming: the server generates the full answer before the headers arrive,
   // so the connect phase gets the long budget; the body read then gets the idle budget
   const wd = createStreamWatchdog(signal, AI_CHAT_RESPONSE_TIMEOUT_MS)
-  return wd.guard(async () => {
+  const result = wd.guard(async () => {
     let endpoint: ResolvedEndpoint
     try {
       endpoint = getProviderAdapter(provider).resolveEndpoint(config)
@@ -64,5 +65,9 @@ export async function chatForProvider(
           bodyExtras: endpoint.bodyExtras,
         })
     }
+  })
+  return result.catch((e) => {
+    if (e instanceof ResponseBodyTooLargeError) return { ok: false as const, error: e.message }
+    throw e
   })
 }

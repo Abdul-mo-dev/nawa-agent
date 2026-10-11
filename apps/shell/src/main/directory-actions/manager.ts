@@ -743,17 +743,20 @@ export class DirectoryActionManager {
         const run = this.runs.get(item.run)
         // Folder actions invalidate receipts for descendants without granting access to them.
         const affected = (path: string) =>
-          samePath(path, item.path) ||
-          (item.operation === 'delete-folder' && within(item.path, path))
+          item.operation !== 'copy' &&
+          (samePath(path, item.path) ||
+            (item.operation === 'delete-folder' && within(item.path, path)))
         if (run) {
           for (const path of run.evidence.keys()) if (affected(path)) run.evidence.delete(path)
-          run.analyticsEvidence?.clear()
+          for (const [datasetId, source] of run.analyticsEvidence ?? [])
+            if (affected(source.path)) run.analyticsEvidence!.delete(datasetId)
           run.myAgentSources = run.myAgentSources?.filter((source) => !affected(source.path))
         }
         for (const path of new Set([
           item.path,
           ...(item.filesystem?.entries.filter((e) => !e.directory).map((e) => e.path) ?? []),
         ])) {
+          if (!affected(path)) continue
           try {
             await this.inspections.invalidatePath(owner, item.run, path)
           } catch (cause) {

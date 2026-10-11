@@ -135,6 +135,7 @@ export const cs = {
   aiClarifyOther: 'Jiné (napsat)',
   aiClarifySkip: 'Přeskočit dotazník',
   aiClarifyNext: 'Další',
+  aiClarifyPrev: 'Předchozí',
   aiClarifySubmit: 'Generovat',
   aiSumReadAttachment: 'Přečtena příloha',
   aiSumReadAttachmentName: 'Přečtena příloha {name}',
@@ -223,4 +224,5 @@ export const cs = {
   aiSumSaveTemplate: 'Uložena šablona stylu „{name}“',
   aiSumTemplatesEmpty: 'Šablony stylu (prázdné)',
   aiSumListTemplates: 'Vypsáno šablon stylu: {count}',
+  aiPageCloudToLocal: 'Cloud není dostupný — vygenerováno lokálně',
 } satisfies Record<keyof typeof zh, string>

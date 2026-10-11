@@ -2,6 +2,13 @@
 // section geometry and the patch outputs of a slicing pass.
 import type { SectionInfo, TextFlowDirection, TextOutline } from '@genoffice/docx-engine'
 
+/** one placeable line of a block; `lead` marks ink-less space a float pushed the
+ *  sole line past: the page bottom swallows it without a fit check */
+export interface LineBox {
+  offsetInBlock: number
+  height: number
+  lead?: boolean
+}
 export interface BlockBox {
   top: number
   height: number
@@ -21,6 +28,9 @@ export interface BlockBox {
    *  lineBoxes offsets); the engine turns the page there and the text before
    *  stays on the current page like Word */
   innerBreaks?: number[]
+  /** a page-break-before paragraph lives inside a cell: the row data must exist
+   *  even when the table fits its page, or the instruction is invisible */
+  hasCellBreak?: boolean
   /** zero-height break carrier (floating-textbox anchor): the break survives a blank page */
   breakForce?: boolean
   /** block contains a column break (w:br type=column): force a column change after it (new page on last column) */
@@ -43,6 +53,8 @@ export interface BlockBox {
    *  wrapped text beside it carries the vertical extent, so it consumes no
    *  column height itself (block boxes in normal flow stack ignoring floats) */
   floated?: boolean
+  /** float lifted above the flow position into the previous anchor's band (syncAnchorBands) */
+  lifted?: boolean
   /** w:tblpPr table (floated or currently flowed by the engine, see floatFlowed) */
   floatTable?: true
   /** floating table the engine renders in normal flow because one of its rows
@@ -95,13 +107,16 @@ export interface BlockBox {
    * Paragraph line-box list (from computeLineMetrics, for line-level page splitting).
    * When absent, degrades to F1 block-level greedy placement.
    */
-  lineBoxes?: Array<{ offsetInBlock: number; height: number }>
+  lineBoxes?: LineBox[]
   /** space before (px), from line-metrics output */
   spaceBeforePx?: number
-  /** first block only: leading space-before folded into height (top moved to 0) */
+  /** leading space-before folded into height (top moved up by it) */
   leadFoldPx?: number
   /** space after (px), from line-metrics output */
   spaceAfterPx?: number
+  /** auto-multiple extra leading of one line (px): a page's last line needs only
+   *  its single-spacing extent, this much may overflow the bottom margin */
+  lineLeadPx?: number
   /** total page-bottom footnote reservation folded into `height` by
    *  applyBlockMeta (never into spaceAfterPx: page-bottom exemptions must not
    *  hand it back) */
@@ -141,6 +156,8 @@ export interface BlockBox {
 
   /** table block under Word 2013+ layout rules (see BlockMeta.modernTableHeaders) */
   modernTableHeaders?: boolean
+  /** table block whose cell paragraphs run without widow/orphan control */
+  cellWidowOff?: true
 }
 
 /**
@@ -160,6 +177,10 @@ export interface TableRowBox {
   /** in-row safe cut points (relative to row top, px, ascending): spanning all cells without splitting any text line/image.
    *  Word allows in-row page breaks by default; without cut points or with cantSplit the row is atomic */
   cutYs?: number[]
+  /** forced in-row cut points (relative to row top, px, ascending): page breaks the
+   *  author instructed inside a cell (a page-break-before paragraph) — they turn the
+   *  page at their position regardless of what fits, unlike the content-line cutYs */
+  forcedCuts?: number[]
   /** bottom of the lowest content band (text/image rects) relative to row top (px, 0 = empty row):
    *  lets pagination clip declared-height fill below the content instead of pushing pages */
   contentBottom?: number
@@ -199,6 +220,8 @@ export interface PageColumn {
   end: number
   /** table continued into the column: header-row range repeated at column top (virtual coordinates) */
   repeatHeader?: { top: number; height: number }
+  /** spilled leading of the column's last line (px), see PageSlice.leadSpill */
+  leadSpill?: number
 }
 
 /** A column-flow region within a page (a continuous column-count change can stack multiple regions vertically on one page) */
@@ -254,6 +277,10 @@ export interface PageSlice {
   /** The owning section began mid-page on an earlier page (continuous break), so
    *  this is not its first page for w:titlePg header/footer selection. */
   continuedSection?: true
+  /** how far the page's last line box runs past the content bottom (px): the
+   *  auto-multiple leading of a paragraph kept by its single-spacing extent
+   *  (applyLeadSpills); the preview window grows by it so no glyph is clipped */
+  leadSpill?: number
 }
 
 /** Pagination geometry for one section */
@@ -538,6 +565,14 @@ export interface BlockMeta {
   keepLines?: boolean
   /** paragraph opted out of section line numbering (w:suppressLineNumbers) */
   suppressLineNumbers?: boolean
+  /** the style chain's share of the flags above: a measured paragraph element takes its
+   *  direct flags from its own data-para and only these from the parse layer */
+  paraStyle?: {
+    keepNext?: boolean
+    keepLines?: boolean
+    widowControl?: boolean
+    suppressLineNumbers?: boolean
+  }
   /** pageBreakBefore (direct or style-level): force a page break before the block */
   breakBefore?: boolean
   /** false only when explicitly disabled (Word default on) */
@@ -553,6 +588,8 @@ export interface BlockMeta {
    *  remaining space (or would stay alone at the page bottom) pushes the table to a fresh page, and
    *  widow/orphan control applies inside split cells */
   modernTableHeaders?: boolean
+  /** table block: the document default turns widow/orphan control off and no cell paragraph turns it back on */
+  cellWidowOff?: true
   /** page-bottom height reserved for footnote refs inside the block (px): merged into the block height (consumes page capacity like Word's note area) */
   footnoteExtraPx?: number
   /** per-reference reservation heights in run order (matched to the block's

@@ -10,14 +10,20 @@ import type {
   DesktopApi,
   MenuCommand,
   AutoSaveDefault,
+  ContextMenuRequest,
+  DocTheme,
   UiTheme,
   ZoteroRendererRequest,
 } from '../shared/ipc'
 import type { ProjectApi } from '@genoffice/project-store'
-import { installDirectoryEditorBridge, installDropOpenBridge } from '@genoffice/electron-utils/drop-open'
+import {
+  installDirectoryEditorBridge,
+  installDropOpenBridge,
+} from '@genoffice/electron-utils/drop-open'
 
 const api: DesktopApi = {
   getLanguage: () => ipcRenderer.invoke('app:get-language'),
+  getSystemLocale: () => ipcRenderer.invoke('docs:system-locale'),
   onLanguageChanged: (handler) => {
     const listener = (
       _event: IpcRendererEvent,
@@ -31,6 +37,15 @@ const api: DesktopApi = {
     const listener = (_event: IpcRendererEvent, theme: UiTheme) => handler(theme)
     ipcRenderer.on('app:theme-changed', listener)
     return () => ipcRenderer.removeListener('app:theme-changed', listener)
+  },
+  getDocumentTheme: async () => {
+    const result: unknown = await ipcRenderer.invoke('app:get-document-theme')
+    return result === 'dark' || result === 'light' ? result : 'follow'
+  },
+  onDocumentThemeChanged: (handler) => {
+    const listener = (_event: IpcRendererEvent, theme: DocTheme) => handler(theme)
+    ipcRenderer.on('app:document-theme-changed', listener)
+    return () => ipcRenderer.removeListener('app:document-theme-changed', listener)
   },
   getAutoSaveDefault: () => ipcRenderer.invoke('app:get-auto-save-default'),
   onAutoSaveDefaultChanged: (handler) => {
@@ -59,6 +74,7 @@ const api: DesktopApi = {
   respondToZotero: (response) => ipcRenderer.send('zotero:response', response),
   openDocx: () => ipcRenderer.invoke('docs:open'),
   openDocxPath: (path: string) => ipcRenderer.invoke('docs:open-path', path),
+  confirmDocumentReplace: () => ipcRenderer.invoke('docs:confirm-document-replace'),
   convertAltChunkHtml: (html: string) => ipcRenderer.invoke('docs:altchunk-html-to-docx', html),
   openDocxDecrypt: (path: string, password: string) =>
     ipcRenderer.invoke('docs:open-decrypt', path, password),
@@ -102,6 +118,20 @@ const api: DesktopApi = {
   },
   respellKick: () => ipcRenderer.invoke('docs:respell-kick'),
   spellDiag: (line: string) => ipcRenderer.send('docs:spell-diag', line),
+  armContextMenu: () => ipcRenderer.send('docs:context-menu-arm'),
+  claimContextMenu: (seq: number) => {
+    ipcRenderer.sendSync('docs:context-menu-claim', seq)
+  },
+  onContextMenuRequest: (handler) => {
+    const listener = (_event: IpcRendererEvent, request: ContextMenuRequest) => handler(request)
+    ipcRenderer.on('docs:context-menu', listener)
+    return () => ipcRenderer.removeListener('docs:context-menu', listener)
+  },
+  spellAddWord: (word: string) => ipcRenderer.invoke('docs:spell-add-word', word),
+  spellIgnoreWord: (word: string) => ipcRenderer.invoke('docs:spell-ignore-word', word),
+  spellReplace: (word: string) => ipcRenderer.invoke('docs:spell-replace', word),
+  spellLanguages: () => ipcRenderer.invoke('docs:spell-languages'),
+  spellSetLanguages: (langs: string[]) => ipcRenderer.invoke('docs:spell-set-languages', langs),
   saveDocxAs: (defaultName: string, data: ArrayBuffer, sourcePath?: string | null) =>
     ipcRenderer.invoke('docs:save-as', defaultName, data, sourcePath ?? null),
   saveDocxNew: (defaultName: string, data: ArrayBuffer) =>
@@ -153,6 +183,12 @@ const api: DesktopApi = {
   },
   getAiSettings: () => ipcRenderer.invoke('ai:get-settings'),
   setAiSettings: (settings: AiSettings) => ipcRenderer.invoke('ai:set-settings', settings),
+  onAiSettingsChanged: (handler) => {
+    const listener = () => handler()
+    ipcRenderer.on('ai:settings-changed', listener)
+    return () => ipcRenderer.removeListener('ai:settings-changed', listener)
+  },
+  openAiModelSettings: () => ipcRenderer.invoke('ai:open-model-settings'),
   aiChat: (request: AiChatRequest) => ipcRenderer.invoke('ai:chat', request),
   aiStream: (request: AiStreamRequest) => ipcRenderer.invoke('ai:stream', request),
   aiStreamCancel: (requestId: string) => ipcRenderer.invoke('ai:stream-cancel', requestId),
@@ -176,8 +212,12 @@ const api: DesktopApi = {
   readAttachment: (path: string, offset: number, maxChars: number) =>
     ipcRenderer.invoke('files:read', path, offset, maxChars),
   readAttachmentImage: (path: string) => ipcRenderer.invoke('files:read-image', path),
+  kbList: () => ipcRenderer.invoke('kb:list'),
+  kbSearch: (query: { q: string; limit?: number }) => ipcRenderer.invoke('kb:search', query),
+  kbRead: (path: string, offset: number) => ipcRenderer.invoke('kb:read', { path, offset }),
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
   openNewTab: (openPath?: string | null) => ipcRenderer.invoke('win:new', openPath ?? null),
+  openSourcePath: (path: string) => ipcRenderer.invoke('home:open-path', path),
   listDocsTabs: () => ipcRenderer.invoke('win:list'),
   focusDocsTab: (id: string) => ipcRenderer.invoke('win:focus', id),
   onAiStream: (handler: (chunk: AiStreamChunk) => void) => {

@@ -1,6 +1,16 @@
 import type { zh } from './zh'
 
 export const ja = {
+  redactMenuLabel: '選択範囲をAIから隠す',
+  redactDialogDesc:
+    '選択した内容はドキュメントとファイルに残り、AI には下のマーカーしか見えません。名前をつけると、何を表すかAIが理解できます。',
+  redactDialogScope:
+    'これはこのアプリの AI に限られます。CLI、MCP ツール、GUI なしのエクスポートはファイルを直接読み込むため、これらの文字はまだ見えています。',
+  redactDialogPlaceholder: 'プレースホルダー名（例：顧客電話）',
+  redactCancel: 'キャンセル',
+  redactInsert: '隠す',
+  redactEnable: '選択範囲を右クリックしてAIから隠します。',
+
   appPhPromptTitle: 'クリックしてタイトルを追加',
   appPhPromptSubtitle: 'クリックしてサブタイトルを追加',
   appPhPromptBody: 'クリックしてテキストを追加',
@@ -113,6 +123,7 @@ export const ja = {
   appPasteOptSource: '元の書式を保持',
   appPasteOptTheme: '貼り付け先のテーマを使用',
   appStatusPasteOptionsExpired: '貼り付けオプションは利用できなくなりました',
+  appStatusPasteTruncated: '貼り付けたテキストが長すぎるため切り詰めました',
   appCtxHideSlide: '非表示スライドに設定',
   appCtxUnhideSlide: '非表示スライドの解除',
   appCtxAddSectionBefore: 'セクションの追加（このスライドの前）',

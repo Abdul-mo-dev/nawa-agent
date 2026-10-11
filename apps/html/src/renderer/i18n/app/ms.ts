@@ -1,12 +1,23 @@
 import type { zh } from './zh'
 
 export const ms = {
+  redactMenuLabel: 'Sembunyikan pilihan daripada AI',
+  redactDialogDesc:
+    'Perkataan kekal dalam dokumen dan fail; model hanya melihat placeholder di bawah. Beri nama supaya model tahu apa yang diwakili.',
+  redactDialogScope:
+    'Penyembunyian ini hanya untuk AI dalam aplikasi ini. CLI, alat MCP dan eksport tanpa antara muka membaca fail secara terus, jadi perkataan ini masih kelihatan kepada mereka.',
+  redactDialogPlaceholder: 'Nama placeholder, cth. telefon pelanggan',
+  redactCancel: 'Batal',
+  redactInsert: 'Sembunyikan',
+
   loading: 'Memuatkan…',
   loadFailed: 'Tidak dapat membuka fail',
   untitled: 'Tanpa tajuk',
   saveFailed: 'Gagal menyimpan: {error}',
   saveFailedStatus: 'Gagal menyimpan',
   exportFailed: 'Eksport gagal',
+  printFailed: 'Gagal mencetak: {error}',
+  exportHtmlSkipped: 'Dieksport, tetapi {count} aset tidak dapat disisipkan (cth. {first})',
   viewPreview: 'Pratonton',
   viewSplit: 'Terbelah',
   viewSource: 'Sumber',
@@ -52,7 +63,6 @@ export const ms = {
   save: 'Simpan (⌘S)',
   saveAs: 'Simpan Sebagai…',
   ribbonCollapse: 'Runtuhkan Reben',
-  ribbonPin: 'Semat Reben',
   ribbonExpand: 'Kembangkan Reben',
   ribbonGroupInsert: 'Sisip',
   editText: 'Edit teks',
@@ -118,6 +128,7 @@ export const ms = {
   insertImageUrl: 'Imej daripada URL…',
   insertConfirm: 'Sisipkan',
   insertMore: 'Lagi',
+  insertSkeleton: 'Sisipkan rangka',
   insertTableSize: 'Jadual {r}×{c}',
   insertTablePickSize: 'Pilih saiz jadual',
   insertPlaceholderTableHeader: 'Pengepala {n}',

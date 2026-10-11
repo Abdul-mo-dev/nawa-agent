@@ -22,7 +22,11 @@ import {
   type ToolDisplay,
 } from '@genoffice/agent-core'
 import type { RenderSlide } from '@genoffice/pptx-render'
-import { imageGenerationAvailable, mediaAnalysisAvailable } from '@genoffice/ai-provider/browser'
+import {
+  cloudToolsEnabled,
+  imageGenerationAvailable,
+  mediaAnalysisAvailable,
+} from '@genoffice/ai-provider/browser'
 import type { AiSettings, AttachmentAddResult, AttachmentMeta } from '../../shared/ipc'
 import { ATTACHMENT_IMAGE_EXTS } from '../../shared/ipc'
 import {
@@ -48,13 +52,16 @@ import {
   isQcEnabled,
   isUnsupportedImageInputError,
   mergeQcPages,
+  NO_SCREENSHOT_NOTE,
   qcSlidePage,
   QC_MAX_PAGES,
+  screenshotAllowed,
   settingsSupportVision,
 } from './slide-qc'
 import { useI18n, t as tGlobal, aiLangDirective, type TFunc } from '../i18n/locale'
 import { AiScopeQuote, Markdown, useAiPanelPrefs, type AiScopeQuoteData } from '@genoffice/ui'
 import { NawaMark } from '../components/icons'
+import { AiQueueStrip, AI_QUEUE_LABELS, useChatRunQueue } from '@genoffice/ui'
 import sendEnterOn from '../assets/send-enter-on.png'
 import sendEnterOff from '../assets/send-enter-off.png'
 import sendStop from '../assets/send-stop.png'
@@ -383,6 +390,21 @@ export function AiPanel({
   // must honor it like the shared AiComposer does.
   const { spellcheck } = useAiPanelPrefs()
   const [busy, setBusy] = useState(false)
+  /** messages queued while a reply runs; the pump re-runs them through runWith on settle */
+  const msgQueue = useChatRunQueue<{
+    attachments: AttachmentMeta[]
+    scope: AiScopeQuoteData | undefined
+  }>({
+    busy,
+    submit: (text, meta) => {
+      // the QC pass edits the deck with busy=false: refuse and let the pump retry
+      if (qcRunningRef.current || runStartingRef.current) return false
+      const loop = loopRef.current
+      if (!loop || loop.busy) return false
+      runWith(text, text, { attachments: meta.attachments, scope: meta.scope })
+      return true
+    },
+  })
   const [chat, setChat] = useState<ChatEntry[]>([])
   /** Past conversation restored from JSONL (read-only transcript, not fed to the model) */
   const [historicChat, setHistoricChat] = useState<ChatEntry[]>([])
@@ -763,7 +785,7 @@ export function AiPanel({
   if (!loopRef.current) {
     // The three slides generation steps (style/planning/per-page HTML) force the high-quality model (only with the anthropic provider;
     // other providers keep the user setting, avoiding passing nonexistent model names). Chat/fine-tuning still uses the user's configured model.
-    const SLIDES_GEN_MODEL = 'claude-opus-4-7'
+    const SLIDES_GEN_MODEL = 'claude-opus-5-5'
     // Return on demand a settings copy with the generation model overridden (deep copy, doesn't pollute settingsRef).
     const settingsForGen = (): AiSettings => {
       const cur = settingsRef.current
@@ -1006,6 +1028,14 @@ export function AiPanel({
       },
       isCloudPageGenEnabled: async () => {
         if (!directoryWorkflowMedia()) return false
+        // Cloud page generation runs on Genspark's own slide model and spends
+        // Genspark credits, so it is gated by the "Genspark cloud tools" toggle
+        // plus the main-process account status only — the chat provider does not
+        // gate it (search/media gate per capability, not per chat provider). A
+        // free-plan or credits-exhausted account is covered by the mid-run
+        // fallback to the local pipeline instead of disabling cloud up front.
+        const cur = settingsRef.current
+        if (!cloudToolsEnabled(cur)) return false
         try {
           return !!(await window.slidesApi.cloudGenStatus())?.enabled
         } catch {
@@ -1041,6 +1071,8 @@ export function AiPanel({
           '\n' +
           '## Visuals and assets\n' +
           '- Photos may only use URLs from the "available images" list, at most as many image elements as URLs. With no available images, fill with typography/color blocks/shapes — never fake photos.\n' +
+          "- Use a photo only when it genuinely matches this page's content and improves it — an irrelevant or generic stock photo is worse than none. When in doubt, skip the image and compose with typography/color blocks/shapes instead.\n" +
+          '- At most 3 image elements on one page; one strong, relevant image beats several weak ones.\n' +
           '- Icon-like decoration uses the allowed shapes only (at most 4-5 per page, strongly content-related). **Never use emoji**.\n' +
           '- Data visuals: compose bars/rings/timelines from rect/donut/line shapes with sizes proportional to the real values from the brief.\n' +
           '- Solid colors only (alpha allowed) — no gradients. **No placeholders of any kind**: all copy comes from the brief’s real content.\n' +
@@ -1056,12 +1088,13 @@ export function AiPanel({
         const ctxBlock = args.context
           ? `\n\nReference material (all real names/figures/facts come from here; do not invent):\n${args.context.slice(0, 4000)}`
           : ''
+        const skeletonBlock = args.skeleton ? `\n\n${args.skeleton}` : ''
         const userMsg =
           `This is the deck's unified style (this page must follow it strictly to stay consistent across pages):\n${args.style}\n\n` +
           (args.topic ? `Deck topic: ${args.topic}\n` : '') +
           `Deck-wide narrative Core Hook: ${args.coreHook}\n\n` +
           `Now design page ${args.pageIndex}/${args.totalPages}.\n` +
-          `Title: ${args.title}\nLayout: ${args.layout}\nContent brief (use real data/facts): ${args.brief}${imgBlock}${ctxBlock}\n\n` +
+          `Title: ${args.title}\nLayout: ${args.layout}\nContent brief (use real data/facts): ${args.brief}${imgBlock}${ctxBlock}${skeletonBlock}\n\n` +
           "Return only this page's spec JSON."
         // One repair round: feed the exact validation error back so the model can fix its JSON
         let lastErr = ''
@@ -1090,6 +1123,12 @@ export function AiPanel({
       // Cloud single-page generation (gsk slide_generate): the cloud service owns HTML writing +
       // pptx conversion; the deck-level style/outline stay local.
       generatePageCloud: async (args) => {
+        // a stop that already fired must not start (and bill) another page
+        if (args.signal?.aborted) return { ok: false, error: tGlobal('aiErrStopped') }
+        // Forward the panel's stop signal: the main process aborts the in-flight
+        // cloud request instead of letting it run (and bill) to completion
+        const cancelCloud = () => void window.slidesApi.cloudPageCancel().catch(() => {})
+        args.signal?.addEventListener('abort', cancelCloud, { once: true })
         try {
           const briefParts = [args.brief]
           if (args.layout) briefParts.push(`Layout intent: ${args.layout}`)
@@ -1097,10 +1136,13 @@ export function AiPanel({
             briefParts.push(
               `Reference material (all real names/figures/facts come from here; do not invent):\n${args.context.slice(0, 4000)}`,
             )
+          // The cloud service owns its own page prompt; the template chrome rides
+          // in as part of the style so its pages pin the same geometry
+          const styleSkill = args.skeleton ? `${args.style}\n\n${args.skeleton}` : args.style
           const res = await window.slidesApi.cloudGeneratePage({
             brief: briefParts.join('\n\n'),
             title: args.title,
-            styleSkill: args.style,
+            styleSkill,
             deckContext: {
               ...(args.topic ? { topic: args.topic } : {}),
               core_hook: args.coreHook,
@@ -1114,6 +1156,8 @@ export function AiPanel({
           return res ?? { ok: false, error: tGlobal('aiErrUnknown') }
         } catch (e) {
           return { ok: false, error: e instanceof Error ? e.message : String(e) }
+        } finally {
+          args.signal?.removeEventListener('abort', cancelCloud)
         }
       },
       // ── In-tool planning: given topic+page count, the LLM produces a structured outline (batched recursion scheduled by the skill).
@@ -1550,6 +1594,31 @@ export function AiPanel({
 
   const run = () => runWith(input.trim())
 
+  /** Enter while a reply runs: the draft joins the queue above the composer */
+  const enqueueDraft = () => {
+    const text = input.trim()
+    if (!text) return
+    // snapshot + consume the composer attachments exactly like a send does
+    const attachments = attachmentsRef.current
+    if (attachments.length > 0) {
+      const seen = new Set(sentAttachmentsRef.current.map((a) => a.path))
+      sentAttachmentsRef.current = [
+        ...sentAttachmentsRef.current,
+        ...attachments.filter((a) => !seen.has(a.path)),
+      ]
+      setAttachments([])
+      attachmentsRef.current = []
+    }
+    const scope =
+      selectedRef.current.length > 0
+        ? {
+            label: `${t('aiScopeSlide', { n: current + 1 })} · ${t('aiScopeSelection', { count: selectedRef.current.length })}`,
+          }
+        : undefined
+    msgQueue.enqueue(text, { attachments, scope })
+    setInput('')
+  }
+
   /** Image attachments read as base64, sent multimodally with this user message (≤5MB per image, max 20; isomorphic to docs) */
   const MAX_IMAGES_PER_MESSAGE = 20
   const collectImageAttachments = async (atts: AttachmentMeta[]): Promise<AgentImage[]> => {
@@ -1579,9 +1648,19 @@ export function AiPanel({
   }
 
   /** Current slide rendered at pixelRatio 1 (vision-friendly size); null when rendering fails */
+  /**
+   * A rendered picture of the slide, when sending one is safe.
+   *
+   * A screenshot is the one outbound path that no text projection can reach:
+   * the renderer tints a withheld run, it does not replace it, so the words are
+   * in the bitmap. There is no mask to put over them — a picture has no spans.
+   * So a slide that withholds anything gets no picture, and the caller says so,
+   * rather than the model receiving an image it was never shown the text of.
+   */
   const captureSlideShot = async (pageIndex: number): Promise<AgentImage | null> => {
     const slide = slidesRef.current[pageIndex]
     if (!slide) return null
+    if (!screenshotAllowed(slide)) return null
     try {
       const [png] = await renderSlidesToPngBase64([slide], imagesRef.current, 1)
       return png ? { base64: png, mime: 'image/png' } : null
@@ -1668,6 +1747,10 @@ export function AiPanel({
           if (shot) {
             images.push(shot)
             modelInstruction += `\n\n(Attached image: the current rendering of this slide, slideIndex ${currentRef.current}. Use it to spot visual issues the element inventory can't show.)`
+          } else {
+            // said rather than omitted: a model told nothing assumes it has the
+            // rendering and reasons about text it cannot see
+            modelInstruction += `\n\n(${NO_SCREENSHOT_NOTE})`
           }
         }
         // Clear the flag before run: loop.run sets running synchronously, leaving no re-entry window
@@ -1916,6 +1999,7 @@ export function AiPanel({
     })
 
   const newChat = () => {
+    msgQueue.clear()
     dismissClarify()
     qcAbortRef.current?.abort()
     loopRef.current?.reset()
@@ -2295,6 +2379,16 @@ export function AiPanel({
             disabled={busy}
           />
           <div className="ai-input-box">
+            <AiQueueStrip
+              items={msgQueue.queued}
+              labels={AI_QUEUE_LABELS[lang]}
+              onUpdate={msgQueue.update}
+              onRemove={msgQueue.remove}
+              onClear={msgQueue.clear}
+              paused={msgQueue.paused}
+              onTogglePause={msgQueue.togglePaused}
+              onMove={msgQueue.move}
+            />
             {attachments.length > 0 && (
               <div className="ai-attachments" onScroll={onAttachmentsScroll}>
                 {attachments.map((a) =>
@@ -2361,7 +2455,11 @@ export function AiPanel({
               spellCheck={spellcheck}
               data-slides-ai-input="true"
               data-deck-undo-ready={!busy && !inputEditedSinceRunRef.current ? 'true' : 'false'}
-              placeholder={t(deckEmpty ? 'aiInputPlaceholderGen' : 'aiInputPlaceholder')}
+              placeholder={
+                busy
+                  ? AI_QUEUE_LABELS[lang].queuePlaceholder
+                  : t(deckEmpty ? 'aiInputPlaceholderGen' : 'aiInputPlaceholder')
+              }
               onChange={(e) => {
                 inputEditedSinceRunRef.current = true
                 setInput(e.target.value)
@@ -2369,7 +2467,8 @@ export function AiPanel({
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                   e.preventDefault()
-                  run()
+                  if (busy) enqueueDraft()
+                  else run()
                 } else if (e.key === 'Escape' && busy) {
                   e.preventDefault()
                   cancel()
@@ -2764,6 +2863,15 @@ function DeckProgressCard({ progress }: { progress: DeckProgressSnapshot }) {
                 <span className={`deck-progress-icon ${step.stepStatus}`}>
                   {step.stepStatus === 'running' ? (
                     <span className="deck-progress-spinner" />
+                  ) : step.stepStatus === 'stopped' ? (
+                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+                      <path
+                        d="M2.5 6h7"
+                        stroke="currentColor"
+                        strokeWidth="0.75"
+                        strokeLinecap="round"
+                      />
+                    </svg>
                   ) : step.stepStatus === 'done' ? (
                     <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
                       <path
@@ -2954,7 +3062,7 @@ function ClarifyCard({
             className="ai-clarify-head-arrow"
             disabled={qIdx === 0}
             onClick={() => goTo(qIdx - 1)}
-            aria-label="‹"
+            aria-label={t('aiClarifyPrev')}
           >
             ‹
           </button>
@@ -2963,7 +3071,7 @@ function ClarifyCard({
             className="ai-clarify-head-arrow"
             disabled={qIdx >= furthest || !hasAnswer}
             onClick={() => goTo(qIdx + 1)}
-            aria-label="›"
+            aria-label={t('aiClarifyNext')}
           >
             ›
           </button>
