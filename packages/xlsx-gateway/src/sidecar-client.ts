@@ -5,7 +5,10 @@ const PROTOCOL_VERSION = 1
 const REQUEST_TIMEOUT_MS = 30_000
 // Archive commands stream whole workbooks; large files need more headroom.
 const ARCHIVE_TIMEOUT_MS = 180_000
+const CONVERT_TIMEOUT_MS = 120_000
 const MAX_STDERR_LENGTH = 8_192
+let converting = false
+const conversionQueue: (() => void)[] = []
 
 interface PendingRequest {
   readonly resolve: (value: unknown) => void
@@ -42,6 +45,8 @@ export class XlsxSidecarClient {
   private lines: Interface | null = null
   private readonly pending = new Map<string, PendingRequest>()
   private stderr = ''
+  private readonly conversions = new Set<XlsxSidecarClient>()
+  private readonly queuedConversions = new Set<() => void>()
   /// Notified when the sidecar process dies and the NEXT request will spawn a
   /// replacement that has never heard of the session ids we are holding. This
   /// is a positive crash signal, and deliberately NOT the same thing as a
@@ -125,7 +130,52 @@ export class XlsxSidecarClient {
   }
 
   async convertWorkbook(input: { path: string; targetPath: string }): Promise<unknown> {
-    return this.request({ command: 'convert_workbook', ...input }, ARCHIVE_TIMEOUT_MS)
+    // Calamine parses eagerly. Use a disposable process so cancellation/timeout
+    // can kill an import without destroying any open workbook sessions.
+    // Keep one import active across clients: isolation must not multiply the
+    // memory budget when a folder selection contains several large workbooks.
+    return new Promise((resolve, reject) => {
+      const cancel = () => {
+        const index = conversionQueue.indexOf(start)
+        if (index >= 0) conversionQueue.splice(index, 1)
+        this.queuedConversions.delete(cancel)
+        reject(new Error('XLSX sidecar stopped.'))
+      }
+      const start = () => {
+        this.queuedConversions.delete(cancel)
+        const worker = new XlsxSidecarClient(this.binaryPath)
+        this.conversions.add(worker)
+        const finish = () => {
+          this.conversions.delete(worker)
+          worker.stop()
+          const next = conversionQueue.shift()
+          if (next) queueMicrotask(next)
+          else converting = false
+        }
+        try {
+          void worker.request({ command: 'convert_workbook', ...input }, CONVERT_TIMEOUT_MS).then(
+            (result) => {
+              finish()
+              resolve(result)
+            },
+            (cause) => {
+              finish()
+              reject(cause)
+            },
+          )
+        } catch (cause) {
+          finish()
+          reject(cause)
+        }
+      }
+      if (converting) {
+        this.queuedConversions.add(cancel)
+        conversionQueue.push(start)
+      } else {
+        converting = true
+        start()
+      }
+    })
   }
 
   async archiveManifest(path: string): Promise<unknown> {
@@ -204,6 +254,10 @@ export class XlsxSidecarClient {
   }
 
   stop(): void {
+    for (const cancel of this.queuedConversions) cancel()
+    this.queuedConversions.clear()
+    for (const worker of this.conversions) worker.stop()
+    this.conversions.clear()
     this.lines?.close()
     this.lines = null
     this.process?.kill()

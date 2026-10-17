@@ -263,7 +263,7 @@ function normalizeMetadata(item, interrupted = false) {
           throw new Error('Invalid action proposal hash.')
         normalized.action.proposalHash = action.proposalHash
       }
-      for (const field of ['destination', 'backupPath'])
+      for (const field of ['destination', 'backupPath', 'sourcePath'])
         if (action[field] !== undefined)
           normalized.action[field] = string(action[field], 'action ' + field)
       if (action.status) normalized.action.status = action.status

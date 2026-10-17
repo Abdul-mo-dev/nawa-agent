@@ -17,6 +17,7 @@ export default defineConfig({
     plugins: [
       externalizeDepsPlugin({
         exclude: [
+          '@genoffice/file-formats',
           '@genoffice/i18n',
           'pdf-lib',
           '@genoffice/electron-utils',
@@ -27,7 +28,11 @@ export default defineConfig({
   },
   preload: {
     // i18n and electron-utils ship as TS source — must be bundled, not left external
-    plugins: [externalizeDepsPlugin({ exclude: ['@genoffice/i18n', '@genoffice/electron-utils'] })],
+    plugins: [
+      externalizeDepsPlugin({
+        exclude: ['@genoffice/file-formats', '@genoffice/i18n', '@genoffice/electron-utils'],
+      }),
+    ],
   },
   renderer: {
     plugins: [

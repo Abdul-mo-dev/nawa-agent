@@ -1,3 +1,4 @@
+import { EDITOR_DIALOG_EXTENSIONS } from '@genoffice/file-formats'
 import {
   accessSync,
   constants,
@@ -26,24 +27,7 @@ import { isValidRenameName } from './rename-validation'
 import { statPathEntries } from './recent-files'
 
 /** files the home tree shows; mirrors the shell's open-dialog filter */
-export const TREE_FILE_EXTENSIONS: ReadonlySet<string> = new Set([
-  'docx',
-  'doc',
-  'xlsx',
-  'xlsm',
-  'xls',
-  'csv',
-  'tsv',
-  'pptx',
-  'ppt',
-  'pdf',
-  'md',
-  'markdown',
-  'txt',
-  'json',
-  'html',
-  'htm',
-])
+export const TREE_FILE_EXTENSIONS: ReadonlySet<string> = new Set(EDITOR_DIALOG_EXTENSIONS)
 
 const HIDDEN_DIR_NAMES = new Set(['node_modules', '__macosx'])
 const HIDDEN_FILE_NAMES = new Set(['thumbs.db', 'desktop.ini'])

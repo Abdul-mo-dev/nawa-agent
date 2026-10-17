@@ -134,7 +134,7 @@ describe('createDefaultAppService', () => {
       platform: 'linux',
       run,
       readFile: (p) => {
-        if (p.endsWith('/usr/share/applications/wps-office-et.desktop'))
+        if (p.replaceAll('\\', '/').endsWith('/usr/share/applications/wps-office-et.desktop'))
           return '[Desktop Entry]\nName=WPS Spreadsheets\n'
         throw new Error('ENOENT')
       },
@@ -160,9 +160,9 @@ describe('createDefaultAppService', () => {
         if (key.includes('.pptx')) throw new Error('no user choice')
         return key.includes('.docx')
           ? '    ProgId    REG_SZ    Word.Document.12\r\n'
-          : '    ProgId    REG_SZ    Excel Workbook\r\n'
+          : '    ProgId    REG_SZ    com.nawa.app.xlsx\r\n'
       }
-      if (key === 'HKCR\\.pptx') return '    (Default)    REG_SZ    PowerPoint Presentation\r\n'
+      if (key === 'HKCR\\.pptx') return '    (Default)    REG_SZ    com.nawa.app.pptx\r\n'
       if (key === 'HKCR\\Word.Document.12')
         return '    (Default)    REG_SZ    Microsoft Word Document\r\n'
       throw new Error('missing')
@@ -184,5 +184,20 @@ describe('createDefaultAppService', () => {
     })
     const svc = createDefaultAppService({ ...base, platform: 'darwin', run })
     expect((await svc.status()).state).toBe('unknown')
+  })
+
+  it('windows: recognizes product-specific registrations and keeps generic classes owned by other apps', async () => {
+    let generic = false
+    const run = vi.fn<RunCommand>(async (_cmd, args) => {
+      const key = args[1]
+      const type = OFFICE_TYPES.find((entry) => key.includes(`.${entry.ext}\\UserChoice`))
+      if (type) return `    ProgId    REG_SZ    ${generic ? 'Word Document' : type.progId}\r\n`
+      if (key === 'HKCR\\Word Document') return '    (Default)    REG_SZ    Another Office App\r\n'
+      throw new Error('missing')
+    })
+    const svc = createDefaultAppService({ ...base, platform: 'win32', run })
+    expect(await svc.status()).toMatchObject({ state: 'default', others: [] })
+    generic = true
+    expect(await svc.status()).toMatchObject({ state: 'other', others: ['Another Office App'] })
   })
 })

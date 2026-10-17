@@ -1,6 +1,10 @@
 import type { zh } from './zh'
 
 export const he = {
+  appWorkbookImportNotice:
+    'הקובץ .{format} נפתח כעותק XLSX. המקור לא השתנה. עיצוב, תרשימים, תמונות, פקודות מאקרו וטווחים בעלי שם אינם מיובאים.',
+  appWorkbookImportFormulaLoss:
+    'נוסחאות שנשמרו כערכים מהמטמון: {formulas}. גיליונות עם נוסחאות שלא ניתן לקרוא: {sheets}.',
   appMergeWorkbooks: 'מיזוג חוברות עבודה',
   appMergeWorkbooksTip: 'הוספת גיליונות מקובצי Excel אחרים לחוברת העבודה הזו',
   appMergeWorkbooksPicking: 'בחרו קבצים למיזוג…',

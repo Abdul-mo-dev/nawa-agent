@@ -107,6 +107,13 @@ describe('stream timeouts end to end', () => {
       cb,
     )
     const result = expect(run).rejects.toBeInstanceOf(AiTimeoutError)
+    // prepareModelRequest awaits the tiktoken dynamic import before the
+    // streaming watchdog is created, so a single timer advance can elapse
+    // before the connect timer exists and leave the rejection pending
+    // forever. Wait for the timer to be armed, then advance the full timeout.
+    for (let i = 0; i < 1000 && vi.getTimerCount() === 0; i++) {
+      await vi.advanceTimersByTimeAsync(0)
+    }
     await vi.advanceTimersByTimeAsync(AI_CONNECT_TIMEOUT_MS)
     await result
   })
@@ -142,6 +149,11 @@ describe('stream timeouts end to end', () => {
       cb,
     )
     const result = expect(run).rejects.toBeInstanceOf(AiTimeoutError)
+    // Same delayed-arming race as above: the budget path resolves before the
+    // watchdog exists. Wait for the timer, then advance past the idle timeout.
+    for (let i = 0; i < 1000 && vi.getTimerCount() === 0; i++) {
+      await vi.advanceTimersByTimeAsync(0)
+    }
     await vi.advanceTimersByTimeAsync(AI_IDLE_TIMEOUT_MS + 1_000)
     await result
     expect(deltas).toEqual(['hi'])

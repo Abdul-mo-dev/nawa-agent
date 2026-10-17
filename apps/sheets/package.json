@@ -23,6 +23,7 @@
     "gate": "npm run typecheck && npm run fixtures && npm test && npm run compat"
   },
   "dependencies": {
+    "@genoffice/file-formats": "*",
     "@fluentui/react-icons": "^2.0.333",
     "@genoffice/agent-core": "*",
     "@genoffice/ai-provider": "*",

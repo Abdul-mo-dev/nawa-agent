@@ -1,6 +1,10 @@
 import type { zh } from './zh'
 
 export const de = {
+  appWorkbookImportNotice:
+    '.{format} wurde als XLSX-Kopie geöffnet. Das Original bleibt unverändert. Formatierung, Diagramme, Bilder, Makros und benannte Bereiche werden nicht importiert.',
+  appWorkbookImportFormulaLoss:
+    'Als zwischengespeicherte Werte übernommene Formeln: {formulas}. Blätter mit nicht lesbaren Formeln: {sheets}.',
   appMergeWorkbooks: 'Arbeitsmappen zusammenführen',
   appMergeWorkbooksTip: 'Blätter aus anderen Excel-Dateien in diese Arbeitsmappe übernehmen',
   appMergeWorkbooksPicking: 'Dateien zum Zusammenführen wählen…',

@@ -1,6 +1,10 @@
 import type { zh } from './zh'
 
 export const id = {
+  appWorkbookImportNotice:
+    '.{format} dibuka sebagai salinan XLSX. File asli tidak berubah. Pemformatan, bagan, gambar, makro, dan rentang bernama tidak diimpor.',
+  appWorkbookImportFormulaLoss:
+    'Rumus dipertahankan sebagai nilai tersimpan: {formulas}. Lembar dengan rumus yang tidak terbaca: {sheets}.',
   appMergeWorkbooks: 'Gabungkan Buku Kerja',
   appMergeWorkbooksTip: 'Tambahkan sheet dari file Excel lain ke buku kerja ini',
   appMergeWorkbooksPicking: 'Pilih file yang akan digabungkan…',

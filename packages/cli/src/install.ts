@@ -10,7 +10,7 @@ import {
   symlinkSync,
   unlinkSync,
 } from 'node:fs'
-import { basename, dirname, isAbsolute, join, resolve, win32 } from 'node:path'
+import { basename, dirname, isAbsolute, join, resolve, win32, posix } from 'node:path'
 
 /**
  * Making `genoffice` reachable from a terminal. The launcher ships inside the app
@@ -89,9 +89,9 @@ export function homebrewBinDirs(
   const fromEnv = env.HOMEBREW_PREFIX?.replace(/\/+$/, '')
   if (fromEnv && isAbsolute(fromEnv)) roots.add(fromEnv)
   for (const root of HOMEBREW_ROOTS[platform] ?? []) {
-    if (exists(join(root, 'bin', 'brew'))) roots.add(root)
+    if (exists(posix.join(root, 'bin', 'brew'))) roots.add(root)
   }
-  return [...roots].map((r) => join(r, 'bin'))
+  return [...roots].map((r) => posix.join(r, 'bin'))
 }
 
 /** `$XDG_BIN_HOME`, then `~/.local/bin`: created on demand because a fresh account rarely has them. */

@@ -9,6 +9,8 @@ export interface OpenFileResult {
   encrypted?: boolean
   /** content came from a newer crash-recovery copy and still needs an explicit save */
   recovered?: boolean
+  /** Converted legacy source; only modern Office copies may be saved. */
+  importedFrom?: import('@genoffice/file-formats').OfficeImportExtension
 }
 
 /** Password-protected (ECMA-376 encrypted) docx: the renderer prompts for the

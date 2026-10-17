@@ -28,8 +28,8 @@ export interface RoutedDirectorySkill extends AgentSkill {
   /** Final gate after the agent loop's single corrective turn. */
   verifyEvidence(finalText: string): string | null
 }
-const sheet = /\.(?:xlsx?|xlsm|csv|tsv|ods)$/i
-const tableFile = /\.(?:xlsx?|xlsm|csv|tsv|ods|json|jsonl|ndjson)$/i
+const sheet = /\.(?:xlsx?|xltx|xlsm|xltm|xlsb|csv|tsv|ods)$/i
+const tableFile = /\.(?:xlsx?|xltx|xlsm|xltm|xlsb|csv|tsv|ods|json|jsonl|ndjson)$/i
 const name = (path: string) => path.replace(/\\/g, '/').split('/').pop()!.toLowerCase()
 const numericRequest =
   /كم(?: عدد)?|متوسط|مجموع|إجمالي|اجمالي|نسبة|平均|合計|何人|件数|何件|何個|割合|总计|总数|平均|多少|数量|百分比/
@@ -112,7 +112,7 @@ export function directoryRoute(task: string, scope: DirectorySelection): Directo
   const matches = scope.files.filter((path) => text.includes(name(path)))
   let target = matches.length === 1 ? matches[0] : undefined
   if (!target && !matches.length) {
-    const tokens = text.match(/[\w()-]+\.(?:xlsx?|xlsm|csv|tsv|ods)\b/g) ?? []
+    const tokens = text.match(/[\w()-]+\.(?:xlsx?|xltx|xlsm|xltm|xlsb|csv|tsv|ods)\b/g) ?? []
     const close = scope.files.filter((path) => tokens.some((token) => oneEdit(token, name(path))))
     if (close.length === 1) target = close[0]
   }

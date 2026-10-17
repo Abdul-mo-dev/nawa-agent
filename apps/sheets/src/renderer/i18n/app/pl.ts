@@ -1,6 +1,10 @@
 import type { zh } from './zh'
 
 export const pl = {
+  appWorkbookImportNotice:
+    'Otwarto .{format} jako kopię XLSX. Oryginał pozostaje bez zmian. Formatowanie, wykresy, obrazy, makra i nazwane zakresy nie są importowane.',
+  appWorkbookImportFormulaLoss:
+    'Formuły zachowane jako wartości z pamięci podręcznej: {formulas}. Arkusze z nieczytelnymi formułami: {sheets}.',
   appMergeWorkbooks: 'Scal skoroszyty',
   appMergeWorkbooksTip: 'Dodaj arkusze z innych plików Excel do tego skoroszytu',
   appMergeWorkbooksPicking: 'Wybierz pliki do scalenia…',

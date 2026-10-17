@@ -1,6 +1,10 @@
 import type { zh } from './zh'
 
 export const ar = {
+  appWorkbookImportNotice:
+    'تم فتح .{format} كنسخة XLSX دون تغيير الملف الأصلي. لا يتم استيراد التنسيق أو المخططات أو الصور أو وحدات الماكرو أو النطاقات المسماة.',
+  appWorkbookImportFormulaLoss:
+    'الصيغ المحتفظ بها كقيم مخزنة: {formulas}. الأوراق ذات الصيغ غير القابلة للقراءة: {sheets}.',
   appMergeWorkbooks: 'دمج المصنفات',
   appMergeWorkbooksTip: 'إضافة أوراق من ملفات Excel أخرى إلى هذا المصنف',
   appMergeWorkbooksPicking: 'اختر الملفات المراد دمجها…',

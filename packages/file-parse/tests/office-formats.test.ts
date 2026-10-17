@@ -17,6 +17,29 @@ function legacyFixture(name: string): string {
   return fileURLToPath(new URL(`fixtures/${name}`, import.meta.url))
 }
 
+describe('parseFileToText: editor template and show formats', () => {
+  it.each(['dotx', 'xltx', 'ppsx', 'potx'])(
+    'extracts content from .%s for folder search',
+    async (ext) => {
+      const bytes =
+        ext === 'dotx'
+          ? await buildDocxFixture()
+          : ext === 'xltx'
+            ? await buildXlsxFixture()
+            : await buildPptxFixture()
+      const result = await parseFileToText(writeFixture(`editor.${ext}`, bytes))
+      expect(result.ok).toBe(true)
+      expect(result.kind).toBe('text')
+      expect(result.text?.length).toBeGreaterThan(0)
+      const mismatch = await parseFileToText(
+        writeFixture(`fake.${ext}`, buildPdfFixture('wrong format')),
+      )
+      expect(mismatch.ok).toBe(false)
+      expect(mismatch.error).toContain('Content mismatch')
+    },
+  )
+})
+
 describe('parseFileToText: magic-byte sniffing', () => {
   it('rejects a ZIP named .pdf with a content-mismatch error', async () => {
     const zip = new JSZip()

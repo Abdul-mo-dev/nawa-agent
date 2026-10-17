@@ -71,6 +71,8 @@ per-chat model selection, local knowledge and approval-controlled file edits;
 its workspace navigation differs from the upstream screenshots. Provider and
 media features require a configured, supported service or local model.
 
+Editor support also includes Word/Excel templates (`.dotx`, `.xltx`), PowerPoint shows/templates (`.ppsx`, `.potx`), OpenDocument imports (`.odt`, `.odp`) with reviewed chat edits saved as DOCX/PPTX copies, and configuration/source text files. OpenDocument editor imports require LibreOffice. See [the editor format matrix](docs/editor-formats.md) for open, save and import behavior. New OS file associations take effect after a fresh install.
+
 ### 1 · Docs — open and edit `.docx` with an AI you can review
 
 <table>

@@ -8,7 +8,7 @@ class FakeSidecarProcess extends EventEmitter {
   readonly stdout = new PassThrough()
   readonly stderr = new PassThrough()
   readonly killed = false
-  kill(): void {}
+  kill = vi.fn()
 }
 
 function writtenRequests(fake: FakeSidecarProcess): Record<string, unknown>[] {
@@ -103,5 +103,56 @@ describe('XlsxSidecarClient cancel wiring', () => {
     const [cancel] = writtenRequests(fake)
     expect(cancel?.command).toBe('cancel')
     expect(cancel?.targetRequestId).toBe(request!.requestId)
+  })
+
+  it('kills a timed-out conversion process while the workbook process stays usable', async () => {
+    vi.useFakeTimers()
+    const { client, fake } = await clientWithFake()
+    client.start()
+    const conversionProcess = new FakeSidecarProcess()
+    spawnMock.mockReturnValueOnce(conversionProcess)
+    const conversion = client.convertWorkbook({ path: 'input.ods', targetPath: 'copy.xlsx' })
+    const rejected = expect(conversion).rejects.toThrow('timed out')
+    expect(writtenRequests(conversionProcess)[0]?.command).toBe('convert_workbook')
+    await vi.advanceTimersByTimeAsync(120_000)
+    await rejected
+    expect(conversionProcess.kill).toHaveBeenCalledOnce()
+    expect(fake.kill).not.toHaveBeenCalled()
+    const reopened = client.open('existing.xlsx')
+    const [request] = writtenRequests(fake)
+    fake.stdout.write(
+      `${JSON.stringify({ version: 1, requestId: request!.requestId, ok: true, result: { sessionId: 'healthy' } })}\n`,
+    )
+    await expect(reopened).resolves.toEqual({ sessionId: 'healthy' })
+    client.stop()
+  })
+
+  it('stops an active isolated import when its owning client shuts down', async () => {
+    const { client, fake } = await clientWithFake()
+    const conversion = client.convertWorkbook({ path: 'input.xls', targetPath: 'copy.xlsx' })
+    const rejected = expect(conversion).rejects.toThrow('stopped')
+    client.stop()
+    await rejected
+    expect(fake.kill).toHaveBeenCalledOnce()
+  })
+
+  it('serializes imports across clients and cancels a queued import before spawning', async () => {
+    const { client, fake } = await clientWithFake()
+    const { XlsxSidecarClient } = await import('../src/main/xlsx-sidecar-client')
+    const peer = new XlsxSidecarClient('/nonexistent/sidecar')
+    const first = client.convertWorkbook({ path: 'first.ods', targetPath: 'first.xlsx' })
+    const second = peer.convertWorkbook({ path: 'second.ods', targetPath: 'second.xlsx' })
+    const cancelled = expect(second).rejects.toThrow('stopped')
+    expect(spawnMock).toHaveBeenCalledOnce()
+    peer.stop()
+    await cancelled
+    const [request] = writtenRequests(fake)
+    fake.stdout.write(
+      `${JSON.stringify({ version: 1, requestId: request!.requestId, ok: true, result: { sheets: 1 } })}\n`,
+    )
+    await expect(first).resolves.toEqual({ sheets: 1 })
+    expect(spawnMock).toHaveBeenCalledOnce()
+    expect(fake.kill).toHaveBeenCalledOnce()
+    client.stop()
   })
 })

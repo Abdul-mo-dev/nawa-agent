@@ -1,3 +1,4 @@
+import { EDITOR_FILE_EXTENSIONS, EDITOR_FILTER_FAMILIES } from '@genoffice/file-formats'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { DragEvent as ReactDragEvent, ReactElement } from 'react'
 import logoLockup from './assets/nawa-logo.svg'
@@ -55,9 +56,22 @@ const GREET_ASK_KEYS = [
 
 const FILE_ICONS: Record<string, string> = {
   docx: iconDocx,
+  docm: iconDocx,
+  doc: iconDocx,
+  dot: iconDocx,
+  dotx: iconDocx,
   xlsx: iconXlsx,
+  xltx: iconXlsx,
+  xltm: iconXlsx,
+  ods: iconXlsx,
+  xlsb: iconXlsx,
   xlsm: iconXlsx,
   pptx: iconPptx,
+  ppt: iconPptx,
+  pps: iconPptx,
+  pot: iconPptx,
+  ppsx: iconPptx,
+  potx: iconPptx,
   pdf: iconPdf,
   md: iconMd,
   markdown: iconMd,
@@ -68,8 +82,7 @@ const FILE_ICONS: Record<string, string> = {
 /* Formats the open-local card advertises. Too long for the card at any window
    width, so it ellipsizes and a hover ScreenTip carries the full list. Keep in
    sync with the main-process open-dialog filter (OPEN_DIALOG_EXTENSIONS). */
-const OPEN_LOCAL_EXTENSIONS =
-  '.docx / .xlsx / .xlsm / .xls / .csv / .tsv / .pptx / .pdf / .md / .html'
+const OPEN_LOCAL_EXTENSIONS = EDITOR_FILE_EXTENSIONS.map((ext) => `.${ext}`).join(' / ')
 
 /** drag payload of home file/folder rows (JSON array of absolute paths) */
 const DRAG_PATHS_MIME = 'application/x-genoffice-paths'
@@ -169,10 +182,12 @@ function formatSize(bytes: number): string {
 function fileTypeLabel(ext: string): string {
   switch (ext) {
     case 'docx':
+    case 'docm':
     case 'doc':
       return 'Microsoft Word Document'
     case 'xlsx':
     case 'xlsm':
+    case 'xltm':
     case 'xls':
       return 'Microsoft Excel Worksheet'
     case 'csv':
@@ -269,13 +284,7 @@ const FILTERS: { key: string; label: StringKey }[] = [
 ]
 
 /** sidebar filter keys that stand for a family of extensions (mirrors recent-files.ts) */
-const FILTER_FAMILY: Record<string, readonly string[]> = {
-  docx: ['docx', 'doc'],
-  xlsx: ['xlsx', 'xlsm', 'xls', 'csv', 'tsv'],
-  pptx: ['pptx', 'ppt'],
-  md: ['md', 'markdown', 'txt', 'json'],
-  html: ['html', 'htm'],
-}
+const FILTER_FAMILY = EDITOR_FILTER_FAMILIES
 
 function matchesFilter(entry: RecentEntry, filter: string): boolean {
   if (filter === 'all') return true

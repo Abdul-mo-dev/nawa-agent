@@ -4,7 +4,14 @@ import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import JSZip from 'jszip'
-import { openPptx, savePptx, savePptxToFile, commitSaved, addElement } from '../src/index'
+import {
+  openPptx,
+  savePptx,
+  savePptxToFile,
+  commitSaved,
+  discardSave,
+  addElement,
+} from '../src/index'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const fx = (name: string) => readFileSync(join(here, 'fixtures', name))
@@ -14,7 +21,9 @@ describe('savePptxToFile', () => {
   it('writes a package that reopens with the same slides as the in-memory save', async () => {
     const opened = await openPptx(fx('01_standard_business.pptx'))
     const target = out()
-    await savePptxToFile(opened, target)
+    // Bytes on disk are all this test checks; the save is not committed, so
+    // its receipt is discarded (the autosave pattern) rather than leaked.
+    discardSave(opened, await savePptxToFile(opened, target))
 
     const fromDisk = await openPptx(readFileSync(target))
     const fromMemory = await openPptx(
@@ -34,7 +43,7 @@ describe('savePptxToFile', () => {
       paragraphs: [{ runs: [{ text: 'streamed edit', bold: true, fontSize: 28 }] }],
     })
     const target = out()
-    await savePptxToFile(opened, target)
+    discardSave(opened, await savePptxToFile(opened, target))
 
     const reopened = await openPptx(readFileSync(target))
     const xml = reopened.archive.readText(reopened.deck.slides[0]!.path)!
@@ -44,7 +53,7 @@ describe('savePptxToFile', () => {
   it('stores already-compressed media instead of deflating it again', async () => {
     const opened = await openPptx(fx('01_standard_business.pptx'))
     const target = out()
-    await savePptxToFile(opened, target)
+    discardSave(opened, await savePptxToFile(opened, target))
 
     const zip = await JSZip.loadAsync(readFileSync(target))
     const sizes = (name: string) =>
@@ -76,16 +85,15 @@ describe('savePptxToFile', () => {
       offset: { x: 914400, y: 914400, cx: 6096000, cy: 914400 },
       paragraphs: [{ runs: [{ text: 'BEFORE_SNAPSHOT' }] }],
     })
-    // buildZip runs synchronously inside savePptx, so the snapshot is taken
+    // buildZip runs synchronously inside savePptxToFile, so the snapshot is taken
     // before the statement below and the second edit lands after it.
-    const write = savePptx(opened)
+    const write = savePptxToFile(opened, out())
     addElement(slide, {
       kind: 'textbox',
       offset: { x: 914400, y: 2286000, cx: 6096000, cy: 914400 },
       paragraphs: [{ runs: [{ text: 'AFTER_SNAPSHOT' }] }],
     })
-    await write
-    commitSaved(opened)
+    commitSaved(opened, await write)
 
     expect(slide.structureDirty).toBe(true)
 
@@ -98,14 +106,13 @@ describe('savePptxToFile', () => {
   it('commitSaved: a slide first edited during the save is written by the next save', async () => {
     const opened = await openPptx(fx('01_standard_business.pptx'))
     const slide = opened.deck.slides[1]!
-    const write = savePptx(opened)
+    const write = savePptxToFile(opened, out())
     addElement(slide, {
       kind: 'textbox',
       offset: { x: 914400, y: 914400, cx: 6096000, cy: 914400 },
       paragraphs: [{ runs: [{ text: 'SLIDE_CLEAN_AT_SNAPSHOT' }] }],
     })
-    await write
-    commitSaved(opened)
+    commitSaved(opened, await write)
 
     expect(slide.structureDirty).toBe(true)
     const reopened = await openPptx(await savePptx(opened))
@@ -122,8 +129,7 @@ describe('savePptxToFile', () => {
       offset: { x: 914400, y: 914400, cx: 6096000, cy: 914400 },
       paragraphs: [{ runs: [{ text: 'FIRST_CYCLE_EDIT' }] }],
     })
-    await savePptx(opened)
-    commitSaved(opened)
+    commitSaved(opened, await savePptxToFile(opened, out()))
     expect(slide.structureDirty).toBeUndefined()
 
     addElement(slide, {

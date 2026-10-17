@@ -1,6 +1,10 @@
 import type { zh } from './zh'
 
 export const ja = {
+  appWorkbookImportNotice:
+    '.{format} を XLSX のコピーとして開きました。元のファイルは変更されません。書式、グラフ、画像、マクロ、名前付き範囲はインポートされません。',
+  appWorkbookImportFormulaLoss:
+    'キャッシュ値として保持した数式：{formulas}。数式を読み取れなかったシート：{sheets}。',
   appMergeWorkbooks: 'ブックの結合',
   appMergeWorkbooksTip: '他の Excel ファイルのシートをこのブックに追加します',
   appMergeWorkbooksPicking: '結合するファイルを選択…',

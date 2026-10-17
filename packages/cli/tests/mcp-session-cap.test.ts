@@ -12,6 +12,7 @@ describe('mcp http session cap', () => {
   let handle: Awaited<ReturnType<typeof startHttp>>
   const headers = { authorization: `Bearer ${TOKEN}` }
   const clients: Client[] = []
+  const logs: string[] = []
 
   beforeAll(async () => {
     handle = await startHttp({
@@ -20,7 +21,7 @@ describe('mcp http session cap', () => {
       token: TOKEN,
       cwd: mkdtempSync(join(tmpdir(), 'mcp-cap-')),
       env: { ...process.env, GENOFFICE_AUDIT_LOG: 'off', GENOFFICE_ALLOWED_ROOTS: '' },
-      log: () => {},
+      log: (line) => logs.push(line),
     })
   })
 
@@ -31,11 +32,15 @@ describe('mcp http session cap', () => {
 
   const connect = async (): Promise<Client> => {
     const c = new Client({ name: 'cap-test', version: '0' })
-    await c.connect(
-      new StreamableHTTPClientTransport(new URL(`${handle.url}/mcp`), {
-        requestInit: { headers },
-      }),
-    )
+    await c
+      .connect(
+        new StreamableHTTPClientTransport(new URL(`${handle.url}/mcp`), {
+          requestInit: { headers },
+        }),
+      )
+      .catch((cause) => {
+        throw new Error(logs.slice(-4).join('\n'), { cause })
+      })
     clients.push(c)
     return c
   }

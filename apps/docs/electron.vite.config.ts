@@ -34,6 +34,10 @@ const localAlias = {
 // instead of the actual generated-images.ts source file.
 const mainAlias = {
   // ── electron-utils subpath exports ──────────────────────────────────────
+  '@genoffice/electron-utils/legacy-office': resolve(
+    __dirname,
+    '../../packages/electron-utils/src/legacy-office.ts',
+  ),
   '@genoffice/electron-utils/atomic-write': resolve(
     __dirname,
     '../../packages/electron-utils/src/atomic-write.ts',
@@ -104,6 +108,7 @@ export default defineConfig({
     plugins: [
       externalizeDepsPlugin({
         exclude: [
+          '@genoffice/file-formats',
           '@genoffice/docx-engine',
           '@genoffice/electron-utils',
           '@genoffice/font-metrics',
@@ -123,7 +128,7 @@ export default defineConfig({
     // runtime, so the drop-open bridge must be bundled, not externalized.
     plugins: [
       externalizeDepsPlugin({
-        exclude: ['@genoffice/electron-utils'],
+        exclude: ['@genoffice/file-formats', '@genoffice/electron-utils'],
       }),
     ],
     resolve: { alias: mainAlias },

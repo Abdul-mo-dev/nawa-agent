@@ -4,10 +4,18 @@ import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 export default defineConfig({
   // @genoffice/i18n and @genoffice/electron-utils ship as TS source — must be bundled
   main: {
-    plugins: [externalizeDepsPlugin({ exclude: ['@genoffice/i18n', '@genoffice/electron-utils'] })],
+    plugins: [
+      externalizeDepsPlugin({
+        exclude: ['@genoffice/file-formats', '@genoffice/i18n', '@genoffice/electron-utils'],
+      }),
+    ],
   },
   preload: {
-    plugins: [externalizeDepsPlugin({ exclude: ['@genoffice/i18n', '@genoffice/electron-utils'] })],
+    plugins: [
+      externalizeDepsPlugin({
+        exclude: ['@genoffice/file-formats', '@genoffice/i18n', '@genoffice/electron-utils'],
+      }),
+    ],
   },
   renderer: {
     plugins: [react()],

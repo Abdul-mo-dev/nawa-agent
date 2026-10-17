@@ -1,6 +1,10 @@
 import type { zh } from './zh'
 
 export const hi = {
+  appWorkbookImportNotice:
+    '.{format} को XLSX प्रति के रूप में खोला गया। मूल फ़ाइल अपरिवर्तित है। फ़ॉर्मेटिंग, चार्ट, चित्र, मैक्रो और नामित रेंज आयात नहीं होते।',
+  appWorkbookImportFormulaLoss:
+    'कैश किए गए मानों के रूप में रखे गए सूत्र: {formulas}। अपठनीय सूत्रों वाली शीट: {sheets}।',
   appMergeWorkbooks: 'वर्कबुक मर्ज करें',
   appMergeWorkbooksTip: 'अन्य Excel फ़ाइलों की शीट इस वर्कबुक में जोड़ें',
   appMergeWorkbooksPicking: 'मर्ज करने के लिए फ़ाइलें चुनें…',

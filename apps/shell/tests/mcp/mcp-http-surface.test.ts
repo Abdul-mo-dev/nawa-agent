@@ -272,10 +272,14 @@ describe('MCP surface over Streamable HTTP (/mcp)', () => {
       // the format registry's editor truth survives the wire
       expect(infoJson.families.find((f) => f.family === 'xlsx')!.editor.open).toEqual([
         'xlsx',
+        'xltx',
         'xlsm',
+        'xltm',
         'xls',
         'csv',
         'tsv',
+        'ods',
+        'xlsb',
       ])
 
       // ── 3. read_docx error paths ──────────────────────────────────────────

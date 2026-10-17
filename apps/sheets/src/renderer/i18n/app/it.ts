@@ -1,6 +1,10 @@
 import type { zh } from './zh'
 
 export const it = {
+  appWorkbookImportNotice:
+    '.{format} aperto come copia XLSX. L’originale è invariato. Formattazione, grafici, immagini, macro e intervalli denominati non vengono importati.',
+  appWorkbookImportFormulaLoss:
+    'Formule mantenute come valori memorizzati: {formulas}. Fogli con formule illeggibili: {sheets}.',
   appMergeWorkbooks: 'Unisci cartelle di lavoro',
   appMergeWorkbooksTip: 'Aggiungi i fogli di altri file Excel a questa cartella di lavoro',
   appMergeWorkbooksPicking: 'Scegli i file da unire…',

@@ -1,0 +1,36 @@
+{
+  "files": [
+    {
+      "extension": "dotx",
+      "target": "docx",
+      "file": "sample.dotx",
+      "source": "test-files/legacy-office/source/document-sample.docx",
+      "sha256": "77ec1185689f5cc0f15edb1c580f9f14fbff47355ced3cd394a9243fa280b25f",
+      "bytes": 4133
+    },
+    {
+      "extension": "xltx",
+      "target": "xlsx",
+      "file": "sample.xltx",
+      "source": "test-files/spreadsheet-chat/source/binary.xlsx",
+      "sha256": "b9973f97ccd9469417c386c69fc3dfd0a8f4c6fb40cc25d36cd26bcc4731f21d",
+      "bytes": 2362
+    },
+    {
+      "extension": "ppsx",
+      "target": "pptx",
+      "file": "sample.ppsx",
+      "source": "test-files/legacy-office/source/presentation-sample.pptx",
+      "sha256": "33f0c7dc0ca46fcc79cb02a0668a4fc8c610db06fdfe5986f5c6062d10cfa983",
+      "bytes": 27031
+    },
+    {
+      "extension": "potx",
+      "target": "pptx",
+      "file": "sample.potx",
+      "source": "test-files/legacy-office/source/presentation-sample.pptx",
+      "sha256": "3420f2a2d97ef27ebeb1fe54f37e6b8a4a300b01fc793b2b99d09acd2d34b435",
+      "bytes": 27032
+    }
+  ]
+}

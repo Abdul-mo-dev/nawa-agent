@@ -52,7 +52,13 @@ export function actionClaimCorrection(
       named.some(
         (path) =>
           !matching.some((receipt) =>
-            [receipt.path, receipt.destination].some((p) => p && pathKey(p) === pathKey(path)),
+            [
+              receipt.path,
+              receipt.destination,
+              ...(operations.includes('create') && !operations.includes('update')
+                ? [receipt.sourcePath]
+                : []),
+            ].some((p) => p && pathKey(p) === pathKey(path)),
           ),
       )
     )

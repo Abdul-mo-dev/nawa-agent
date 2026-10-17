@@ -596,6 +596,8 @@ fn handle_request(
                 to_json_value(serde_json::json!({
                     "sheets": result.sheets,
                     "cells": result.cells,
+                    "formulasAsValues": result.formulas_as_values,
+                    "formulaReadFailures": result.formula_read_failures,
                 }))
             })
         }

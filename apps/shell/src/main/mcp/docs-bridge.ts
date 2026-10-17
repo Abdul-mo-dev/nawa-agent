@@ -1,5 +1,9 @@
 import { existsSync } from 'node:fs'
 import { ipcMain, webContents } from 'electron'
+import {
+  assertDirectoryStageWrite,
+  directoryStageFor,
+} from '../../../../../packages/electron-utils/src/directory-stage'
 import type { DocsControl, McpEditorCommandName } from './tools/document-tools'
 
 /**
@@ -146,8 +150,12 @@ export interface DocsBridgeDeps {
   abandonBlankTab?: (wcId: number) => void
 }
 
-export function createDocsControl(deps: DocsBridgeDeps): DocsControl {
-  const runCommand = async (
+export interface DirectoryDocsControl extends DocsControl {
+  saveStagedDocm(wcId: number, path: string): Promise<unknown>
+}
+
+export function createDocsControl(deps: DocsBridgeDeps): DirectoryDocsControl {
+  const sendCommand = async (
     wcId: number,
     command: McpEditorCommandName,
     payload: unknown,
@@ -155,15 +163,6 @@ export function createDocsControl(deps: DocsBridgeDeps): DocsControl {
     const wc = webContents.fromId(wcId)
     if (!wc || wc.isDestroyed()) throw new Error('the target document is no longer open')
     await waitForReady(wcId)
-    if (command === 'save_document') {
-      const { path: target, overwrite } = (payload ?? {}) as { path?: unknown; overwrite?: unknown }
-      if (typeof target !== 'string') throw new Error('save_document requires a path')
-      // checked here so the agent gets the reason; the renderer's save only reports success/failure
-      if (existsSync(target) && overwrite !== true) {
-        throw new Error(`file already exists: ${target} (pass overwrite:true to replace it)`)
-      }
-      deps.authorizeSave(wcId, target)
-    }
     const requestId = `mcp-${++requestSeq}`
     const result = new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -175,8 +174,35 @@ export function createDocsControl(deps: DocsBridgeDeps): DocsControl {
     wc.send('docs:mcp-command', { requestId, command, payload })
     return result
   }
+  const runCommand = async (
+    wcId: number,
+    command: McpEditorCommandName,
+    payload: unknown,
+  ): Promise<unknown> => {
+    if (command === 'save_document') {
+      const { path: target, overwrite } = (payload ?? {}) as { path?: unknown; overwrite?: unknown }
+      if (typeof target !== 'string') throw new Error('save_document requires a path')
+      // checked here so the agent gets the reason; the renderer's save only reports success/failure
+      if (existsSync(target) && overwrite !== true) {
+        throw new Error(`file already exists: ${target} (pass overwrite:true to replace it)`)
+      }
+      deps.authorizeSave(wcId, target)
+      // Ordinary agent commands cannot request the private in-place DOCM save.
+      payload = { path: target, overwrite: overwrite === true }
+    }
+    return sendCommand(wcId, command, payload)
+  }
 
   return {
+    saveStagedDocm: async (wcId: number, path: string) => {
+      const wc = webContents.fromId(wcId)
+      if (!wc || wc.isDestroyed()) throw new Error('the target document is no longer open')
+      if (!/\.(?:docm|dotm)$/i.test(path))
+        throw new Error('Only a DOCM or DOTM stage can use in-place save.')
+      if (!directoryStageFor(wc)) throw new Error('An approved directory stage is required.')
+      assertDirectoryStageWrite(wc, path)
+      return sendCommand(wcId, 'save_document', { path, stageInPlace: true })
+    },
     // resolve only once the tab accepts commands, so the agent's first content
     // call never races the renderer boot
     openBlankTab: async () => {

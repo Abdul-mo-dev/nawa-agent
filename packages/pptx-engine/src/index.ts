@@ -6,6 +6,7 @@
  */
 import { stripRedactExt, syncRedactExt } from './redaction-xml'
 import JSZip from 'jszip'
+import { officePackageChanges, OFFICE_PACKAGE_METADATA_LIMIT } from '@genoffice/file-formats'
 import { PackageArchive, relsPathFor, resolveTarget, type Relationship } from './zip'
 import { parseClrMap, parseTheme, type Theme } from './theme'
 import {
@@ -694,18 +695,15 @@ export function reparseDeck(opened: OpenedPptx): OpenedPptx {
  *   even flagged dirty they use original bytes.
  */
 export async function savePptx(opened: OpenedPptx): Promise<Uint8Array> {
-  try {
-    return await buildZip(opened).generateAsync({
-      type: 'uint8array',
-      compression: 'DEFLATE',
-      compressionOptions: { level: 6 },
-    })
-  } catch (err) {
-    // A save that never landed cannot vouch for any edit: drop the snapshot so
-    // a later commitSaved bakes the deck instead of clearing it.
-    saveSnapshot.delete(opened)
-    throw err
-  }
+  // Bytes-only export: no save is registered, so there is nothing to commit.
+  // Callers that land these bytes on disk themselves (generation drafts,
+  // headless export) manage dirty state separately (reopen or an explicit
+  // flush) and stay outside the per-session save lock.
+  return await buildZip(opened).zip.generateAsync({
+    type: 'uint8array',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 6 },
+  })
 }
 
 /**
@@ -718,31 +716,84 @@ export async function savePptx(opened: OpenedPptx): Promise<Uint8Array> {
  * stream's 'error' event — not just the returned promise — has to be handled or the
  * throw escapes as an uncaught exception and takes the process down.
  */
-export async function savePptxToFile(opened: OpenedPptx, filePath: string): Promise<void> {
-  const { createWriteStream } = await import('node:fs')
-  const { pipeline } = await import('node:stream/promises')
-  const source = buildZip(opened).generateNodeStream({
-    type: 'nodebuffer',
-    compression: 'DEFLATE',
-    compressionOptions: { level: 6 },
-    streamFiles: true,
-  })
+export async function savePptxToFile(opened: OpenedPptx, filePath: string): Promise<SaveReceipt> {
+  // The snapshot is taken synchronously on call (before any await), so an
+  // edit made after the call — even before the stream starts — lands after
+  // the snapshot and stays dirty through this save's commit.
+  const { zip, snapshot, formatPath } = buildZip(opened, filePath)
+  const receipt = registerSave(opened, snapshot, formatPath)
   try {
+    const { createWriteStream } = await import('node:fs')
+    const { pipeline } = await import('node:stream/promises')
+    const source = zip.generateNodeStream({
+      type: 'nodebuffer',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 6 },
+      streamFiles: true,
+    })
     await pipeline(source, createWriteStream(filePath))
   } catch (err) {
-    saveSnapshot.delete(opened)
+    // A save that never landed vouches for nothing: discard exactly this
+    // save's receipt so a later commit can never pair with its snapshot.
+    discardSave(opened, receipt)
     throw err
   }
+  return receipt
 }
 
 /**
- * The slide XML each in-flight save pulled into its package, keyed by the
- * opened deck. buildZip records it before the stream starts, and commitSaved
- * clears dirty state only for the slides it matches — a slide that was clean
- * at snapshot time, or whose XML moved afterwards, holds edits the finished
- * write never contained.
+ * One registered disk save: the slide XML its package was built from, plus
+ * the target path's format (for [Content_Types] normalization). Returned by
+ * savePptxToFile; consumed by exactly one commitSaved/discardSave call, so
+ * each finished operation clears only the flags its own bytes carried — never
+ * edits that landed after its snapshot. Receipts are plain values tracked in
+ * a per-deck pending set; commit/discard remove them, so the set cannot grow
+ * without bound.
  */
-const saveSnapshot = new WeakMap<OpenedPptx, Map<string, string>>()
+export interface SaveReceipt {
+  readonly snapshot: Map<string, string>
+  readonly formatPath: string | undefined
+}
+
+const pendingSaves = new WeakMap<OpenedPptx, Set<SaveReceipt>>()
+
+function registerSave(
+  opened: OpenedPptx,
+  snapshot: Map<string, string>,
+  formatPath: string | undefined,
+): SaveReceipt {
+  const receipt: SaveReceipt = { snapshot, formatPath }
+  let pending = pendingSaves.get(opened)
+  if (!pending) {
+    pending = new Set()
+    pendingSaves.set(opened, pending)
+  }
+  pending.add(receipt)
+  return receipt
+}
+
+/**
+ * In-flight (registered but neither committed nor discarded) saves for a
+ * deck. Exposed for tests: after every save settles the count must return to
+ * zero, or a stale snapshot is leaking into future commits.
+ */
+export function pendingSaveCount(opened: OpenedPptx): number {
+  return pendingSaves.get(opened)?.size ?? 0
+}
+
+/**
+ * Drop one in-flight save's receipt without touching dirty state (a save that
+ * never landed, or a recovery-copy write that intentionally keeps the deck
+ * dirty). Unknown/already-consumed receipts are a no-op, so double-discard
+ * after a streamed failure is safe.
+ */
+export function discardSave(opened: OpenedPptx, receipt: SaveReceipt): void {
+  const pending = pendingSaves.get(opened)
+  if (pending) {
+    pending.delete(receipt)
+    if (pending.size === 0) pendingSaves.delete(opened)
+  }
+}
 
 /**
  * Sync the in-memory model with what savePptx/savePptxToFile just wrote, without
@@ -759,10 +810,31 @@ const saveSnapshot = new WeakMap<OpenedPptx, Map<string, string>>()
  * committed while the stream was running stays dirty and lands in the next save.
  * Call only after a successful save; on failure keep the dirty state so the next
  * save retries the patches.
+ *
+ * The receipt ties the commit to the exact operation that finished: pass the
+ * receipt savePptxToFile returned. An unknown or already-consumed receipt is a
+ * no-op (fail dirty, never clear blindly). Omitting the receipt bakes every
+ * dirty slide with no snapshot gate — the legacy flush used by entry-surgery
+ * ops (applyTheme) that run with no save in flight, never by save paths.
  */
-export function commitSaved(opened: OpenedPptx): void {
+export function commitSaved(opened: OpenedPptx, receipt?: SaveReceipt): void {
   const { deck, archive } = opened
-  const snapshot = saveSnapshot.get(opened)
+  let snapshot: Map<string, string> | undefined
+  let formatPath: string | undefined
+  if (receipt) {
+    const pending = pendingSaves.get(opened)
+    if (!pending || !pending.has(receipt)) return
+    pending.delete(receipt)
+    if (pending.size === 0) pendingSaves.delete(opened)
+    snapshot = receipt.snapshot
+    formatPath = receipt.formatPath
+  }
+  if (formatPath) {
+    // Re-plan against live metadata so declarations added during the stream survive.
+    const changes = packageChanges(opened, formatPath)
+    for (const name of changes.removed) archive.entries.delete(name)
+    for (const [name, xml] of changes.replaced) archive.entries.set(name, Buffer.from(xml, 'utf8'))
+  }
   for (const slide of deck.slides) {
     if (!slideIsDirty(slide)) continue
     const xml = patchSlideXml(slide)
@@ -780,7 +852,6 @@ export function commitSaved(opened: OpenedPptx): void {
     delete slide.structureDirty
     archive.entries.set(slide.path, Buffer.from(xml, 'utf8'))
   }
-  saveSnapshot.delete(opened)
 }
 
 /**
@@ -800,17 +871,42 @@ function slideIsDirty(s: Slide): boolean {
   )
 }
 
-function buildZip(opened: OpenedPptx): JSZip {
+function packageChanges(opened: OpenedPptx, filePath: string) {
+  const metadata = new Map<string, string>()
+  for (const [name, data] of opened.archive.entries) {
+    if (name !== '[Content_Types].xml' && !name.endsWith('.rels')) continue
+    if (data.length > OFFICE_PACKAGE_METADATA_LIMIT)
+      throw new Error('Office package metadata exceeds the size limit.')
+    metadata.set(name, new TextDecoder().decode(data))
+  }
+  return officePackageChanges([...opened.archive.entries.keys()], metadata, filePath)
+}
+
+function buildZip(
+  opened: OpenedPptx,
+  filePath?: string,
+): {
+  zip: JSZip
+  snapshot: Map<string, string>
+  formatPath: string | undefined
+} {
   const { deck, archive } = opened
   stripStaleEmbeddedFonts(deck, archive)
   const patched = new Map<string, string>()
+  const changes = filePath
+    ? packageChanges(opened, filePath)
+    : { replaced: new Map<string, string>(), removed: new Set<string>() }
+  for (const [name, xml] of changes.replaced) patched.set(name, xml)
   for (const s of deck.slides) {
     if (slideIsDirty(s)) patched.set(s.path, patchSlideXml(s))
   }
-  saveSnapshot.set(opened, patched)
+  // Pure value: the caller (savePptxToFile) registers the snapshot and gets
+  // back a receipt. No global side effects here, so overlapping builds can
+  // never clobber each other's record.
 
   const zip = new JSZip()
   for (const [path, data] of archive.entries) {
+    if (changes.removed.has(path)) continue
     const xml = patched.get(path)
     if (xml !== undefined) {
       zip.file(path, xml)
@@ -819,7 +915,7 @@ function buildZip(opened: OpenedPptx): JSZip {
     const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase()
     zip.file(path, data, COMPRESSED_EXTENSIONS.has(ext) ? {} : { compression: 'STORE' })
   }
-  return zip
+  return { zip, snapshot: patched, formatPath: filePath }
 }
 
 /**

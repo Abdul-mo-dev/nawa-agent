@@ -8,6 +8,13 @@ import type { AnalyticsReadAction } from '../../shared/analytics-api'
 import { FILE_SEARCH_CHANNEL } from '../../shared/file-search-api'
 import { convertWorkflowFile, reviewWorkflowFile } from './workflow-cli'
 import { reviewFileChanges } from '@genoffice/file-parse'
+import {
+  importLegacyOffice,
+  LegacyOfficeImportError,
+} from '@genoffice/electron-utils/legacy-office'
+import { legacyOfficeMessage, normalizeLang } from '@genoffice/i18n'
+import { importSheetsCopy } from '../../../../sheets/src/main/sheets-main'
+import { WorkbookImportTooLargeError } from '../../../../sheets/src/main/workbook-import'
 import { app, ipcMain, shell, type WebContents } from 'electron'
 import { dirname } from 'node:path'
 import type { AgentToolCall, DirectoryInteractionReply } from '@genoffice/agent-core'
@@ -71,6 +78,41 @@ export function registerDirectoryActionsIpc(options: {
       roots: options.roots,
       stateDirectory: app.getPath('userData'),
       open: openNativeStage,
+      importOffice: async (path) => {
+        try {
+          return (await importLegacyOffice(path)).bytes
+        } catch (cause) {
+          if (cause instanceof LegacyOfficeImportError)
+            throw new Error(legacyOfficeMessage(normalizeLang(app.getLocale()), cause.code), {
+              cause,
+            })
+          throw cause
+        }
+      },
+      importWorkbook: async (path) => {
+        const lang = normalizeLang(app.getLocale())
+        try {
+          const imported = await importSheetsCopy(path)
+          return {
+            bytes: imported.bytes,
+            warnings: [
+              legacyOfficeMessage(lang, 'workbookCopy', { from: imported.format }),
+              ...(['xls', 'ods', 'xlsb'].includes(imported.format)
+                ? [
+                    legacyOfficeMessage(lang, 'workbookImport', {
+                      formulas: imported.formulasAsValues,
+                      sheets: imported.formulaReadFailures,
+                    }),
+                  ]
+                : []),
+            ],
+          }
+        } catch (cause) {
+          if (cause instanceof WorkbookImportTooLargeError)
+            throw new Error(legacyOfficeMessage(lang, 'tooLarge'), { cause })
+          throw cause
+        }
+      },
       blank: nativeBlank,
       assertClosed: assertOriginalClosed,
       trash: (path) => shell.trashItem(path),

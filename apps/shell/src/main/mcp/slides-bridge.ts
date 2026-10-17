@@ -5,6 +5,10 @@ import { elementDurableId, slideDurableId, type SlideElement } from '@genoffice/
 import { applySessionTxn, saveSessionDeckTo } from '../../../../slides/src/main/slides-main'
 import { attachedIds, sessions, type Session } from '../../../../slides/src/main/session-state'
 import type { SlidesControl, SlidesTxnRequest } from './tools/slides-tools'
+import {
+  assertDirectoryStageWrite,
+  directoryStageFor,
+} from '../../../../../packages/electron-utils/src/directory-stage'
 
 /**
  * Shell-main half of the MCP → slides bridge.
@@ -131,8 +135,22 @@ export interface SlidesBridgeDeps {
   abandonBlankTab?: (wcId: number) => void
 }
 
-export function createSlidesControl(deps: SlidesBridgeDeps): SlidesControl {
+export interface SlidesBridgeControl extends SlidesControl {
+  saveStagedMacro(wcId: number, path: string): Promise<{ path: string }>
+}
+
+export function createSlidesControl(deps: SlidesBridgeDeps): SlidesBridgeControl {
   return {
+    saveStagedMacro: async (wcId, path) => {
+      const wc = webContents.fromId(wcId)
+      if (!wc || wc.isDestroyed()) throw new Error('the target presentation is no longer open')
+      if (!/\.(?:pptm|ppsm|potm)$/i.test(path))
+        throw new Error('A macro-enabled presentation stage is required.')
+      if (!directoryStageFor(wc)) throw new Error('An approved directory stage is required.')
+      assertDirectoryStageWrite(wc, path)
+      await saveSessionDeckTo(requireSession(wcId), path)
+      return { path }
+    },
     openBlankTab: async () => {
       const wcId = await deps.openBlankTab()
       try {

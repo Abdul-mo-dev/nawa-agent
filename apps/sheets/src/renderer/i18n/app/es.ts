@@ -1,6 +1,10 @@
 import type { zh } from './zh'
 
 export const es = {
+  appWorkbookImportNotice:
+    'Se abrió .{format} como copia XLSX. El original no cambia. No se importan formatos, gráficos, imágenes, macros ni rangos con nombre.',
+  appWorkbookImportFormulaLoss:
+    'Fórmulas conservadas como valores almacenados: {formulas}. Hojas con fórmulas ilegibles: {sheets}.',
   appMergeWorkbooks: 'Combinar libros',
   appMergeWorkbooksTip: 'Añadir las hojas de otros archivos de Excel a este libro',
   appMergeWorkbooksPicking: 'Elige los archivos para combinar…',

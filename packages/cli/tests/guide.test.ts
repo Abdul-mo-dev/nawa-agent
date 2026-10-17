@@ -91,7 +91,7 @@ describe('op catalogs', () => {
 
   it('builds the docs catalog from the op registry and the tool schemas', async () => {
     const json = await run(['guide', 'docs', '--json'])
-    expect(json.code).toBe(0)
+    expect(json.code, json.stdout + json.stderr).toBe(0)
     const detail = json.json().detail
     expect(detail.groups.map((g: { name: string }) => g.name)).toEqual(['block', 'content'])
     const byName = new Map(detail.ops.map((e: { op: string }) => [e.op, e]))

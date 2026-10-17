@@ -144,9 +144,9 @@ describe('partitionDropPayload', () => {
   })
 
   it('collects known-unsupported extensions uniquely, first-seen order', () => {
-    const result = partitionDropPayload(['old.doc', 'x.pages', 'y.rtf', 'z.doc'])
+    const result = partitionDropPayload(['old.key', 'x.pages', 'y.rtf', 'z.key'])
     expect(result.supported).toEqual([])
-    expect(result.unsupportedExts).toEqual(['doc', 'pages', 'rtf'])
+    expect(result.unsupportedExts).toEqual(['key', 'pages', 'rtf'])
   })
 
   it('caps the number of openable files at 20', () => {
@@ -274,10 +274,10 @@ describe('installDropOpenBridge', () => {
     electronMocks.getPathForFile.mockImplementation((f: { name: string }) => `/tmp/${f.name}`)
     const win = install()
     try {
-      const ev = fileDrag(['legacy.doc'])
+      const ev = fileDrag(['legacy.odt'])
       win.fire('drop', ev)
       await vi.waitFor(() =>
-        expect(electronMocks.send).toHaveBeenCalledWith(DROP_OPEN_CHANNEL, ['/tmp/legacy.doc']),
+        expect(electronMocks.send).toHaveBeenCalledWith(DROP_OPEN_CHANNEL, ['/tmp/legacy.odt']),
       )
     } finally {
       uninstall(win)

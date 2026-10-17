@@ -29,6 +29,114 @@
 const { execFileSync } = require('node:child_process')
 const { existsSync, readFileSync, rmSync, statSync } = require('node:fs')
 const { join } = require('node:path')
+const editorExtensions = require(join(__dirname, '../../packages/file-formats/src/extensions.json'))
+const additionalOfficeAssociations = [
+  ['odt', 'OpenDocument Text', 'docx', 'application/vnd.oasis.opendocument.text'],
+  ['odp', 'OpenDocument Presentation', 'pptx', 'application/vnd.oasis.opendocument.presentation'],
+  ['doc', 'Word 97-2003 Document', 'docx', 'application/msword'],
+  ['dot', 'Word 97-2003 Template', 'docx', 'application/msword'],
+  ['ppt', 'PowerPoint 97-2003 Presentation', 'pptx', 'application/vnd.ms-powerpoint'],
+  ['pps', 'PowerPoint 97-2003 Show', 'pptx', 'application/vnd.ms-powerpoint'],
+  ['pot', 'PowerPoint 97-2003 Template', 'pptx', 'application/vnd.ms-powerpoint'],
+  ['ods', 'OpenDocument Spreadsheet', 'xlsx', 'application/vnd.oasis.opendocument.spreadsheet'],
+  [
+    'xlsb',
+    'Excel Binary Workbook',
+    'xlsx',
+    'application/vnd.ms-excel.sheet.binary.macroEnabled.12',
+  ],
+  [
+    'dotx',
+    'Word Template',
+    'docx',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.template',
+  ],
+  [
+    'dotm',
+    'Word Macro-Enabled Template',
+    'docx',
+    'application/vnd.ms-word.template.macroEnabled.12',
+  ],
+  [
+    'docm',
+    'Word Macro-Enabled Document',
+    'docx',
+    'application/vnd.ms-word.document.macroEnabled.12',
+  ],
+  [
+    'xltx',
+    'Excel Template',
+    'xlsx',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.template',
+  ],
+  [
+    'xltm',
+    'Excel Macro-Enabled Template',
+    'xlsx',
+    'application/vnd.ms-excel.template.macroEnabled.12',
+  ],
+  [
+    'ppsx',
+    'PowerPoint Show',
+    'pptx',
+    'application/vnd.openxmlformats-officedocument.presentationml.slideshow',
+  ],
+  [
+    'ppsm',
+    'PowerPoint Macro-Enabled Show',
+    'pptx',
+    'application/vnd.ms-powerpoint.slideshow.macroEnabled.12',
+  ],
+  [
+    'pptm',
+    'PowerPoint Macro-Enabled Presentation',
+    'pptx',
+    'application/vnd.ms-powerpoint.presentation.macroEnabled.12',
+  ],
+  [
+    'potx',
+    'PowerPoint Template',
+    'pptx',
+    'application/vnd.openxmlformats-officedocument.presentationml.template',
+  ],
+  [
+    'potm',
+    'PowerPoint Macro-Enabled Template',
+    'pptx',
+    'application/vnd.ms-powerpoint.template.macroEnabled.12',
+  ],
+].map(([ext, name, icon, mimeType]) => ({ ext, name, icon, mimeType, role: 'Editor' }))
+function assertFileAssociations() {
+  const seen = new Set()
+  for (const entry of [...additionalOfficeAssociations, ...additionalTextAssociations]) {
+    if (seen.has(entry.ext)) throw new Error(`duplicate file association: ${entry.ext}`)
+    seen.add(entry.ext)
+    for (const iconExt of ['icns', 'ico']) {
+      if (!existsSync(join(__dirname, `build/${entry.icon}.${iconExt}`))) {
+        throw new Error(`file association icon missing: build/${entry.icon}.${iconExt}`)
+      }
+    }
+  }
+}
+const additionalTextAssociations = editorExtensions.markdown
+  .filter((ext) => !['md', 'markdown', 'txt', 'json'].includes(ext))
+  .map((ext) => ({
+    ext,
+    name: `${ext.toUpperCase()} Document`,
+    role: 'Editor',
+    icon: 'txt',
+    mimeType:
+      {
+        xml: 'application/xml',
+        css: 'text/css',
+        js: 'text/javascript',
+        yaml: 'application/yaml',
+        yml: 'application/yaml',
+        toml: 'application/toml',
+        jsonl: 'application/x-ndjson',
+        ndjson: 'application/x-ndjson',
+      }[ext] ?? 'text/plain',
+  }))
 
 function normalizeHttpsBaseUrl(name, value) {
   if (!value || !value.trim()) return null
@@ -520,6 +628,8 @@ const config = {
   // pairs are generated from the shell renderer's file-type tiles by
   // tools/gen-file-association-icons.mjs.
   fileAssociations: [
+    ...additionalOfficeAssociations,
+    ...additionalTextAssociations,
     {
       ext: 'docx',
       name: 'Word Document',
@@ -757,6 +867,7 @@ const config = {
   },
   beforePack: async (context) => {
     ensurePlatformHelpers()
+    assertFileAssociations()
     assertExtraResourceSources()
     ensureThirdPartyNotices()
     assertModuleTreesPresent()

@@ -710,6 +710,7 @@ export function App({
       new URLSearchParams(window.location.search).get('openingWorkbook') === '1',
   )
   const [emptyCsvNotice, setEmptyCsvNotice] = useState(false)
+  const [dismissedImportSessionId, setDismissedImportSessionId] = useState<string | null>(null)
   /// Zoom of the active sheet in percent, echoed by the status-bar slider.
   const [zoomPercent, setZoomPercent] = useState(100)
   const [statusBarFuncs, setStatusBarFuncs] = useState<readonly StatusBarFunc[]>(() =>
@@ -4728,6 +4729,7 @@ export function App({
       return { ...outcome, formulaValues: values }
     },
     saveTo: async (path, overwrite) => handleSave('save-as', true, { path, overwrite }),
+    saveCurrent: async () => handleSave('save', true),
   }
   useEffect(() => {
     const handlers = mcpSheetHandlersRef
@@ -4741,6 +4743,11 @@ export function App({
         (await handlers.current?.applyOps(ops, dryRun)) ?? { ok: false, reason: 'not ready' },
       saveTo: async (path, overwrite) =>
         (await handlers.current?.saveTo(path, overwrite)) ?? {
+          ok: false,
+          error: 'the spreadsheet is not ready',
+        },
+      saveCurrent: async () =>
+        (await handlers.current?.saveCurrent()) ?? {
           ok: false,
           error: 'the spreadsheet is not ready',
         },
@@ -5027,6 +5034,23 @@ export function App({
         formatPainterActive={formatPainterActive}
         statusMessage={openingWorkbook ? t('appOpeningWorkbook') : message}
         emptyCsvNotice={emptyCsvNotice}
+        importNotice={
+          workbookFile?.importInfo && dismissedImportSessionId !== workbookFile.sessionId
+            ? [
+                t('appWorkbookImportNotice', { format: workbookFile.importInfo.format }),
+                ...(workbookFile.importInfo.formulasAsValues ||
+                workbookFile.importInfo.formulaReadFailures
+                  ? [
+                      t('appWorkbookImportFormulaLoss', {
+                        formulas: workbookFile.importInfo.formulasAsValues,
+                        sheets: workbookFile.importInfo.formulaReadFailures,
+                      }),
+                    ]
+                  : []),
+              ].join(' ')
+            : undefined
+        }
+        onDismissImportNotice={() => setDismissedImportSessionId(workbookFile?.sessionId ?? null)}
         onOpenWorkbook={() => void handleInspectWorkbook()}
         onDismissEmptyCsvNotice={() => setEmptyCsvNotice(false)}
         aiBusy={aiBusy}

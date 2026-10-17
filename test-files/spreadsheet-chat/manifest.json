@@ -1,0 +1,35 @@
+{
+  "generatedAt": "2026-10-12T06:06:37.844Z",
+  "files": [
+    {
+      "file": "binary.xls",
+      "extension": "xls",
+      "bytes": 6144,
+      "sha256": "552b6ef6842579f3a8bec544e8fea66cf651b8c5cfc02cac3a159747af0938a2"
+    },
+    {
+      "file": "formulas.ods",
+      "extension": "ods",
+      "bytes": 1050,
+      "sha256": "9115d3f0b334a72d6e75bef38d99dee6845fc4183804ebe70a89160192912051"
+    },
+    {
+      "file": "sheets.xlsb",
+      "extension": "xlsb",
+      "bytes": 14837,
+      "sha256": "ad645571475f1e30875610fc51ad7726d8b7af296850135bc593e15ead0e28c6"
+    },
+    {
+      "file": "table.csv",
+      "extension": "csv",
+      "bytes": 120,
+      "sha256": "9a3ccdd78587ce69dad686570c17b53673084d9b993e63a9727b3e7e1e4c6a2f"
+    },
+    {
+      "file": "table.tsv",
+      "extension": "tsv",
+      "bytes": 196,
+      "sha256": "0bb4931b5e62d30107a6737806155199a1ecf61070cdf040624db887cd771649"
+    }
+  ]
+}

@@ -1,6 +1,10 @@
 import type { zh } from './zh'
 
 export const cs = {
+  appWorkbookImportNotice:
+    '.{format} byl otevřen jako kopie XLSX. Originál se nemění. Formátování, grafy, obrázky, makra a pojmenované oblasti se neimportují.',
+  appWorkbookImportFormulaLoss:
+    'Vzorce zachované jako uložené hodnoty: {formulas}. Listy s nečitelnými vzorci: {sheets}.',
   appMergeWorkbooks: 'Sloučit sešity',
   appMergeWorkbooksTip: 'Připojit listy z jiných souborů Excelu do tohoto sešitu',
   appMergeWorkbooksPicking: 'Vyberte soubory ke sloučení…',

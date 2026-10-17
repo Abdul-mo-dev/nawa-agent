@@ -35,6 +35,8 @@ export const RAG_TEXT_EXTENSIONS = [
   'css',
 ] as const
 export const RAG_OFFICE_EXTENSIONS = [
+  'odt',
+  'odp',
   'docx',
   'docm',
   'dotx',
@@ -44,6 +46,8 @@ export const RAG_OFFICE_EXTENSIONS = [
   'xltx',
   'xltm',
   'pptx',
+  'potx',
+  'potm',
   'pptm',
   'ppsx',
   'ppsm',

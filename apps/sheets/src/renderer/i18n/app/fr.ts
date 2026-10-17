@@ -1,6 +1,10 @@
 import type { zh } from './zh'
 
 export const fr = {
+  appWorkbookImportNotice:
+    'Ouvert .{format} dans une copie XLSX. L’original est inchangé. La mise en forme, les graphiques, images, macros et plages nommées ne sont pas importés.',
+  appWorkbookImportFormulaLoss:
+    'Formules conservées comme valeurs en cache : {formulas}. Feuilles aux formules illisibles : {sheets}.',
   appMergeWorkbooks: 'Fusionner des classeurs',
   appMergeWorkbooksTip: "Ajouter les feuilles d'autres fichiers Excel à ce classeur",
   appMergeWorkbooksPicking: 'Choisissez les fichiers à fusionner…',

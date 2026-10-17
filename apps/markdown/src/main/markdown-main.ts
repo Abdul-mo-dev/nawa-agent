@@ -1,3 +1,5 @@
+import { EDITOR_EXTENSIONS } from '@genoffice/file-formats'
+import { isSourceMode, textModeForPath } from '../shared/text-mode'
 import {
   assertDirectoryStagePicker,
   assertDirectoryStageWrite,
@@ -703,7 +705,7 @@ async function resolveSaveTarget(
   const picked = await showSaveDialogWithMemory(dialog, win, {
     title: tm('dlgSaveTitle'),
     defaultPath,
-    filters: [{ name: tm('filterMarkdown'), extensions: ['md', 'markdown', 'txt', 'json'] }],
+    filters: [{ name: tm('filterMarkdown'), extensions: EDITOR_EXTENSIONS.markdown }],
   })
   if (picked.canceled || !picked.filePath) return 'canceled'
   return picked.filePath
@@ -834,16 +836,19 @@ function registerMarkdownIpc(): void {
         if (!target) return done({ ok: false, error: 'markdown: no save target' })
         const currentPath = pathAtRequest
         const isNewPath = currentPath !== target
-        const imageSources = [...(request.imageSources ?? [])]
+        const sourceMode =
+          isSourceMode(textModeForPath(target)) ||
+          (currentPath !== undefined && isSourceMode(textModeForPath(currentPath)))
+        const imageSources = sourceMode ? [] : [...(request.imageSources ?? [])]
         const knownImageSources = new Set(imageSources)
-        for (const source of extractMarkdownImageSources(request.text)) {
+        for (const source of sourceMode ? [] : extractMarkdownImageSources(request.text)) {
           if (knownImageSources.has(source)) continue
           knownImageSources.add(source)
           imageSources.push(source)
         }
         assertDirectoryStageWrite(e.sender, target)
         const prepared =
-          currentPath && resolve(dirname(currentPath)) !== resolve(dirname(target))
+          !sourceMode && currentPath && resolve(dirname(currentPath)) !== resolve(dirname(target))
             ? await prepareAssetsForSaveAs(currentPath, target, request.text, imageSources)
             : null
         const textToWrite = prepared?.text ?? request.text
@@ -868,20 +873,22 @@ function registerMarkdownIpc(): void {
           : currentPath && resolve(currentPath) === resolve(target)
             ? pendingAtRequest
             : []
-        const reconciled = await reconcileOwnedAssets(target, savedImageSources, { pendingNames })
-        if (reconciled.errors.length > 0) {
-          console.warn('[markdown] asset reconciliation incomplete:', reconciled.errors)
-        }
-        if (mode === 'saveAs' && currentPath && resolve(currentPath) !== resolve(target)) {
-          const sourceResolved = await resolveSourcePendingAfterSaveAs(
-            currentPath,
-            pendingAtRequest,
-          )
-          if (sourceResolved.errors.length > 0) {
-            console.warn(
-              '[markdown] source asset reconciliation incomplete:',
-              sourceResolved.errors,
+        if (!sourceMode) {
+          const reconciled = await reconcileOwnedAssets(target, savedImageSources, { pendingNames })
+          if (reconciled.errors.length > 0) {
+            console.warn('[markdown] asset reconciliation incomplete:', reconciled.errors)
+          }
+          if (mode === 'saveAs' && currentPath && resolve(currentPath) !== resolve(target)) {
+            const sourceResolved = await resolveSourcePendingAfterSaveAs(
+              currentPath,
+              pendingAtRequest,
             )
+            if (sourceResolved.errors.length > 0) {
+              console.warn(
+                '[markdown] source asset reconciliation incomplete:',
+                sourceResolved.errors,
+              )
+            }
           }
         }
         if (isNewPath) fileSavedHook?.(e.sender, target)

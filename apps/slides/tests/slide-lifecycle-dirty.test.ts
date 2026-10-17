@@ -1,6 +1,6 @@
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
+import { copyFile, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   configureDirectoryStage,
@@ -8,6 +8,7 @@ import {
 } from '../../../packages/electron-utils/src/directory-stage'
 
 const handlers = new Map<string, (...args: never[]) => unknown>()
+const saveChoice = vi.hoisted(() => ({ path: '' }))
 
 vi.mock('electron', () => ({
   app: {
@@ -16,7 +17,10 @@ vi.mock('electron', () => ({
     getVersion: () => '0',
     whenReady: () => Promise.resolve(),
   },
-  dialog: {},
+  dialog: {
+    showSaveDialog: vi.fn(async () => ({ canceled: !saveChoice.path, filePath: saveChoice.path })),
+    showMessageBox: vi.fn(async () => ({ response: 0 })),
+  },
   safeStorage: { isEncryptionAvailable: () => false },
   clipboard: { writeBuffer: () => {} },
   ipcMain: {
@@ -24,7 +28,14 @@ vi.mock('electron', () => ({
     on: () => {},
     removeHandler: () => {},
   },
-  BrowserWindow: class {},
+  BrowserWindow: class {
+    static getFocusedWindow() {
+      return null
+    }
+    static fromWebContents() {
+      return null
+    }
+  },
   webContents: { getAllWebContents: () => [], fromId: () => null },
   Menu: { buildFromTemplate: () => ({}), setApplicationMenu: () => {} },
   session: {
@@ -46,10 +57,29 @@ vi.mock('../src/main/shaped-metrics', () => ({
   shapedFamily: () => null,
   shapedMeasure: () => ({ width: 0 }),
 }))
+// Mock the LibreOffice converter so CI covers the legacy dirty/save-blocked path
+// without requiring an installed LibreOffice.
+vi.mock('@genoffice/electron-utils/legacy-office', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@genoffice/electron-utils/legacy-office')>()
+  return {
+    ...actual,
+    findLibreOffice: async () => '/mock/soffice',
+    importLegacyOffice: async (sourcePath: string) => {
+      const { createBlankPptx } = await import('@genoffice/pptx-engine')
+      const extension = sourcePath.split('.').pop()?.toLowerCase() ?? 'ppt'
+      return {
+        bytes: Buffer.from(await createBlankPptx()),
+        extension,
+        suggestSaveAs: sourcePath.replace(/\.[^.]+$/, '.pptx'),
+      }
+    },
+  }
+})
 
 import { createBlankPptx, openPptx } from '@genoffice/pptx-engine'
 import { registerSlidesIpc, slidesIsDirty } from '../src/main/slides-main'
 import { sessions, type Session } from '../src/main/session-state'
+import { dialog } from 'electron'
 
 const WC = 1
 const FIT = 1280
@@ -74,6 +104,7 @@ beforeAll(() => {
 })
 
 beforeEach(async () => {
+  saveChoice.path = ''
   sessions.clear()
   session = {
     path: '',
@@ -83,6 +114,84 @@ beforeEach(async () => {
     opened: await openPptx(await createBlankPptx()),
   }
   sessions.set(WC, session)
+})
+
+describe('legacy presentation import and first save', () => {
+  it.each(['ppt', 'pps', 'pot'])(
+    'opens .%s, edits, cancels, then saves a modern copy',
+    async (extension) => {
+      const root = await mkdtemp(join(tmpdir(), 'nawa-slides-legacy-'))
+      const source = join(root, `source.${extension}`)
+      const contents = { id: WC, isDestroyed: () => false, send: vi.fn() }
+      const invoke = (channel: string, ...args: unknown[]) => {
+        const handler = handlers.get(channel) as (...args: unknown[]) => unknown
+        return handler({ sender: contents }, ...args)
+      }
+      try {
+        const fixture =
+          extension === 'ppt'
+            ? resolve(
+                import.meta.dirname,
+                '../../../packages/file-parse/tests/fixtures/legacy-sample.ppt',
+              )
+            : resolve(
+                import.meta.dirname,
+                '../../../packages/electron-utils/tests/fixtures/legacy-office',
+                `legacy-sample.${extension}`,
+              )
+        await copyFile(fixture, source)
+        const original = await readFile(source)
+        const opened = (await invoke('slides:open-path', source, FIT)) as {
+          path: string
+          importedFrom: string
+          slides: unknown[]
+        }
+        expect(opened.path).toBe(source)
+        expect(opened.importedFrom).toBe(extension)
+        expect(opened.slides.length).toBeGreaterThan(0)
+        session = sessions.get(WC)!
+        const initialCount = session.opened.deck.slides.length
+        invoke('slides:add-blank-slide', { sourceIndex: 0, before: false, fitWidthPx: FIT })
+        expect(dirty()).toBe(true)
+        await expect(invoke('slides:save')).resolves.toMatchObject({ ok: false })
+        expect(session.path).toBe(source)
+        expect(dirty()).toBe(true)
+        expect(await readFile(source)).toEqual(original)
+        const options = vi.mocked(dialog.showSaveDialog).mock.calls.at(-1)![0] as {
+          defaultPath: string
+          filters: { extensions: string[] }[]
+        }
+        expect(options.defaultPath).toBe(join(root, 'source.pptx'))
+        expect(options.filters[0].extensions).toEqual([
+          'pptx',
+          'ppsx',
+          'potx',
+          'pptm',
+          'ppsm',
+          'potm',
+        ])
+        saveChoice.path = source
+        await expect(invoke('slides:save')).resolves.toMatchObject({
+          ok: false,
+          error: expect.stringContaining('Save as'),
+        })
+        expect(await readFile(source)).toEqual(original)
+        saveChoice.path = join(root, 'edited.pptx')
+        await expect(invoke('slides:save')).resolves.toMatchObject({
+          ok: true,
+          path: saveChoice.path,
+        })
+        expect(dirty()).toBe(false)
+        const reopened = await openPptx(await readFile(saveChoice.path))
+        expect(reopened.deck.slides.length).toBe(initialCount + 1)
+        expect(await readFile(source)).toEqual(original)
+      } finally {
+        sessions.clear()
+        await rm(root, { recursive: true, force: true })
+      }
+    },
+    120_000,
+  )
 })
 
 function firstLayoutPath(): string {

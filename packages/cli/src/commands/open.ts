@@ -128,7 +128,7 @@ export function parseTarget(args: ParsedArgs, path: string): ControlTarget | und
     }
     return n
   }
-  if (/^\.ppt[xm]$|^\.ppsx$|^\.potx$/.test(ext)) {
+  if (/^\.(?:ppt[xm]|pps[xm]|pot[xm])$/.test(ext)) {
     expect(['slide', 'el'], 'presentation')
     if (args.flags.slide === undefined) {
       throw new CliError(EXIT.usage, '--el needs --slide', undefined, {
@@ -138,7 +138,7 @@ export function parseTarget(args: ParsedArgs, path: string): ControlTarget | und
     const el = flagString(args, 'el')
     return { kind: 'slide', slide: int('slide', 0), ...(el ? { el } : {}) }
   }
-  if (ext === '.docx' || ext === '.docm' || ext === '.dotx') {
+  if (/^\.(?:doc[xm]|dot[xm])$/.test(ext)) {
     expect(['block'], 'Word document')
     return { kind: 'block', block: int('block', 0) }
   }

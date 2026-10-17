@@ -9,3 +9,5 @@ export { parseFileToRag, type RagBlock, type RagDocument, type RagOcrOptions } f
 
 export { reviewFileChanges } from './review'
 export type { FileReview, FileReviewEntry } from './review'
+
+export { RAG_OFFICE_EXTENSIONS } from './formats'

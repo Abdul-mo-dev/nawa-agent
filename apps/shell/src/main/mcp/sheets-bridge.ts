@@ -1,5 +1,9 @@
 import { existsSync } from 'node:fs'
 import { ipcMain, webContents } from 'electron'
+import {
+  assertDirectoryStageWrite,
+  directoryStageFor,
+} from '../../../../../packages/electron-utils/src/directory-stage'
 import type { SheetsControl } from './tools/sheets-tools'
 
 /**
@@ -153,8 +157,12 @@ export interface SheetsBridgeDeps {
   abandonBlankTab?: (wcId: number) => void
 }
 
-export function createSheetsControl(deps: SheetsBridgeDeps): SheetsControl {
-  const runCommand = async (
+export interface DirectorySheetsControl extends SheetsControl {
+  saveStagedXlsm(wcId: number, path: string): Promise<unknown>
+}
+
+export function createSheetsControl(deps: SheetsBridgeDeps): DirectorySheetsControl {
+  const sendCommand = async (
     wcId: number,
     command: 'apply_ops' | 'read_sheet' | 'save_sheet',
     payload: unknown,
@@ -162,6 +170,22 @@ export function createSheetsControl(deps: SheetsBridgeDeps): SheetsControl {
     const wc = webContents.fromId(wcId)
     if (!wc || wc.isDestroyed()) throw new Error('the target spreadsheet is no longer open')
     await waitForReady(wcId)
+    const requestId = `mcp-${++requestSeq}`
+    const result = new Promise<unknown>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pending.delete(requestId)
+        reject(new Error(`the spreadsheet command timed out after ${COMMAND_TIMEOUT_MS}ms`))
+      }, COMMAND_TIMEOUT_MS)
+      pending.set(requestId, { wcId, resolve, reject, timer })
+    })
+    wc.send('sheets:mcp-command', { requestId, command, payload })
+    return result
+  }
+  const runCommand = async (
+    wcId: number,
+    command: 'apply_ops' | 'read_sheet' | 'save_sheet',
+    payload: unknown,
+  ): Promise<unknown> => {
     if (command === 'save_sheet') {
       const { path: requested, overwrite } = (payload ?? {}) as {
         path?: unknown
@@ -174,20 +198,22 @@ export function createSheetsControl(deps: SheetsBridgeDeps): SheetsControl {
         throw new Error(`file already exists: ${target} (pass overwrite:true to replace it)`)
       }
       deps.authorizeSave(wcId, target)
+      // External agent saves have the normal XLSX-only contract. The private
+      // XLSM stage uses saveStagedXlsm below and cannot be requested here.
+      payload = { path: requested, overwrite: overwrite === true }
     }
-    const requestId = `mcp-${++requestSeq}`
-    const result = new Promise<unknown>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        pending.delete(requestId)
-        reject(new Error(`the spreadsheet command timed out after ${COMMAND_TIMEOUT_MS}ms`))
-      }, COMMAND_TIMEOUT_MS)
-      pending.set(requestId, { wcId, resolve, reject, timer })
-    })
-    wc.send('sheets:mcp-command', { requestId, command, payload })
-    return result
+    return sendCommand(wcId, command, payload)
   }
 
   return {
+    saveStagedXlsm: async (wcId: number, path: string) => {
+      const wc = webContents.fromId(wcId)
+      if (!wc || wc.isDestroyed()) throw new Error('the target spreadsheet is no longer open')
+      if (!/\.xlsm$/i.test(path)) throw new Error('Only an XLSM stage can use in-place save.')
+      if (!directoryStageFor(wc)) throw new Error('An approved directory stage is required.')
+      assertDirectoryStageWrite(wc, path)
+      return sendCommand(wcId, 'save_sheet', { path, stageInPlace: true })
+    },
     openBlankTab: async () => {
       const wcId = await deps.openBlankTab()
       try {

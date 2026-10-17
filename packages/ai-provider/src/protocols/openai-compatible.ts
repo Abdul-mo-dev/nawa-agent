@@ -19,6 +19,34 @@ import {
   type StreamCallbacks,
 } from './shared'
 
+/** Local templates need scalar type names. Equivalent anyOf branches retain null support. */
+export function simplifyUnionTypeArrays<T>(schema: T): T {
+  const clone = structuredClone(schema)
+  const walk = (node: unknown): unknown => {
+    if (Array.isArray(node)) {
+      for (let i = 0; i < node.length; i++) node[i] = walk(node[i])
+      return node
+    }
+    if (typeof node === 'object' && node !== null) {
+      const record = node as Record<string, unknown>
+      if (Array.isArray(record.type) && record.type.length > 0) {
+        const alternatives = record.type.map((type) => ({ type }))
+        delete record.type
+        if (record.anyOf) {
+          const existing = Array.isArray(record.allOf) ? record.allOf : []
+          record.allOf = [...existing, { anyOf: alternatives }]
+        } else record.anyOf = alternatives
+      }
+      for (const key of Object.keys(record)) {
+        record[key] = walk(record[key])
+      }
+      return record
+    }
+    return node
+  }
+  return walk(clone) as T
+}
+
 export function openAiMessages(
   system: string,
   messages: AgentMessage[],

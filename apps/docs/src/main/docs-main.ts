@@ -1,4 +1,17 @@
 import {
+  EDITOR_EXTENSIONS,
+  EDITOR_SAVE_EXTENSIONS,
+  editorSavePath,
+  extensionPattern,
+  officeImportTarget,
+  modernOfficePath,
+} from '@genoffice/file-formats'
+import {
+  importLegacyOffice,
+  LegacyOfficeImportError,
+} from '@genoffice/electron-utils/legacy-office'
+import { normalizeDocxFormat } from '@genoffice/docx-engine/zip-splice'
+import {
   assertDirectoryStagePicker,
   assertDirectoryStageWrite,
 } from '../../../../packages/electron-utils/src/directory-stage'
@@ -34,7 +47,7 @@ import {
   writeFile,
 } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, dirname, extname, isAbsolute, join } from 'node:path'
+import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
   BrowserWindow,
@@ -82,7 +95,13 @@ import {
   writeJsonAtomic,
 } from '@genoffice/electron-utils'
 import { configureMetricsCache, familyVerticalMetrics } from '@genoffice/font-metrics'
-import { createI18n, getUiLang, normalizeLang, setUiLang } from '@genoffice/i18n'
+import {
+  createI18n,
+  getUiLang,
+  normalizeLang,
+  setUiLang,
+  legacyOfficeMessage,
+} from '@genoffice/i18n'
 import { ProjectStore } from '@genoffice/project-store'
 import type {
   IpcMainInvokeEvent,
@@ -91,7 +110,7 @@ import type {
   SaveDialogOptions,
   WebContents,
 } from 'electron'
-import { parseFileToText } from '@genoffice/file-parse'
+import { parseFileToText, RAG_OFFICE_EXTENSIONS } from '@genoffice/file-parse'
 import { convertHtmlToDocx } from '../../../../packages/html2docx/src'
 import { ElectronBrowserDriver } from '../../../../packages/html2docx/src/drivers/electron'
 import {
@@ -3130,7 +3149,7 @@ async function opensAsPasswordPrompt(filePath: string, wcId: number): Promise<bo
 }
 
 export function openExternalDocx(filePath: string | null): void {
-  if (!filePath || !/\.docx$/i.test(filePath)) return
+  if (!filePath || !extensionPattern(EDITOR_EXTENSIONS.docs).test(filePath)) return
   const win = BrowserWindow.getFocusedWindow() ?? mainWindow
   if (!rendererReady || !win) {
     pendingOpenPath = filePath
@@ -3569,21 +3588,44 @@ async function loadDocx(
 ): Promise<OpenDocxResult> {
   const contents = webContents.fromId(wcId)
   const staged = !!contents && !!directoryStageFor(contents)
-  if (typeof filePath !== 'string' || !/\.docx$/i.test(filePath)) return null
+  if (typeof filePath !== 'string' || !extensionPattern(EDITOR_EXTENSIONS.docs).test(filePath))
+    return null
   if (!existsSync(filePath)) return null
   const size = (await stat(filePath)).size
-  const lazy = await openLazyDocx(filePath, wcId)
+  if (tornDownWcIds.has(wcId) || contents?.isDestroyed()) return null
+  let imported
+  if (officeImportTarget(filePath) === 'docx') {
+    try {
+      imported = await importLegacyOffice(resolve(filePath), {
+        tempRoot: app.getPath('temp'),
+        signal: tornDownWcIds.has(wcId) ? AbortSignal.abort() : undefined,
+      })
+    } catch (error) {
+      await showOpenError(
+        wcId,
+        legacyOfficeMessage(
+          getUiLang(),
+          error instanceof LegacyOfficeImportError ? error.code : 'failed',
+        ),
+      )
+      return null
+    }
+    if (tornDownWcIds.has(wcId) || contents?.isDestroyed()) return null
+  }
+  const lazy = imported ? null : await openLazyDocx(filePath, wcId)
   if ((lazy?.bytes.length ?? size) > MAX_OPEN_BYTES) {
     const mb = MAX_OPEN_BYTES / 1024 / 1024
     await showOpenError(wcId, `${basename(filePath)}: ${tm('errTooLarge', { mb })}`)
     return null
   }
-  const original = lazy?.bytes ?? (await readFile(filePath))
+  // For imports the converter hashed its private snapshot; re-reading the live
+  // path here would baseline content the converted view was not built from.
+  const original = lazy?.bytes ?? (imported ? Buffer.alloc(0) : await readFile(filePath))
   // Password-protected docx (ECMA-376 CFB container): without a password, hand
   // back a marker — the renderer prompts and retries via docs:open-decrypt.
   // No side effects (recents/write grant) until the password checks out.
-  let plainBytes: Buffer = original
-  const encrypted = isEncryptedDocx(original)
+  let plainBytes: Buffer = imported?.bytes ?? original
+  const encrypted = !imported && isEncryptedDocx(original)
   if (encrypted) {
     const pwd = password ?? docPasswordFor(wcId, filePath)
     if (!pwd) return { needsPassword: true, path: filePath, name: basename(filePath) }
@@ -3594,8 +3636,8 @@ async function loadDocx(
   }
   // the archive keeps the on-disk original as-is (encrypted ones included: they
   // reopen with the user's password), so a bad save never loses the source file
-  const hash = lazy?.hash ?? sha256Hex(original)
-  if (!staged) await archiveOriginal(filePath, hash, size)
+  const hash = imported?.sourceHash ?? lazy?.hash ?? sha256Hex(original)
+  if (!staged && !imported) await archiveOriginal(filePath, hash, size)
   const recovery = staged
     ? { bytes: plainBytes, recovered: false }
     : await maybeRecoverDocBytes(filePath, plainBytes)
@@ -3625,6 +3667,7 @@ async function loadDocx(
     dataUrl: handOffBytes(bytes),
     hash,
     encrypted,
+    ...(imported ? { importedFrom: imported.extension } : {}),
     recovered: recovered || undefined,
   }
 }
@@ -3674,8 +3717,10 @@ const TEXT_EXTS = new Set([
 /** office/pdf formats get text extracted via @genoffice/file-parse; images skip extraction and go multimodal (files:read-image) */
 const ATTACHMENT_EXTS = new Set([
   ...TEXT_EXTS,
+  ...RAG_OFFICE_EXTENSIONS,
   'doc',
   'docx',
+  'docm',
   'pdf',
   'pptx',
   'ppt',
@@ -4425,7 +4470,7 @@ export function registerDocsIpc(): void {
   ipcMain.handle('docs:open', async (event) => {
     const result = await openDialog(event, {
       title: tm('dlgOpenDoc'),
-      filters: [{ name: tm('filterWord'), extensions: ['docx'] }],
+      filters: [{ name: tm('filterWord'), extensions: EDITOR_EXTENSIONS.docs }],
       properties: ['openFile'],
     })
     if (result.canceled || result.filePaths.length === 0) return null
@@ -4595,6 +4640,8 @@ export function registerDocsIpc(): void {
         if (typeof filePath !== 'string' || !canDocWrite(event.sender.id, filePath)) {
           return { ok: false, error: 'save target is not an opened document' }
         }
+        if (officeImportTarget(filePath))
+          return { ok: false, error: 'Save the imported copy as .docx or .dotx.' }
         if (await diskChangedExternally(event.sender.id, filePath)) {
           if (directoryStageFor(event.sender)) {
             return { ok: false, reason: 'external-modified' }
@@ -4627,7 +4674,8 @@ export function registerDocsIpc(): void {
         // Snapshot desired state: the disk password remains unchanged until the
         // atomic write succeeds, and a newer ribbon intent survives this save.
         const passwordState = snapshotDocPassword(event.sender.id, filePath)
-        const { bytes: plain, hashes } = await materializeLazyDocx(Buffer.from(data))
+        const { bytes: materialized, hashes } = await materializeLazyDocx(Buffer.from(data))
+        const plain = await normalizeDocxFormat(materialized, filePath)
         const bytes = passwordState.password ? encryptDocx(plain, passwordState.password) : plain
         assertDirectoryStageWrite(event.sender, filePath)
         await atomicWriteFile(filePath, bytes)
@@ -4830,24 +4878,55 @@ export function registerDocsIpc(): void {
       const result = await saveDialog(event, {
         title: tm('dlgSaveAs'),
         defaultPath: saveAsSuggestion(
-          typeof sourcePath === 'string' ? sourcePath : null,
-          defaultName,
+          typeof sourcePath === 'string' ? modernOfficePath(sourcePath) : null,
+          modernOfficePath(defaultName),
         ),
-        filters: [{ name: tm('filterWord'), extensions: ['docx'] }],
+        filters: [
+          {
+            name: tm('filterWord'),
+            extensions: /\.docm$/i.test(sourcePath ?? '')
+              ? ['docm']
+              : /\.dotm$/i.test(sourcePath ?? '')
+                ? ['dotm']
+                : EDITOR_SAVE_EXTENSIONS.docs,
+          },
+        ],
       })
       if (result.canceled || !result.filePath) return { ok: false }
       // the tab may have been closed while the dialog was open; checked before the
       // write because Save As may overwrite an existing file (no safe rollback)
       if (tornDownWcIds.has(event.sender.id)) return { ok: false }
       try {
+        result.filePath = editorSavePath(
+          result.filePath,
+          /\.docm$/i.test(sourcePath ?? '')
+            ? ['docm']
+            : /\.dotm$/i.test(sourcePath ?? '')
+              ? ['dotm']
+              : EDITOR_SAVE_EXTENSIONS.docs,
+          /\.docm$/i.test(sourcePath ?? '')
+            ? 'docm'
+            : /\.dotm$/i.test(sourcePath ?? '')
+              ? 'dotm'
+              : /\.dotx$/i.test(sourcePath ?? '')
+                ? 'dotx'
+                : 'docx',
+        )
         const passwordState = snapshotDocPassword(
           event.sender.id,
           typeof sourcePath === 'string' && sourcePath ? sourcePath : null,
         )
-        const { bytes: plain, hashes } = await materializeLazyDocx(Buffer.from(data))
+        const { bytes: materialized, hashes } = await materializeLazyDocx(Buffer.from(data))
+        const plain = await normalizeDocxFormat(materialized, result.filePath)
         const bytes = passwordState.password ? encryptDocx(plain, passwordState.password) : plain
         await atomicWriteFile(result.filePath, bytes)
         if (tornDownWcIds.has(event.sender.id)) return { ok: false }
+        if (
+          sourcePath &&
+          officeImportTarget(sourcePath) &&
+          canDocWrite(event.sender.id, sourcePath)
+        )
+          clearRecoveryCopy(sourcePath)
         allowDocWrite(event.sender.id, result.filePath)
         rememberOpenDoc(event.sender.id, result.filePath)
         await rememberDiskState(event.sender.id, result.filePath, sha256Hex(bytes))
@@ -4886,9 +4965,13 @@ export function registerDocsIpc(): void {
       // a discarded draft in an orphaned renderer must not silently persist
       // itself to the default folder after the user chose Don't Save
       if (tornDownWcIds.has(event.sender.id)) return { ok: false }
-      const filePath = uniquePathIn(defaultSaveDir(), defaultName)
+      const filePath = uniquePathIn(
+        defaultSaveDir(),
+        editorSavePath(defaultName, EDITOR_SAVE_EXTENSIONS.docs, 'docx'),
+      )
       const passwordState = snapshotDocPassword(event.sender.id, null)
-      const { bytes: plain, hashes } = await materializeLazyDocx(Buffer.from(data))
+      const { bytes: materialized, hashes } = await materializeLazyDocx(Buffer.from(data))
+      const plain = await normalizeDocxFormat(materialized, filePath)
       const bytes = passwordState.password ? encryptDocx(plain, passwordState.password) : plain
       await atomicWriteFile(filePath, bytes)
       // teardown may have happened while the write was in flight — the path is
@@ -4961,7 +5044,8 @@ export function registerDocsIpc(): void {
         }
         await mkdir(dirname(filePath), { recursive: true })
         const passwordState = snapshotDocPassword(event.sender.id, null)
-        const { bytes: plain, hashes } = await materializeLazyDocx(Buffer.from(data))
+        const { bytes: materialized, hashes } = await materializeLazyDocx(Buffer.from(data))
+        const plain = await normalizeDocxFormat(materialized, filePath)
         const bytes = passwordState.password ? encryptDocx(plain, passwordState.password) : plain
         assertDirectoryStageWrite(event.sender, filePath)
         await atomicWriteFile(filePath, bytes)
@@ -5208,7 +5292,7 @@ export function registerDocsIpc(): void {
       if (!filePath) {
         const result = await saveDialog(event, {
           title: tm('dlgExportPdf'),
-          defaultPath: defaultName.replace(/\.docx$/i, '') + '.pdf',
+          defaultPath: defaultName.replace(/\.(docx|docm|dotx)$/i, '') + '.pdf',
           filters: [{ name: 'PDF', extensions: ['pdf'] }],
         })
         if (result.canceled || !result.filePath) return { ok: false }
@@ -5320,7 +5404,7 @@ export function registerDocsIpc(): void {
       if (!filePath) {
         const result = await saveDialog(event, {
           title: tm('dlgExportHtml'),
-          defaultPath: defaultName.replace(/\.docx$/i, '') + '.html',
+          defaultPath: defaultName.replace(/\.(docx|docm|dotx)$/i, '') + '.html',
           filters: [{ name: 'HTML', extensions: ['html'] }],
         })
         if (result.canceled || !result.filePath) return { ok: false }
@@ -5379,7 +5463,7 @@ export function registerDocsIpc(): void {
       if (!filePath) {
         const result = await saveDialog(event, {
           title: tm('dlgExportPdf'),
-          defaultPath: defaultName.replace(/\.docx$/i, '') + '.pdf',
+          defaultPath: defaultName.replace(/\.(docx|docm|dotx)$/i, '') + '.pdf',
           filters: [{ name: 'PDF', extensions: ['pdf'] }],
         })
         if (result.canceled || !result.filePath) return { ok: false }

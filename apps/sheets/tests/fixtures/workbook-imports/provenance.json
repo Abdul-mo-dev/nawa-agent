@@ -1,0 +1,17 @@
+{
+  "repository": "https://github.com/tafia/calamine",
+  "commit": "0af05f4f6030351e3b8a999ea0810c8618368776",
+  "license": "MIT",
+  "files": [
+    {
+      "name": "any_sheets.xlsb",
+      "url": "https://raw.githubusercontent.com/tafia/calamine/0af05f4f6030351e3b8a999ea0810c8618368776/tests/any_sheets.xlsb",
+      "sha256": "ad645571475f1e30875610fc51ad7726d8b7af296850135bc593e15ead0e28c6"
+    },
+    {
+      "name": "date_1904.xlsb",
+      "url": "https://raw.githubusercontent.com/tafia/calamine/0af05f4f6030351e3b8a999ea0810c8618368776/tests/date_1904.xlsb",
+      "sha256": "afc2478a94822c624c44291c8455c172d6d45cc7828849f0168950b9230cb7d8"
+    }
+  ]
+}

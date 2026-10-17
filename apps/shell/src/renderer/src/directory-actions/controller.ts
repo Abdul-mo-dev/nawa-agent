@@ -542,8 +542,12 @@ export class DirectoryActionClient {
         (result) =>
           !result.status &&
           result.proposalHash === proposalHash &&
-          result.operation === request.operation &&
-          pathKey(result.path) === pathKey(request.path) &&
+          (result.sourcePath
+            ? request.operation === 'update' &&
+              result.operation === 'create' &&
+              pathKey(result.sourcePath) === pathKey(request.path)
+            : result.operation === request.operation &&
+              pathKey(result.path) === pathKey(request.path)) &&
           pathKey(result.destination ?? '') === pathKey(request.destination ?? ''),
       )
     if (earlier)
@@ -562,7 +566,7 @@ export class DirectoryActionClient {
     try {
       const run = await this.run()
       this.check()
-      const rejectionKey = `${request.operation}:${request.path.toLowerCase()}`
+      const rejectionKey = `${request.operation}:${pathKey(request.path)}`
       if (this.rejectedActions.has(rejectionKey))
         return JSON.stringify({
           status: 'declined',
@@ -779,13 +783,13 @@ export function directoryMutationSkill(
   return {
     id: 'approved-directory-files',
     systemPrompt:
-      'Use rename_file, move_file, copy_file, create_folder and delete_folder for filesystem operations; they need one explicit user review and do not open a native editor. Never emulate copying with generated content. Renaming changes the name, not the document format. Folder deletion requires an explicitly selected folder and approval of its inventoried contents; it never grants content-read permission. Normal deletion uses the Recycle Bin. Use permanently_delete_file or delete_folder permanent=true only when the user explicitly requests permanent deletion; the user must type the exact target name and no backup is made. Destinations must be opened or selected folders; no overwriting or implicit folder selection. Case-only renames are unsupported. Report partial outcomes and warnings accurately; never claim a partial move or deletion completed. You can propose document edits with update_file and new documents with create_file. These use a private copy in the native editor, with preparation approval and separate save approval. delete_file has one Recycle Bin approval. Files must be individually selected. Never say an action completed unless its tool returns status=committed. Respect rejection; do not retry a rejected action in this turn. Local document writing, deck generation, HTML briefs and workbook merging reuse native workflows. Use convert_file for format conversion, never reconstruct converted documents from text. validate_file runs native checks without changing a file. Request renderPreview=true for a first-page screenshot in save review. Supply individually selected references via sources. Request network=true only for needed external research/downloads; media=true additionally requests external media processing. These permissions appear in the user approval. Never promise services before approval or successful execution.',
+      'Use rename_file, move_file, copy_file, create_folder and delete_folder for filesystem operations; they need one explicit user review and do not open a native editor. Never emulate copying with generated content. Renaming changes the name, not the document format. Folder deletion requires an explicitly selected folder and approval of its inventoried contents; it never grants content-read permission. Normal deletion uses the Recycle Bin. Use permanently_delete_file or delete_folder permanent=true only when the user explicitly requests permanent deletion; the user must type the exact target name and no backup is made. Destinations must be opened or selected folders; no overwriting or implicit folder selection. Case-only renames are unsupported. Report partial outcomes and warnings accurately; never claim a partial move or deletion completed. You can propose document edits with update_file and new documents with create_file. These use a private copy in the native editor, with preparation approval and separate save approval. For selected .doc/.dot/.ppt/.pps/.pot files, update_file imports through installed LibreOffice, edits the modern model, and creates a new sibling .docx/.pptx file. Selected .xls/.ods/.xlsb/.csv/.tsv files create .xlsx copies through Sheets import. Selected .dotx/.xltx/.ppsx/.potx files create regular .docx/.xlsx/.pptx copies by changing the Office package type. Selected .xltm templates create macro-enabled .xlsm copies that retain VBA parts; the template stays unchanged. Selected .docm and .xlsm files use their native editors and are updated in place after review; preserve VBA package parts and never execute macros. Existing siblings are preserved by choosing an edited-copy name. The approval and commit receipt identify the modern output and the unchanged source. Never claim that an imported original was updated. New documents use modern formats. delete_file has one Recycle Bin approval. Files must be individually selected. Never say an action completed unless its tool returns status=committed. Respect rejection; do not retry a rejected action in this turn. Local document writing, deck generation, HTML briefs and workbook merging reuse native workflows. Use convert_file for format conversion, never reconstruct converted documents from text. validate_file runs native checks without changing a file. Request renderPreview=true for a first-page screenshot in save review. Supply individually selected references via sources. Request network=true only for needed external research/downloads; media=true additionally requests external media processing. These permissions appear in the user approval. Never promise services before approval or successful execution.',
     tools: [
       ...filesystemTools,
       {
         name: 'validate_file',
         description:
-          'Run the existing native DOCX/XLSX/PPTX checks on a saved copy of one selected file. Returns diagnostics, not a guarantee of correctness. Does not save or require edit approval.',
+          'Run the existing native DOCX/DOCM/XLSX/XLSM/PPTX checks on a saved copy of one selected file. XLTM templates are checked through a private macro-enabled XLSM copy. Returns diagnostics, not a guarantee of correctness. Does not save or require edit approval.',
         inputSchema: {
           type: 'object',
           properties: { path: { type: 'string' } },
@@ -817,7 +821,7 @@ export function directoryMutationSkill(
       {
         name: 'update_file',
         description:
-          'Propose editing a selected individual file with its native editor; user approval is required. Give an exact, self-contained edit instruction.',
+          'Propose editing a selected individual file with its native editor; user approval is required. Legacy .doc/.dot/.ppt/.pps/.pot files create edited .docx/.pptx copies. Spreadsheet .xls/.ods/.xlsb/.csv/.tsv files create edited .xlsx copies using the Sheets import engines. Modern .dotx/.xltx/.ppsx/.potx files create regular .docx/.xlsx/.pptx copies while preserving their parts. Selected .xltm templates create reviewed .xlsm sibling copies while preserving VBA parts and the original template. Selected .docm and .xlsm files are reviewed and updated in place, retaining their macro-enabled packages and VBA parts; macros are never executed. All imported originals remain unchanged. Binary spreadsheet imports omit formatting, charts, images, macros and named ranges; unsupported formulas use cached values. Give an exact, self-contained edit instruction.',
         inputSchema: {
           type: 'object',
           properties: {

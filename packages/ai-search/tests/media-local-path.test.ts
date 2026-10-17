@@ -1,6 +1,6 @@
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import {
   documentMediaRoots,
@@ -45,7 +45,10 @@ describe('localMediaRoots', () => {
 
 describe('documentMediaRoots', () => {
   it("is the open document's directory plus the attachment directory", () => {
-    expect(documentMediaRoots(join('/work', 'deck.pptx'), '/attach')).toEqual(['/work', '/attach'])
+    expect(documentMediaRoots(join('/work', 'deck.pptx'), '/attach')).toEqual([
+      dirname(join('/work', 'deck.pptx')),
+      '/attach',
+    ])
   })
 
   it('keeps only the attachment directory for an untitled document', () => {
@@ -92,15 +95,19 @@ describe('loadMediaReference with caller-supplied roots', () => {
 
   it('refuses a symlink inside a root that points outside it', async () => {
     writePng(secret)
-    const link = join(inside, 'looks-local.png')
-    symlinkSync(secret, link)
+    const link =
+      process.platform === 'win32'
+        ? join(inside, 'junction', 'private.png')
+        : join(inside, 'looks-local.png')
+    if (process.platform === 'win32') symlinkSync(outside, dirname(link), 'junction')
+    else symlinkSync(secret, link)
     await expect(loadMediaReference(link, [inside])).rejects.toThrow(/allowed/i)
   })
 
   it('refuses a file reached through a symlinked directory', async () => {
     writePng(secret)
     const dirLink = join(inside, 'linked-dir')
-    symlinkSync(outside, dirLink, 'dir')
+    symlinkSync(outside, dirLink, process.platform === 'win32' ? 'junction' : 'dir')
     await expect(loadMediaReference(join(dirLink, 'private.png'), [inside])).rejects.toThrow(
       /allowed/i,
     )

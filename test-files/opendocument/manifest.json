@@ -1,0 +1,21 @@
+{
+  "generatedAt": "2026-10-16T23:53:06.842Z",
+  "files": [
+    {
+      "extension": "odt",
+      "file": "document-sample.odt",
+      "sha256": "51340cd81c0b4223b0c6c0f1fd6edb63bde2a7f5c79cdbaf6ed1f84d3aa98d41",
+      "bytes": 19124,
+      "source": "../legacy-office/source/document-sample.docx",
+      "filter": "writer8"
+    },
+    {
+      "extension": "odp",
+      "file": "presentation-sample.odp",
+      "sha256": "42baf6bfc11e0af8cb8964495fce918f9dec39a87e8a0345c207dd13b3f8cecd",
+      "bytes": 24813,
+      "source": "../legacy-office/source/presentation-sample.pptx",
+      "filter": "impress8"
+    }
+  ]
+}

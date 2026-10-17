@@ -10,6 +10,7 @@ export default defineConfig({
     plugins: [
       externalizeDepsPlugin({
         exclude: [
+          '@genoffice/file-formats',
           '@genoffice/ai-provider',
           '@genoffice/agent-core',
           '@genoffice/ai-search',
@@ -26,7 +27,9 @@ export default defineConfig({
   preload: {
     // Sandboxed preload scripts cannot require arbitrary npm packages at
     // runtime, so the drop-open bridge must be bundled, not externalized.
-    plugins: [externalizeDepsPlugin({ exclude: ['@genoffice/electron-utils'] })],
+    plugins: [
+      externalizeDepsPlugin({ exclude: ['@genoffice/file-formats', '@genoffice/electron-utils'] }),
+    ],
   },
   renderer: {
     plugins: [react()],

@@ -1,6 +1,10 @@
 import type { zh } from './zh'
 
 export const nl = {
+  appWorkbookImportNotice:
+    '.{format} geopend als XLSX-kopie. Het origineel blijft ongewijzigd. Opmaak, grafieken, afbeeldingen, macro’s en benoemde bereiken worden niet geïmporteerd.',
+  appWorkbookImportFormulaLoss:
+    'Formules bewaard als opgeslagen waarden: {formulas}. Bladen met onleesbare formules: {sheets}.',
   appMergeWorkbooks: 'Werkmappen samenvoegen',
   appMergeWorkbooksTip: 'Bladen uit andere Excel-bestanden aan deze werkmap toevoegen',
   appMergeWorkbooksPicking: 'Kies bestanden om samen te voegen…',

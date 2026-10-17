@@ -1,0 +1,22 @@
+{
+  "name": "@genoffice/file-formats",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "description": "Browser-safe editor extension catalog and Office package format metadata",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11"
+  },
+  "dependencies": {
+    "@xmldom/xmldom": "^0.8.15"
+  }
+}

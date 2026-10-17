@@ -1,6 +1,10 @@
 import type { zh } from './zh'
 
 export const ms = {
+  appWorkbookImportNotice:
+    '.{format} dibuka sebagai salinan XLSX. Fail asal tidak berubah. Pemformatan, carta, imej, makro dan julat bernama tidak diimport.',
+  appWorkbookImportFormulaLoss:
+    'Formula dikekalkan sebagai nilai cache: {formulas}. Helaian dengan formula yang tidak dapat dibaca: {sheets}.',
   appMergeWorkbooks: 'Gabung Buku Kerja',
   appMergeWorkbooksTip: 'Tambah helaian daripada fail Excel lain ke buku kerja ini',
   appMergeWorkbooksPicking: 'Pilih fail untuk digabungkan…',

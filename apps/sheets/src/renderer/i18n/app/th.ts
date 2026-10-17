@@ -1,6 +1,10 @@
 import type { zh } from './zh'
 
 export const th = {
+  appWorkbookImportNotice:
+    'เปิด .{format} เป็นสำเนา XLSX โดยไม่เปลี่ยนไฟล์ต้นฉบับ รูปแบบ แผนภูมิ รูปภาพ แมโคร และช่วงที่มีชื่อจะไม่ถูกนำเข้า',
+  appWorkbookImportFormulaLoss:
+    'สูตรที่เก็บเป็นค่าที่แคชไว้: {formulas} แผ่นงานที่อ่านสูตรไม่ได้: {sheets}',
   appMergeWorkbooks: 'รวมเวิร์กบุ๊ก',
   appMergeWorkbooksTip: 'นำชีตจากไฟล์ Excel อื่นมารวมในเวิร์กบุ๊กนี้',
   appMergeWorkbooksPicking: 'เลือกไฟล์ที่จะรวม…',

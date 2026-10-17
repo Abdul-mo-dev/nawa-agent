@@ -19,6 +19,16 @@ describe('textModeForPath', () => {
     expect(textModeForPath('/a/log.txt')).toBe('plain')
   })
 
+  it.each(['yaml', 'yml', 'toml', 'ini', 'xml', 'log', 'jsonl', 'ndjson', 'py', 'js', 'ts', 'ps1'])(
+    'opens .%s as source without interpreting Markdown',
+    (extension) => {
+      expect(textModeForPath(`/a/source.${extension}`)).toBe('plain')
+      const raw = '\uFEFF---\r\n*literal*\r\n1. unchanged'
+      const { text, format } = readSourceText(raw)
+      expect(writeSourceText(text, format)).toBe(raw)
+    },
+  )
+
   it('treats an untitled document as markdown — that is what New creates', () => {
     expect(textModeForPath(null)).toBe('markdown')
     expect(textModeForPath(undefined)).toBe('markdown')

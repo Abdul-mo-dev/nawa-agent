@@ -46,6 +46,8 @@ export interface McpSheetHandlers {
     path: string,
     overwrite: boolean,
   ) => Promise<{ ok: boolean; path?: string; error?: string }>
+  /** main-authorized directory XLSM stages save to their own backing path */
+  saveCurrent: () => Promise<{ ok: boolean; path?: string; error?: string }>
 }
 
 export function installSheetsMcpBridge(handlers: McpSheetHandlers): () => void {
@@ -186,7 +188,10 @@ export function installSheetsMcpBridge(handlers: McpSheetHandlers): () => void {
             reply(false, undefined, 'save_sheet needs an absolute path')
             return
           }
-          const saved = await handlers.saveTo(path, overwrite)
+          const saved =
+            payload.stageInPlace === true
+              ? await handlers.saveCurrent()
+              : await handlers.saveTo(path, overwrite)
           // a refused save must surface as an error so the agent keeps its session and can retry
           if (!saved.ok) {
             reply(false, undefined, saved.error ?? 'the spreadsheet could not be saved')

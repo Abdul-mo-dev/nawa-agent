@@ -20,6 +20,7 @@
     "dist:linux": "npm run notices && electron-vite build && electron-builder --linux"
   },
   "devDependencies": {
+    "@genoffice/file-formats": "*",
     "@genoffice/agent-core": "*",
     "@genoffice/ai-provider": "*",
     "@genoffice/ai-search": "*",

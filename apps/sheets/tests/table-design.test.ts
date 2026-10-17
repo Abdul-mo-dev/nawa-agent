@@ -17,6 +17,7 @@ import {
   uniqueColumnNames,
 } from '../src/renderer/table-design'
 import { t } from '../src/renderer/i18n/locale'
+import { handleTableDesignCommand } from '../src/renderer/table-design-actions'
 import { applyTint, builtinTablePalette, tableThemeJson } from '../src/renderer/table-styles'
 
 const _ = null
@@ -63,7 +64,6 @@ describe('resolveCreateTableRange', () => {
 
 describe('handleTableDesignCommand parsing', () => {
   it('keeps the colon inside the Create Table range', async () => {
-    const { handleTableDesignCommand } = await import('../src/renderer/table-design-actions')
     const messages: string[] = []
     const ctx = {
       univerRef: { current: null },

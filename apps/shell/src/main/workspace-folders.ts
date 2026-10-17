@@ -1,3 +1,4 @@
+import { EDITOR_DIALOG_EXTENSIONS } from '@genoffice/file-formats'
 import { constants, existsSync, lstatSync, realpathSync, type Dirent } from 'node:fs'
 import {
   access,
@@ -24,24 +25,7 @@ const MAX_ENTRIES = 10_000
 const MAX_SCOPE_FILES = 256
 const MAX_SCOPE_DIRECTORIES = 512
 const MAX_SCOPE_DEPTH = 32
-const OFFICE_EXTENSIONS = new Set([
-  'docx',
-  'doc',
-  'xlsx',
-  'xlsm',
-  'xls',
-  'csv',
-  'pptx',
-  'ppt',
-  'pdf',
-  'md',
-  'markdown',
-  'html',
-  'htm',
-  'txt',
-  'json',
-  'tsv',
-])
+const OFFICE_EXTENSIONS = new Set(EDITOR_DIALOG_EXTENSIONS)
 
 function validPath(value: unknown): value is string {
   return (

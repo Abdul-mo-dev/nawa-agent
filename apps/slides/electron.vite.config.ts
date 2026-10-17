@@ -52,6 +52,8 @@ export default defineConfig({
     plugins: [
       externalizeDepsPlugin({
         exclude: [
+          '@genoffice/agent-core',
+          '@genoffice/file-formats',
           '@genoffice/pptx-engine',
           '@genoffice/pptx-ops',
           '@genoffice/pptx-render',
@@ -66,7 +68,9 @@ export default defineConfig({
   },
   preload: {
     // electron-utils ships raw TS source — must be bundled, not left external
-    plugins: [externalizeDepsPlugin({ exclude: ['@genoffice/electron-utils'] })],
+    plugins: [
+      externalizeDepsPlugin({ exclude: ['@genoffice/file-formats', '@genoffice/electron-utils'] }),
+    ],
   },
   renderer: {
     resolve: { alias: workspaceAlias },

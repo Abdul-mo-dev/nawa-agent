@@ -93,7 +93,10 @@ describe('validateHeadlessPaths', () => {
   it('rejects an output path that is the input file, also through a symlink', () => {
     const fs = {
       ...fsWith(['/docs/a.docx', '/docs', '/link/a.docx', '/link']),
-      realpath: (path: string) => path.replace(/^\/link/, '/docs'),
+      realpath: (path: string) =>
+        path.startsWith(resolve('/link'))
+          ? resolve('/docs') + path.slice(resolve('/link').length)
+          : path,
     }
     expect(
       validateHeadlessPaths(request('/docs/a.docx', '/docs/a.docx', 'html'), fs),
@@ -103,13 +106,14 @@ describe('validateHeadlessPaths', () => {
     ).toMatchObject({ ok: false, code: 1, message: expect.stringContaining('differ') })
     expect(
       validateHeadlessPaths(request('/docs/a.docx', '/link/b.docx', 'html'), fs),
-    ).toMatchObject({ ok: true, outPath: '/link/b.docx' })
+    ).toMatchObject({ ok: true, outPath: resolve('/link/b.docx') })
   })
 
   it('rejects an output path that is an existing directory (exit 1)', () => {
     const fs = {
-      exists: (path: string) => ['/docs/a.docx', '/out', '/out/a.pdf'].includes(path),
-      isFile: (path: string) => path === '/docs/a.docx',
+      exists: (path: string) =>
+        ['/docs/a.docx', '/out', '/out/a.pdf'].map((entry) => resolve(entry)).includes(path),
+      isFile: (path: string) => path === resolve('/docs/a.docx'),
     }
     expect(validateHeadlessPaths(request('/docs/a.docx', '/out/a.pdf'), fs)).toMatchObject({
       ok: false,
@@ -191,8 +195,8 @@ describe('runHeadlessExport', () => {
       present.push('/out/a.pdf')
     }
     const outcome = await runHeadlessExport(request('/a.docx'), exporters, {
-      exists: (path) => present.includes(path),
-      isFile: (path) => path === '/a.docx',
+      exists: (path) => present.map((entry) => resolve(entry)).includes(path),
+      isFile: (path) => path === resolve('/a.docx'),
     })
     expect(outcome).toMatchObject({ ok: false, code: 3 })
   })

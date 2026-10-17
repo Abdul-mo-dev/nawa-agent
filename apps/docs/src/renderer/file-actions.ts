@@ -6,6 +6,8 @@
  * so state never goes stale.
  */
 import type { Editor } from '@tiptap/core'
+import { officeImportTarget } from '@genoffice/file-formats'
+import { legacyOfficeMessage } from '@genoffice/i18n'
 import { history } from '@tiptap/pm/history'
 import {
   applyPageNumType,
@@ -533,6 +535,8 @@ export async function loadFile(
       ctx.setStatus(t('appOpenedFile', { name: result.name }))
     }
     void window.desktop.getRecentFiles().then(ctx.setRecent)
+    if (result.importedFrom)
+      showToast(legacyOfficeMessage(getLang(), 'notice', { from: result.importedFrom, to: 'docx' }))
     return 'ok'
   } catch (err) {
     if (generation !== openGeneration) return 'superseded'
@@ -979,6 +983,11 @@ async function saveOnce(
 ): Promise<boolean> {
   const { doc, editor } = ctx
   if (!doc || !editor) return false
+  if (!explicitTarget && doc.filePath && officeImportTarget(doc.filePath)) {
+    // Background AutoSave keeps recovery copies until the user chooses a modern file.
+    if (auto && !saveAs) return false
+    saveAs = true
+  }
   ctx.saveInFlightRef.current = true
   ctx.saveIncompleteRef.current = false
   try {

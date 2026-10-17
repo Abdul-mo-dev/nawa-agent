@@ -3,6 +3,8 @@ import { withOutputCapFallback } from './output-cap'
 import { streamAnthropic } from './protocols/anthropic'
 import { streamGemini } from './protocols/gemini'
 import { streamOpenAiCompatible } from './protocols/openai-compatible'
+import { simplifyUnionTypeArrays } from './protocols/openai-compatible'
+import { isLoopbackApiUrl } from './local-endpoint'
 import { streamCodexAppServer } from './codex-app-server'
 import type { StreamCallbacks } from './protocols/shared'
 import { getProviderAdapter, type AiProtocol } from './registry'
@@ -36,6 +38,11 @@ export async function streamForProvider(
     throw new Error(
       'This model has no verified vision capability. Use OCR text or select and test a vision model in Settings.',
     )
+  if (endpoint.protocol === 'openai-compatible' && isLoopbackApiUrl(baseUrl))
+    tools = tools.map((tool) => ({
+      ...tool,
+      inputSchema: simplifyUnionTypeArrays(tool.inputSchema),
+    }))
   const budget = await prepareModelRequest(
     provider,
     config,

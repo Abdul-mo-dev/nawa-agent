@@ -99,6 +99,10 @@ export async function parseFileToRag(path: string, ocr?: RagOcrOptions): Promise
     const { archiveDocument } = await import('./rag-archive')
     return archiveDocument(await readFile(path), title, (entry) => parseFileToRag(entry, ocr))
   }
+  if (ext === 'odt' || ext === 'odp') {
+    const { openDocumentRag } = await import('./opendocument')
+    return openDocumentRag(await readFile(path), title, ext)
+  }
   if ((RAG_OFFICE_EXTENSIONS as readonly string[]).includes(ext)) {
     const office = await import('./rag-office'),
       bytes = await readFile(path)
@@ -106,9 +110,11 @@ export async function parseFileToRag(path: string, ocr?: RagOcrOptions): Promise
     try {
       document = await (['docx', 'docm', 'dotx', 'dotm'].includes(ext)
         ? office.docxDocument(bytes, title)
-        : ['pptx', 'pptm', 'ppsx', 'ppsm'].includes(ext)
+        : ['pptx', 'pptm', 'ppsx', 'ppsm', 'potx', 'potm'].includes(ext)
           ? office.pptxDocument(bytes, title)
-          : office.xlsxDocument(bytes, title))
+          : ['xlsx', 'xlsm', 'xltx', 'xltm'].includes(ext)
+            ? office.xlsxDocument(bytes, title)
+            : Promise.reject(new Error(`No RAG office extractor for .${ext}`)))
     } catch (error) {
       if (
         !ocr?.image ||

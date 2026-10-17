@@ -1,6 +1,10 @@
 import type { zh } from './zh'
 
 export const ru = {
+  appWorkbookImportNotice:
+    '.{format} открыт как копия XLSX. Исходный файл не изменён. Форматирование, диаграммы, изображения, макросы и именованные диапазоны не импортируются.',
+  appWorkbookImportFormulaLoss:
+    'Формулы, сохранённые как кэшированные значения: {formulas}. Листы с нечитаемыми формулами: {sheets}.',
   appMergeWorkbooks: 'Объединить книги',
   appMergeWorkbooksTip: 'Добавить листы из других файлов Excel в эту книгу',
   appMergeWorkbooksPicking: 'Выберите файлы для объединения…',

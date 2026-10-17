@@ -37,8 +37,16 @@ describe('scanFiles budget', () => {
   it('does not follow symlinked directories', () => {
     mkdirSync(join(dir, 'real'))
     writeFileSync(join(dir, 'real', 'a.md'), 'x')
-    symlinkSync(join(dir, 'real'), join(dir, 'real', 'loop'), 'dir')
-    symlinkSync(join(dir, 'real'), join(dir, 'alias'), 'dir')
+    symlinkSync(
+      join(dir, 'real'),
+      join(dir, 'real', 'loop'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    )
+    symlinkSync(
+      join(dir, 'real'),
+      join(dir, 'alias'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    )
     expect(scanFiles(dir).files.map((f) => f.path)).toEqual([join(dir, 'real', 'a.md')])
   })
 })

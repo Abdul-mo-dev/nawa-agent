@@ -14,6 +14,7 @@
     "./font-catalog": "./src/font-catalog.ts",
     "./font-store": "./src/font-store.ts",
     "./headless-export": "./src/headless-export.ts",
+    "./legacy-office": "./src/legacy-office.ts",
     "./print-window": "./src/print-window.ts",
     "./remote-image": "./src/remote-image.ts",
     "./renderer-protocol": "./src/renderer-protocol.ts",
@@ -31,6 +32,9 @@
     "vitest": "^4.1.11"
   },
   "dependencies": {
+    "@genoffice/file-formats": "*",
+    "@genoffice/zip-gate": "*",
+    "jszip": "^3.10.2",
     "parse5": "^8.0.1"
   }
 }

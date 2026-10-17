@@ -157,9 +157,20 @@ async function runCommand(
     }
 
     case 'save_document': {
-      const input = (payload ?? {}) as { path?: string; overwrite?: boolean }
+      const input = (payload ?? {}) as {
+        path?: string
+        overwrite?: boolean
+        stageInPlace?: boolean
+      }
       if (typeof input.path !== 'string' || !input.path) {
         throw new Error('save_document requires an absolute "path"')
+      }
+      if (input.stageInPlace === true) {
+        if (ctx.doc.filePath !== input.path)
+          throw new Error('the staged document path changed before save')
+        if (!(await save(ctx, false, true)))
+          throw new Error('the staged document could not be saved')
+        return { ok: true, path: input.path }
       }
       let reason = ''
       const ok = await save(ctx, false, true, undefined, {

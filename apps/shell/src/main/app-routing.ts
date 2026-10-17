@@ -1,13 +1,14 @@
+import { EDITOR_EXTENSIONS, extensionPattern } from '@genoffice/file-formats'
 import type { DocumentTabKind } from '../shared/tabs-api'
 
 // shared by the open route, the open-dialog filter and the rename gate so they cannot drift
-const DOCX_RE = /\.docx$/i
-const XLSX_RE = /\.(xlsx|xlsm|xls|csv|tsv)$/i
-const PPTX_RE = /\.pptx$/i
+const DOCX_RE = extensionPattern(EDITOR_EXTENSIONS.docs)
+const XLSX_RE = extensionPattern(EDITOR_EXTENSIONS.sheets)
+const PPTX_RE = extensionPattern(EDITOR_EXTENSIONS.slides)
 const PDF_RE = /\.pdf$/i
 const HTML_RE = /\.html?$/i
 
-const TEXT_RE = /\.(md|markdown|txt|json)$/i
+const TEXT_RE = extensionPattern(EDITOR_EXTENSIONS.markdown)
 
 export { DOCX_RE, XLSX_RE, PPTX_RE, PDF_RE, HTML_RE, TEXT_RE }
 

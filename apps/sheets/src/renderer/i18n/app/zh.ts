@@ -1,5 +1,9 @@
 /** app strings, zh: defines the key set every other locale shard must match. */
 export const zh = {
+  appWorkbookImportNotice:
+    '已将 .{format} 打开为 XLSX 副本，原文件未更改。格式、图表、图片、宏和命名范围不会导入。',
+  appWorkbookImportFormulaLoss:
+    '已保留为缓存值的公式：{formulas}。公式无法读取的工作表：{sheets}。',
   appMergeWorkbooks: '合并工作簿',
   appMergeWorkbooksTip: '将其他 Excel 文件的工作表并入当前工作簿',
   appMergeWorkbooksPicking: '选择要合并的文件…',

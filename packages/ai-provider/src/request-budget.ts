@@ -50,7 +50,7 @@ function promptBudgetContent(system: string, messages: AgentMessage[], tools: Ag
   }
 }
 
-/** Unknown/local tokenizers retain a conservative estimate or use server token counts. */
+/** Coarse byte-based upper bound; retained for monotonicity checks, not budgeting. */
 export function estimatedPromptTokens(
   system: string,
   messages: AgentMessage[],
@@ -58,6 +58,31 @@ export function estimatedPromptTokens(
 ): number {
   const content = promptBudgetContent(system, messages, tools)
   return new TextEncoder().encode(content.text).length + content.reserve
+}
+
+/** Bound pathological repeated runs before BPE; account for every omitted UTF-8 byte. */
+const LONG_RUN_RE = /([\s\S])\1{511,}/gu
+function boundedTokenizationText(text: string) {
+  let omittedBytes = 0
+  const capped = text.replace(LONG_RUN_RE, (run, char: string) => {
+    const kept = char.repeat(512)
+    omittedBytes += new TextEncoder().encode(run.slice(kept.length)).length
+    return kept
+  })
+  return { capped, omittedBytes }
+}
+
+/** o200k proxy with a margin for other tokenizers and a byte upper bound for long runs. */
+export async function estimatedProxyPromptTokens(
+  system: string,
+  messages: AgentMessage[],
+  tools: AgentToolDef[],
+  margin = 1.3,
+): Promise<number> {
+  const content = promptBudgetContent(system, messages, tools)
+  const { capped, omittedBytes } = boundedTokenizationText(content.text)
+  const encoder = await openAiEncoder('gpt-4o')
+  return Math.ceil(encoder.encode(capped, [], []).length * margin) + omittedBytes + content.reserve
 }
 
 /** Tokenize the complete cloud request locally; framing and future aliases remain estimates. */
@@ -69,7 +94,8 @@ export async function estimatedOpenAiPromptTokens(
 ): Promise<number> {
   const content = promptBudgetContent(system, messages, tools)
   const encoder = await openAiEncoder(model)
-  return Math.ceil(encoder.encode(content.text, [], []).length * 1.15) + content.reserve
+  const { capped, omittedBytes } = boundedTokenizationText(content.text)
+  return Math.ceil(encoder.encode(capped, [], []).length * 1.15) + omittedBytes + content.reserve
 }
 
 async function llamaPromptTokens(
@@ -169,8 +195,8 @@ export async function prepareModelRequest(
     const estimate = tokenizeCloud
       ? await estimatedOpenAiPromptTokens(config.model, system, bounded, budgetTools)
       : Math.max(
-          estimatedPromptTokens(system, bounded, tools),
-          estimatedPromptTokens(system, bounded, budgetTools),
+          await estimatedProxyPromptTokens(system, bounded, tools),
+          await estimatedProxyPromptTokens(system, bounded, budgetTools),
         )
     if (estimate <= inputLimit) return estimate
     if (provider === 'custom' && policy.local)

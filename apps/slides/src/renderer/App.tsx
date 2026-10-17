@@ -110,7 +110,9 @@ import type { ChartPresetDef, IconDef, SmartArtDef } from './insert-presets'
 import { NawaMark, IconAiBeautify, IconAiFactCheck, IconAiImage } from './components/icons'
 import { ToastHost } from './components/toast'
 import { showToast } from './components/toast-bus'
-import { t, useI18n } from './i18n/locale'
+import { t, useI18n, getLang } from './i18n/locale'
+import { legacyOfficeMessage } from '@genoffice/i18n'
+import { officeImportTarget, type OfficeImportExtension } from '@genoffice/file-formats'
 import { AiPanel } from './ai/AiPanel'
 import { ChartDataDialog } from './components/ChartDataDialog'
 import type { BrushFormat } from './format-brush'
@@ -854,7 +856,14 @@ export function App() {
   }, [hasDoc, fitZoom, rawFit, viewMode])
 
   const applyOpen = useCallback(
-    (result: { path: string; slides: RenderSlide[]; defaultFont?: string } | null) => {
+    (
+      result: {
+        path: string
+        slides: RenderSlide[]
+        defaultFont?: string
+        importedFrom?: OfficeImportExtension
+      } | null,
+    ) => {
       if (!result) return
       setSlides(result.slides)
       setDefaultFont(result.defaultFont ?? null)
@@ -881,6 +890,10 @@ export function App() {
       )
       // Fetch the layout list asynchronously (doesn't block opening)
       void window.slidesApi.getLayouts().then((r) => setLayoutsResult(r))
+      if (result.importedFrom)
+        showToast(
+          legacyOfficeMessage(getLang(), 'notice', { from: result.importedFrom, to: 'pptx' }),
+        )
     },
     [fitZoom],
   )
@@ -982,7 +995,7 @@ export function App() {
     }
   }, [])
   useEffect(() => {
-    if (!autoSave || !path) return
+    if (!autoSave || !path || officeImportTarget(path)) return
     let saving = false
     const tick = () => {
       if (saving || editing || editingCell || mouseDownRef.current) return

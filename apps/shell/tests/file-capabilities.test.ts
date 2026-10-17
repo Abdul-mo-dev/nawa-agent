@@ -12,17 +12,54 @@ import {
 import type { HistoryMessage } from '../src/shared/conversation-api'
 
 it('reports different extraction, native and analytical coverage precisely', () => {
+  for (const [extension, target] of [
+    ['odt', 'docx'],
+    ['odp', 'pptx'],
+  ])
+    expect(fileCapabilities(`/files/report.${extension}`)).toMatchObject({
+      search: true,
+      inspection: true,
+      editing: true,
+      legacy: false,
+      editOutput: target,
+    })
   expect(fileCapabilities('C:\\test\\file.XLSM')).toMatchObject({
     search: true,
     analysis: true,
-    inspection: false,
-    editing: false,
+    inspection: true,
+    editing: true,
+    legacy: false,
+  })
+  expect(fileCapabilities('C:\\test\\file.DOCM')).toMatchObject({
+    search: true,
+    analysis: false,
+    inspection: true,
+    editing: true,
+    legacy: false,
+  })
+  for (const name of ['template.DOTM', 'deck.PPTM', 'show.PPSM', 'theme.POTM']) {
+    expect(fileCapabilities(`C:\\test\\${name}`)).toMatchObject({
+      search: true,
+      inspection: true,
+      editing: true,
+      legacy: false,
+    })
+    expect(fileCapabilities(`C:\\test\\${name}`).editOutput).toBeUndefined()
+  }
+  expect(fileCapabilities('C:\\test\\template.XLTM')).toMatchObject({
+    search: true,
+    analysis: false,
+    inspection: true,
+    editing: true,
+    editOutput: 'xlsm',
+    legacy: false,
   })
   expect(fileCapabilities('/files/legacy.xls')).toMatchObject({
     search: false,
     analysis: false,
-    inspection: false,
-    editing: false,
+    inspection: true,
+    editing: true,
+    editOutput: 'xlsx',
     legacy: true,
   })
   expect(fileCapabilities('/files/scan.png')).toMatchObject({

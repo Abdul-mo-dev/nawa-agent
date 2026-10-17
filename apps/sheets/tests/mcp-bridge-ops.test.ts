@@ -40,6 +40,7 @@ function bridgeWith(overrides: Partial<McpSheetHandlers> = {}): McpSheetHandlers
     focusSheet: () => {},
     applyOps: vi.fn().mockResolvedValue({ ok: true }),
     saveTo: vi.fn().mockResolvedValue({ ok: true }),
+    saveCurrent: vi.fn().mockResolvedValue({ ok: true }),
     ...overrides,
   }
 }
@@ -75,5 +76,23 @@ describe('mcp bridge apply_ops validation', () => {
     expect(applyOpsFn).toHaveBeenCalledTimes(1)
     const reply = reportMcpResult.mock.calls[0]![0] as { ok: boolean }
     expect(reply.ok).toBe(true)
+  })
+})
+
+describe('staged XLSM save dispatch', () => {
+  it('uses the in-place save handler only for a main-process stage command', async () => {
+    const saveTo = vi.fn().mockResolvedValue({ ok: true })
+    const saveCurrent = vi.fn().mockResolvedValue({ ok: true })
+    const uninstall = installSheetsMcpBridge(bridgeWith({ saveTo, saveCurrent }))
+    commandListener!({
+      requestId: 3,
+      command: 'save_sheet',
+      payload: { path: 'C:/stage/macro.xlsm', stageInPlace: true },
+    })
+    uninstall()
+    await vi.waitFor(() => expect(reportMcpResult).toHaveBeenCalledTimes(1))
+    expect(saveCurrent).toHaveBeenCalledOnce()
+    expect(saveTo).not.toHaveBeenCalled()
+    expect(reportMcpResult.mock.calls[0]![0]).toMatchObject({ ok: true })
   })
 })

@@ -41,3 +41,41 @@ __pycache__/
 # One-off verification tests kept while chasing a fix; promote to a real test
 # file (or delete) instead of committing them under this name.
 _scratch-*
+
+# Generated Office-format verification outputs (fixtures + generators stay tracked)
+test-files/legacy-office/edited/
+test-files/legacy-office/converted/
+test-files/legacy-office/conversion-comparison/
+test-files/legacy-office/chat-edited-*/
+test-files/legacy-office/ui-report*.json
+test-files/legacy-office/report.json
+test-files/legacy-office/report.md
+test-files/legacy-office/results.md
+test-files/legacy-office/chat-report.json
+test-files/legacy-office/chat-results.md
+test-files/legacy-office/screenshots/
+test-files/modern-office-chat/edited-*/
+test-files/modern-office-chat/report.json
+test-files/modern-office-chat/results.md
+test-files/spreadsheet-chat/edited-*/
+test-files/spreadsheet-chat/report.json
+test-files/spreadsheet-chat/results.md
+test-files/xlsm-chat/edited-*/
+test-files/xlsm-chat/report.json
+test-files/xlsm-chat/results.md
+test-files/xltm-chat/edited-*/
+test-files/xltm-chat/ui-edited-*/
+test-files/xltm-chat/ui-report.json
+test-files/xltm-chat/report.json
+test-files/xltm-chat/results.md
+
+# Generated macro Office verification outputs
+test-files/opendocument/chat-edited-*/
+test-files/opendocument/ui-edited-*/
+test-files/opendocument/chat-report.json
+test-files/opendocument/chat-results.md
+test-files/opendocument/ui-report.json
+test-files/opendocument/screenshots/
+test-files/macro-office-chat/edited-*/
+test-files/macro-office-chat/report.json
+test-files/macro-office-chat/results.md

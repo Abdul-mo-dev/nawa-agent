@@ -15,6 +15,16 @@ describe('findDocxPath', () => {
   it('ignores Electron switches and unrelated files', () => {
     expect(findDocxPath(['GenOffice Docs', '--inspect=document.docx', '/tmp/notes.txt'])).toBeNull()
   })
+
+  it('accepts Word template arguments', () => {
+    expect(findDocxPath(['Nawa.exe', 'C:/files/LETTER.DOTX'])).toBe('C:/files/LETTER.DOTX')
+  })
+
+  it.each(['doc', 'dot'])('accepts legacy .%s arguments', (extension) => {
+    expect(findDocxPath(['Nawa.exe', `C:/files/LETTER.${extension.toUpperCase()}`])).toBe(
+      `C:/files/LETTER.${extension.toUpperCase()}`,
+    )
+  })
 })
 
 describe('runGuardedCandidate', () => {

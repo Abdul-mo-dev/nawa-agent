@@ -97,6 +97,102 @@ describe('saveWorkbookViaSidecar', () => {
     expect(sheet).toContain('<c r="A6"><v>42</v></c>')
   })
 
+  it('saves and edits an Excel template, then converts its package type back to a workbook', async () => {
+    const sourcePath = join(directory, 'template-source.xlsx')
+    const templatePath = join(directory, 'template.xltx')
+    const workbookPath = join(directory, 'template-copy.xlsx')
+    await writeFile(sourcePath, await buildEditFixture())
+    const result = await saveWorkbookViaSidecar({
+      client,
+      sourcePath,
+      targetPath: templatePath,
+      edits: [],
+    })
+    expect(result.touchedEntries).toContain('[Content_Types].xml')
+    const templateZip = await JSZip.loadAsync(await readFile(templatePath))
+    expect(await templateZip.file('[Content_Types].xml')!.async('text')).toContain(
+      'spreadsheetml.template.main+xml',
+    )
+    await saveWorkbookViaSidecar({
+      client,
+      sourcePath: templatePath,
+      targetPath: workbookPath,
+      edits: [
+        {
+          sheetName: 'Data',
+          row: 0,
+          column: 0,
+          writeValue: true,
+          cell: { value: 'Template edit' },
+        },
+      ],
+    })
+    const workbookZip = await JSZip.loadAsync(await readFile(workbookPath))
+    expect(await workbookZip.file('[Content_Types].xml')!.async('text')).toContain(
+      'spreadsheetml.sheet.main+xml',
+    )
+    expect(await workbookZip.file('xl/worksheets/sheet1.xml')!.async('text')).toContain(
+      'Template edit',
+    )
+    const recoveryPath = join(directory, 'template-recovery.xlsx')
+    await saveWorkbookViaSidecar({
+      client,
+      sourcePath: templatePath,
+      targetPath: recoveryPath,
+      edits: [],
+      preservePackageType: true,
+    })
+    const recoveryZip = await JSZip.loadAsync(await readFile(recoveryPath))
+    expect(await recoveryZip.file('[Content_Types].xml')!.async('text')).toContain(
+      'spreadsheetml.template.main+xml',
+    )
+  })
+
+  it('edits a macro-enabled template in place and saves a VBA-preserving workbook copy', async () => {
+    const templatePath = join(directory, 'macro-template.xltm')
+    const workbookPath = join(directory, 'macro-template-copy.xlsm')
+    const original = await readFile(
+      fileURLToPath(new URL('../../../test-files/xltm-chat/sample.xltm', import.meta.url)),
+    )
+    await writeFile(templatePath, original)
+    const edit = {
+      sheetName: 'Inventory',
+      row: 0,
+      column: 0,
+      writeValue: true,
+      cell: { value: 'Macro template edit' },
+    }
+    await saveWorkbookViaSidecar({
+      client,
+      sourcePath: templatePath,
+      targetPath: templatePath,
+      edits: [edit],
+    })
+    const template = await JSZip.loadAsync(await readFile(templatePath))
+    expect(await template.file('[Content_Types].xml')!.async('text')).toContain(
+      'application/vnd.ms-excel.template.macroEnabled.main+xml',
+    )
+    expect(await template.file('xl/vbaProject.bin')!.async('nodebuffer')).toEqual(
+      await (await JSZip.loadAsync(original)).file('xl/vbaProject.bin')!.async('nodebuffer'),
+    )
+    await saveWorkbookViaSidecar({
+      client,
+      sourcePath: templatePath,
+      targetPath: workbookPath,
+      edits: [],
+    })
+    const workbook = await JSZip.loadAsync(await readFile(workbookPath))
+    expect(await workbook.file('[Content_Types].xml')!.async('text')).toContain(
+      'application/vnd.ms-excel.sheet.macroEnabled.main+xml',
+    )
+    expect(await workbook.file('xl/vbaProject.bin')!.async('nodebuffer')).toEqual(
+      await template.file('xl/vbaProject.bin')!.async('nodebuffer'),
+    )
+    expect(await workbook.file('xl/worksheets/sheet1.xml')!.async('text')).toContain(
+      'Macro template edit',
+    )
+  })
+
   it('saves a large constant fill without a per-cell edit payload', async () => {
     const sourcePath = join(directory, 'bulk-source.xlsx')
     const targetPath = join(directory, 'bulk-saved.xlsx')

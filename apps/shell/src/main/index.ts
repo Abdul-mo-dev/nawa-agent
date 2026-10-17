@@ -1,3 +1,8 @@
+import {
+  EDITOR_EXTENSIONS,
+  EDITOR_DIALOG_EXTENSIONS,
+  EDITOR_FILTER_FAMILIES,
+} from '@genoffice/file-formats'
 import { execSync, spawn } from 'node:child_process'
 import { registerWorkspaceIpc } from './workspace-ipc'
 import { configureDirectoryNative } from './directory-actions/native-runtime'
@@ -785,7 +790,7 @@ function applyPendingDir(wcId: number, filePath: string): string {
 function afterFileMoved(oldPath: string, newPath: string): void {
   replaceRecentFile(oldPath, newPath)
   projectFileRenamed(oldPath, newPath)
-  if (/\.pptx$/i.test(newPath)) void replaceSlidesRecentFile(oldPath, newPath)
+  if (PPTX_RE.test(newPath)) void replaceSlidesRecentFile(oldPath, newPath)
   const affected = tabManager?.renameTabFile(oldPath, newPath) ?? []
   const detachedAffected = detachedRenameFile(oldPath, newPath)
   if (detachedAffected) affected.push(detachedAffected)
@@ -867,13 +872,7 @@ function ensureFileIndexer(): FileIndexer | null {
   return fileIndexer
 }
 
-const SEARCH_EXT_FAMILY: Record<string, readonly string[]> = {
-  docx: ['docx', 'doc'],
-  xlsx: ['xlsx', 'xlsm', 'xls', 'csv', 'tsv'],
-  pptx: ['pptx', 'ppt'],
-  md: ['md', 'markdown', 'txt', 'json'],
-  html: ['html', 'htm'],
-}
+const SEARCH_EXT_FAMILY = EDITOR_FILTER_FAMILIES
 
 /** one recursive watcher per tree root; follows the save-folder setting and the added folders */
 function ensureFolderWatchers(): void {
@@ -1221,28 +1220,9 @@ function createShellWindow(): void {
 // ---- routing: one dispatch function for every open path ----
 
 /**
- * Single source of truth for the open-dialog filter. Includes the
- * legacy .doc/.ppt binaries so they are selectable and surface the explicit
- * "not supported" dialog via openDocumentPath instead of being grayed out.
+ * Single source of truth for the open-dialog filter, including converted imports.
  */
-const OPEN_DIALOG_EXTENSIONS = [
-  'docx',
-  'doc',
-  'xlsx',
-  'xlsm',
-  'xls',
-  'csv',
-  'tsv',
-  'pptx',
-  'ppt',
-  'pdf',
-  'md',
-  'markdown',
-  'txt',
-  'json',
-  'html',
-  'htm',
-]
+const OPEN_DIALOG_EXTENSIONS = EDITOR_DIALOG_EXTENSIONS
 
 function notifyUnsupportedFile(filePath: string): void {
   const ext = extname(filePath).slice(1).toLowerCase() || basename(filePath)
@@ -1887,11 +1867,11 @@ function registerHomeIpc(): void {
       title: tm('dlgOpenTitle'),
       filters: [
         { name: tm('filterSupported'), extensions: OPEN_DIALOG_EXTENSIONS },
-        { name: tm('filterWord'), extensions: ['docx', 'doc'] },
-        { name: tm('filterExcel'), extensions: ['xlsx', 'xlsm', 'xls', 'csv', 'tsv'] },
-        { name: tm('filterPpt'), extensions: ['pptx', 'ppt'] },
+        { name: tm('filterWord'), extensions: EDITOR_EXTENSIONS.docs },
+        { name: tm('filterExcel'), extensions: EDITOR_EXTENSIONS.sheets },
+        { name: tm('filterPpt'), extensions: EDITOR_EXTENSIONS.slides },
         { name: tm('filterPdf'), extensions: ['pdf'] },
-        { name: tm('filterMarkdown'), extensions: ['md', 'markdown', 'txt', 'json'] },
+        { name: tm('filterMarkdown'), extensions: EDITOR_EXTENSIONS.markdown },
         { name: tm('filterHtml'), extensions: ['html', 'htm'] },
       ],
       properties: ['openFile', 'multiSelections'],
@@ -3819,11 +3799,17 @@ app.whenReady().then(async () => {
     save: async (kind, contents, path) => {
       switch (kind) {
         case 'docs':
-          return mcpDocsControl.runCommand(contents.id, 'save_document', { path, overwrite: true })
+          return /\.(?:docm|dotm)$/i.test(path)
+            ? mcpDocsControl.saveStagedDocm(contents.id, path)
+            : mcpDocsControl.runCommand(contents.id, 'save_document', { path, overwrite: true })
         case 'sheets':
-          return mcpSheetsControl.runCommand(contents.id, 'save_sheet', { path, overwrite: true })
+          return /\.xlsm$/i.test(path)
+            ? mcpSheetsControl.saveStagedXlsm(contents.id, path)
+            : mcpSheetsControl.runCommand(contents.id, 'save_sheet', { path, overwrite: true })
         case 'slides':
-          return mcpSlidesControl.saveDeck(contents.id, path, true)
+          return /\.(?:pptm|ppsm|potm)$/i.test(path)
+            ? mcpSlidesControl.saveStagedMacro(contents.id, path)
+            : mcpSlidesControl.saveDeck(contents.id, path, true)
         case 'pdf':
           return flushPdfSave(contents)
         case 'markdown':

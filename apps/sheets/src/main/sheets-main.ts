@@ -1,3 +1,12 @@
+import { EDITOR_EXTENSIONS } from '@genoffice/file-formats'
+import {
+  CONVERTED_WORKBOOK_EXTENSIONS,
+  prepareConvertedWorkbookForOpen,
+  WorkbookImportTooLargeError,
+  importWorkbookCopyBytes,
+  MAX_DELIMITED_IMPORT_BYTES,
+} from './workbook-import'
+import type { WorkbookImportInfo } from '../shared/desktop-api'
 import {
   assertDirectoryStagePicker,
   assertDirectoryStageWrite,
@@ -1670,7 +1679,6 @@ interface SheetsTabSession {
 /// Same ceiling as local add_image (readLocalImage's 20MB check)
 const MAX_REMOTE_IMAGE_BYTES = 20 * 1024 * 1024
 /** Max .csv/.tsv bytes converted on open: stops a 500MB text file OOMing main before sidecar limits. */
-const MAX_DELIMITED_IMPORT_BYTES = 32 * 1024 * 1024
 
 const sheetsTabs = new Map<number, SheetsTabSession>()
 let activeSheetsWebContents: WebContents | null = null
@@ -1736,7 +1744,7 @@ async function saveFileDialog(event: IpcMainInvokeEvent, options: SaveDialogOpti
 
 /** Workbook file extensions the open pipeline accepts. Single source for the
  *  picker filters, the merge-source check, and the crash re-open check. */
-const WORKBOOK_EXTS = new Set(['xlsx', 'xlsm', 'xls', 'csv', 'tsv'])
+const WORKBOOK_EXTS = new Set(['xlsx', 'xltx', 'xlsm', 'xltm', 'xls', 'ods', 'xlsb', 'csv', 'tsv'])
 
 /** register a tab's webContents/client pair and wire up cleanup on teardown */
 /** Clients whose process-death notification is already wired. A sidecar client
@@ -2402,7 +2410,9 @@ const ATTACHMENT_EXTS = new Set([
   'pptx',
   'ppt',
   'xlsx',
+  'xltx',
   'xlsm',
+  'xltm',
   'xls',
   ...ATTACHMENT_IMAGE_EXTS,
 ])
@@ -2704,9 +2714,7 @@ export function registerSheetsIpc(): void {
     if (!path) {
       const selection = await openFileDialog(event, {
         properties: ['openFile'],
-        filters: [
-          { name: tm('filterSpreadsheets'), extensions: ['xlsx', 'xlsm', 'xls', 'csv', 'tsv'] },
-        ],
+        filters: [{ name: tm('filterSpreadsheets'), extensions: EDITOR_EXTENSIONS.sheets }],
       })
       if (selection.canceled || !selection.filePaths[0]) return null
       path = selection.filePaths[0]
@@ -2728,6 +2736,7 @@ export function registerSheetsIpc(): void {
     const result = await openWorkbookSession(entry.client, prepared.openPath, entry.sessions, {
       displayName: basename(path),
       suggestSaveAs: prepared.suggestSaveAs,
+      importInfo: prepared.importInfo,
       csvImport: prepared.csvImport,
       csvSourcePath: prepared.csvSourcePath,
       emptyCsv: prepared.emptyCsv,
@@ -2825,6 +2834,7 @@ export function registerSheetsIpc(): void {
         const result = await openWorkbookSession(entry.client, prepared.openPath, entry.sessions, {
           displayName: basename(path),
           suggestSaveAs: prepared.suggestSaveAs,
+          importInfo: prepared.importInfo,
           csvImport: prepared.csvImport,
           csvSourcePath: prepared.csvSourcePath,
           importTempDir: prepared.importTempDir,
@@ -2850,9 +2860,7 @@ export function registerSheetsIpc(): void {
   ipcMain.handle(IPC_CHANNELS.selectWorkbooksForMerge, async (event) => {
     const selection = await openFileDialog(event, {
       properties: ['openFile', 'multiSelections'],
-      filters: [
-        { name: tm('filterSpreadsheets'), extensions: ['xlsx', 'xlsm', 'xls', 'csv', 'tsv'] },
-      ],
+      filters: [{ name: tm('filterSpreadsheets'), extensions: EDITOR_EXTENSIONS.sheets }],
     })
     if (selection.canceled || selection.filePaths.length === 0) return null
     return openMergeSources(event, selection.filePaths)
@@ -3290,12 +3298,17 @@ export function registerSheetsIpc(): void {
       // session stays an unsaved new one (Ctrl+S still asks where to save)
       targetPath = session.path
     } else if (request.mode === 'save-as' || session.suggestSaveAs !== undefined) {
-      // .xlsm keeps its extension: untouched archive entries (vbaProject.bin,
-      // the macro-enabled content type) round-trip verbatim through the save.
-      const macroEnabled = /\.xlsm$/i.test(
-        session.suggestSaveAs ?? session.restoreTarget ?? session.path,
-      )
-      const ext = macroEnabled ? 'xlsm' : 'xlsx'
+      // Macro-enabled workbooks/templates keep VBA parts while Save As can
+      // switch only between the macro-enabled package types.
+      const sourcePath = session.suggestSaveAs ?? session.restoreTarget ?? session.path
+      const macroEnabled = /\.(?:xlsm|xltm)$/i.test(sourcePath)
+      const ext = macroEnabled
+        ? /\.xltm$/i.test(sourcePath)
+          ? 'xltm'
+          : 'xlsm'
+        : /\.xltx$/i.test(sourcePath)
+          ? 'xltx'
+          : 'xlsx'
       const selection = await saveFileDialog(event, {
         defaultPath:
           session.suggestSaveAs ??
@@ -3303,9 +3316,15 @@ export function registerSheetsIpc(): void {
           session.restoreTarget ??
           session.path,
         filters: macroEnabled
-          ? [{ name: tm('filterXlsm'), extensions: ['xlsm'] }]
+          ? [
+              { name: tm('filterXlsm'), extensions: ['xlsm'] },
+              // No dedicated xltm label; the macro-enabled workbook label covers the template too.
+              { name: tm('filterXlsm'), extensions: ['xltm'] },
+            ]
           : [
               { name: tm('filterXlsx'), extensions: ['xlsx'] },
+              // No dedicated xltx label; reuse the xlsx label for the template.
+              { name: tm('filterXlsx'), extensions: ['xltx'] },
               { name: tm('filterCsv'), extensions: ['csv'] },
             ],
         // CSV import: explain why the save goes through .xlsx (CSV keeps values only)
@@ -3319,7 +3338,9 @@ export function registerSheetsIpc(): void {
       if (!macroEnabled && selection.filePath.toLowerCase().endsWith('.csv')) {
         return { canceled: true, csvSaveAsPath: selection.filePath }
       }
-      targetPath = selection.filePath.toLowerCase().endsWith(`.${ext}`)
+      targetPath = (macroEnabled ? /\.(?:xlsm|xltm)$/i : /\.(?:xlsx|xltx)$/i).test(
+        selection.filePath,
+      )
         ? selection.filePath
         : `${selection.filePath}.${ext}`
     } else if (session.restoreTarget !== undefined) {
@@ -3498,7 +3519,7 @@ export function registerSheetsIpc(): void {
         : session.path
     try {
       await mkdir(recoveryDir(), { recursive: true })
-      await writeWorkbookTo(entry.client, session, request, recoveryPathFor(recoveryKey))
+      await writeWorkbookTo(entry.client, session, request, recoveryPathFor(recoveryKey), true)
       if (session.unsavedNew) rememberUnsavedNewRecovery(recoveryKey)
       return { ok: true }
     } catch (error) {
@@ -4093,6 +4114,7 @@ async function writeWorkbookTo(
   session: SessionInfo,
   request: WorkbookSaveRequest,
   targetPath: string,
+  preservePackageType = false,
 ): Promise<Awaited<ReturnType<typeof saveWorkbookViaSidecar>>> {
   // Sheet ops resolve first: added sheets have Univer ids the session map
   // doesn't know, so cell edits into them resolve through the op's name.
@@ -4322,6 +4344,7 @@ async function writeWorkbookTo(
     cells,
   }))
   const mutation = await saveWorkbookViaSidecar({
+    preservePackageType,
     client,
     // The snapshot, not the live path: the save base must be the bytes this
     // session's pending edits were made against, regardless of what other
@@ -4419,6 +4442,7 @@ async function openWorkbookSession(
     restoreTarget?: string | undefined
     emptySource?: boolean | undefined
     unsavedNew?: boolean | undefined
+    importInfo?: WorkbookImportInfo | undefined
   },
 ): Promise<WorkbookFile> {
   const {
@@ -4431,6 +4455,7 @@ async function openWorkbookSession(
     restoreTarget,
     emptySource,
     unsavedNew,
+    importInfo,
   } = options ?? {}
   // Snapshot first, then the sidecar opens the snapshot (not the live path):
   // everything the session serves — cell reads, media, recalc, saves — comes
@@ -4480,6 +4505,7 @@ async function openWorkbookSession(
       fileBytes: snapshotStat.size,
       readOnly: false,
       needsSaveAs: suggestSaveAs !== undefined,
+      ...(importInfo ? { importInfo } : {}),
       ...(unsavedNew ? { unsavedNew: true } : {}),
       ...(csvSourcePath === undefined ? {} : { csvPath: csvSourcePath }),
       ...(emptyCsv ? { emptyCsv: true } : {}),
@@ -4528,7 +4554,7 @@ function legacyCsvCharset(): string | undefined {
   return byLang[getUiLang()]
 }
 
-/// .xls and .tsv open as a converted copy in the temp dir; the session
+/// .xls, .ods, .xlsb and .tsv open as converted copies in the temp dir; the session
 /// remembers the original's .xlsx sibling as the Save As default. .csv converts
 /// the same way but keeps its file identity, so Save writes values back to it.
 async function prepareWorkbookForOpen(
@@ -4547,6 +4573,7 @@ async function prepareWorkbookForOpen(
   restoreTarget?: string
   emptySource?: boolean
   unsavedNew?: boolean
+  importInfo?: WorkbookImportInfo
 }> {
   // A shell-created "New spreadsheet" opens from a temp directory and has no
   // user-visible file yet: Save As produces it, and closing unsaved discards
@@ -4582,7 +4609,16 @@ async function prepareWorkbookForOpen(
     return { openPath: path, ...base }
   }
   const extension = path.slice(path.lastIndexOf('.') + 1).toLowerCase()
-  if (extension !== 'csv' && extension !== 'tsv' && extension !== 'xls') {
+  if (CONVERTED_WORKBOOK_EXTENSIONS.has(extension)) {
+    try {
+      return await prepareConvertedWorkbookForOpen(client, path, app.getPath('temp'))
+    } catch (error) {
+      if (error instanceof WorkbookImportTooLargeError)
+        throw new Error(tm('errFileTooLarge'), { cause: error })
+      throw error
+    }
+  }
+  if (extension !== 'csv' && extension !== 'tsv') {
     // Unsaved work from a lost session: offer the recovery copy. Restoring
     // opens it with restoreTarget pointing back at the original, so a plain
     // Save writes straight back over the file the user opened — the restore
@@ -4605,27 +4641,23 @@ async function prepareWorkbookForOpen(
   const directory = join(app.getPath('temp'), 'genoffice-imports', randomUUID())
   await mkdir(directory, { recursive: true })
   const openPath = join(directory, `${stem}.xlsx`)
-  let emptyCsv = false
+  let emptyCsv: boolean
   try {
-    if (extension === 'csv' || extension === 'tsv') {
-      const csvStat = await stat(path)
-      if (csvStat.size > MAX_DELIMITED_IMPORT_BYTES) throw new Error(tm('errFileTooLarge'))
-      const converted = await csvToXlsxBufferForOpen(
-        decodeCsvBuffer(await readFile(path), legacyCsvCharset()),
-        'Sheet1',
-        // A .tsv's delimiter is declared by its extension, and sniffing by
-        // frequency can get it wrong: annotation-heavy exports (gene
-        // descriptions, database cross-references) hold comma-separated
-        // lists, so a narrow table ends up with more commas than tabs and
-        // every row shatters on the comma. A .csv keeps the sniff — the prose
-        // guard in resolveImportDelimiter is what that path needs.
-        extension === 'tsv' ? '\t' : undefined,
-      )
-      emptyCsv = converted.empty
-      await writeFile(openPath, converted.buffer)
-    } else {
-      await client.convertWorkbook({ path, targetPath: openPath })
-    }
+    const csvStat = await stat(path)
+    if (csvStat.size > MAX_DELIMITED_IMPORT_BYTES) throw new Error(tm('errFileTooLarge'))
+    const converted = await csvToXlsxBufferForOpen(
+      decodeCsvBuffer(await readFile(path), legacyCsvCharset()),
+      'Sheet1',
+      // A .tsv's delimiter is declared by its extension, and sniffing by
+      // frequency can get it wrong: annotation-heavy exports (gene
+      // descriptions, database cross-references) hold comma-separated
+      // lists, so a narrow table ends up with more commas than tabs and
+      // every row shatters on the comma. A .csv keeps the sniff — the prose
+      // guard in resolveImportDelimiter is what that path needs.
+      extension === 'tsv' ? '\t' : undefined,
+    )
+    emptyCsv = converted.empty
+    await writeFile(openPath, converted.buffer)
   } catch (error) {
     await cleanupImportTempDirectory(app.getPath('temp'), directory)
     throw error
@@ -4751,6 +4783,14 @@ function installApplicationMenu(): void {
 export function stopSheetsSidecar(): void {
   sidecar?.stop()
   sidecar = null
+}
+
+/** The folder agent shares the editor's configured sidecar and import rules. */
+export async function importSheetsCopy(path: string) {
+  const client = sidecar ?? new XlsxSidecarClient(resolveSidecarPath())
+  sidecar = client
+  client.start()
+  return importWorkbookCopyBytes(client, path, app.getPath('temp'), legacyCsvCharset())
 }
 
 export {

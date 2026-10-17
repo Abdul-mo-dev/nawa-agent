@@ -785,6 +785,15 @@ const visualObjectSchema = z
   })
   .strict()
 
+export const workbookImportInfoSchema = z
+  .object({
+    format: z.enum(['ods', 'xlsb', 'xls']),
+    formulasAsValues: z.number().int().nonnegative(),
+    formulaReadFailures: z.number().int().nonnegative(),
+  })
+  .strict()
+export type WorkbookImportInfo = z.infer<typeof workbookImportInfoSchema>
+
 export const workbookFileSchema = z
   .object({
     sessionId: z.string().uuid(),
@@ -817,6 +826,8 @@ export const workbookFileSchema = z
     /// Converted .xls import: the first save opens a Save As dialog,
     /// so background flows (AutoSave) must not trigger mode 'save'.
     needsSaveAs: z.boolean().optional(),
+    /// Import conversion losses displayed until this session is saved or dismissed.
+    importInfo: workbookImportInfoSchema.optional(),
     /// The shell's "New spreadsheet" before its first save: still needsSaveAs
     /// for Ctrl+S, but AutoSave and the recovery copy keep running (a quiet
     /// save writes the backing temp file in place, no dialog).

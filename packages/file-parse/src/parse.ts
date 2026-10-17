@@ -6,6 +6,9 @@ import { pdfToText } from './pdf'
 import { pptToText } from './ppt'
 import { pptxToText } from './pptx'
 import { xlsxToText } from './xlsx'
+import { RAG_TEXT_EXTENSIONS } from './formats'
+import { openDocumentRag } from './opendocument'
+import { basename } from 'node:path'
 
 export type ParsedFileKind = 'text' | 'image' | 'unsupported'
 
@@ -26,18 +29,24 @@ const IMAGE_MIMES: Record<string, string> = {
   webp: 'image/webp',
 }
 
-const TEXT_EXTS = new Set([
-  'txt',
-  'md',
-  'markdown',
-  'csv',
-  'tsv',
-  'json',
-  'xml',
-  'html',
-  'htm',
-  'log',
-  'py',
+const TEXT_EXTS = new Set<string>(RAG_TEXT_EXTENSIONS)
+const OFFICE_EXTS = new Set([
+  'docx',
+  'docm',
+  'dotx',
+  'dotm',
+  'pptx',
+  'ppsx',
+  'potx',
+  'pptm',
+  'ppsm',
+  'potm',
+  'xlsx',
+  'xltx',
+  'xlsm',
+  'xltm',
+  'odt',
+  'odp',
 ])
 
 const FATAL_UTF8_DECODER = new TextDecoder('utf-8', { fatal: true })
@@ -74,7 +83,15 @@ type BinaryKind = 'zip' | 'pdf' | 'ole2' | 'unknown'
 const PDF_HEADER_WINDOW = 1024
 
 function sniffBinary(bytes: Buffer): BinaryKind {
-  if (bytes.length >= 2 && bytes[0] === 0x50 && bytes[1] === 0x4b) return 'zip'
+  if (
+    bytes.length >= 4 &&
+    bytes[0] === 0x50 &&
+    bytes[1] === 0x4b &&
+    ((bytes[2] === 0x03 && bytes[3] === 0x04) ||
+      (bytes[2] === 0x05 && bytes[3] === 0x06) ||
+      (bytes[2] === 0x07 && bytes[3] === 0x08))
+  )
+    return 'zip'
   if (bytes.subarray(0, PDF_HEADER_WINDOW).includes(Buffer.from('%PDF-'))) return 'pdf'
   if (
     bytes.length >= 4 &&
@@ -114,10 +131,7 @@ export async function parseFileToText(filePath: string): Promise<ParsedFile> {
         error: `Content mismatch: .pdf file has ${sniffed} magic bytes`,
       }
     }
-    if (
-      (ext === 'docx' || ext === 'pptx' || ext === 'xlsx' || ext === 'xlsm') &&
-      sniffed !== 'zip'
-    ) {
+    if (OFFICE_EXTS.has(ext) && sniffed !== 'zip') {
       return {
         ok: false,
         kind: 'text',
@@ -136,6 +150,15 @@ export async function parseFileToText(filePath: string): Promise<ParsedFile> {
       }
     }
     switch (ext) {
+      case 'odt':
+      case 'odp': {
+        const document = await openDocumentRag(bytes, basename(filePath), ext)
+        return {
+          ok: true,
+          kind: 'text',
+          text: document.blocks.map((block) => block.text).join('\n'),
+        }
+      }
       case 'doc':
         return {
           ok: true,
@@ -143,13 +166,23 @@ export async function parseFileToText(filePath: string): Promise<ParsedFile> {
           text: sniffed === 'zip' ? await docxToText(bytes) : await docToText(bytes),
         }
       case 'docx':
+      case 'docm':
+      case 'dotx':
+      case 'dotm':
         return { ok: true, kind: 'text', text: await docxToText(bytes) }
       case 'ppt':
         return { ok: true, kind: 'text', text: await pptToText(bytes) }
       case 'pptx':
+      case 'ppsx':
+      case 'potx':
+      case 'pptm':
+      case 'ppsm':
+      case 'potm':
         return { ok: true, kind: 'text', text: await pptxToText(bytes) }
       case 'xlsx':
+      case 'xltx':
       case 'xlsm':
+      case 'xltm':
         return { ok: true, kind: 'text', text: await xlsxToText(bytes) }
       case 'pdf':
         return { ok: true, kind: 'text', text: await pdfToText(bytes) }

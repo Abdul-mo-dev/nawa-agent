@@ -1,0 +1,54 @@
+{
+  "files": [
+    {
+      "extension": "docm",
+      "target": "docx",
+      "file": "sample.docm",
+      "sha256": "18f903251422b4f039b43100255089ca282a40fdcba7fe0b7f4afad81f594606",
+      "vbaPart": "word/vbaProject.bin",
+      "vbaSha256": "c25abc9ea72be25f56adcfe40b2e6e469943bd7b85f340beb051bc79a3d9e76b",
+      "mainType": "application/vnd.ms-word.document.macroEnabled.main+xml",
+      "bytes": 4571
+    },
+    {
+      "extension": "dotm",
+      "target": "docx",
+      "file": "sample.dotm",
+      "sha256": "62750cda991bfeae162fa434368191f2b60472e390d1c7fd60927b7a42eecac7",
+      "vbaPart": "word/vbaProject.bin",
+      "vbaSha256": "c25abc9ea72be25f56adcfe40b2e6e469943bd7b85f340beb051bc79a3d9e76b",
+      "mainType": "application/vnd.ms-word.template.macroEnabled.main+xml",
+      "bytes": 4575
+    },
+    {
+      "extension": "pptm",
+      "target": "pptx",
+      "file": "sample.pptm",
+      "sha256": "51c1fb7b7879d1c9b79f034c36b70221a522e5349d729e1c56fa3147881100cb",
+      "vbaPart": "ppt/vbaProject.bin",
+      "vbaSha256": "c3beab747082442f3d16ff07a9899608c988242a05f7a4d140fbef758a89f654",
+      "mainType": "application/vnd.ms-powerpoint.presentation.macroEnabled.main+xml",
+      "bytes": 27474
+    },
+    {
+      "extension": "ppsm",
+      "target": "pptx",
+      "file": "sample.ppsm",
+      "sha256": "168557db357a8fd0f420e52ab30891cb74353b502a6adfc8cf1d0bb1c88a505a",
+      "vbaPart": "ppt/vbaProject.bin",
+      "vbaSha256": "c3beab747082442f3d16ff07a9899608c988242a05f7a4d140fbef758a89f654",
+      "mainType": "application/vnd.ms-powerpoint.slideshow.macroEnabled.main+xml",
+      "bytes": 27477
+    },
+    {
+      "extension": "potm",
+      "target": "pptx",
+      "file": "sample.potm",
+      "sha256": "dd6d94c39f4e3baf58fe1330cce25d771eb94abbfa44682c30eab21d010bbf3b",
+      "vbaPart": "ppt/vbaProject.bin",
+      "vbaSha256": "c3beab747082442f3d16ff07a9899608c988242a05f7a4d140fbef758a89f654",
+      "mainType": "application/vnd.ms-powerpoint.template.macroEnabled.main+xml",
+      "bytes": 27477
+    }
+  ]
+}

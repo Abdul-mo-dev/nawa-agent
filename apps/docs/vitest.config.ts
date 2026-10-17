@@ -8,11 +8,15 @@ const local = (rel: string) => fileURLToPath(new URL(rel, import.meta.url))
 
 export default defineConfig({
   resolve: {
-    alias: {
+    alias: Object.entries({
+      '@genoffice/docx-engine/zip-splice': local('../../packages/docx-engine/src/zip-splice.ts'),
       '@genoffice/docx-engine/lazy-media': local('../../packages/docx-engine/src/lazy-media.ts'),
       '@genoffice/docx-engine': local('../../packages/docx-engine/src/index.ts'),
       '@genoffice/font-metrics': local('../../packages/font-metrics/src/index.ts'),
       // subpath before the bare name: string aliases are prefix replacements
+      '@genoffice/electron-utils/legacy-office': local(
+        '../../packages/electron-utils/src/legacy-office.ts',
+      ),
       '@genoffice/electron-utils/atomic-write': local(
         '../../packages/electron-utils/src/atomic-write.ts',
       ),
@@ -27,11 +31,21 @@ export default defineConfig({
       ),
       '@genoffice/electron-utils': local('../../packages/electron-utils/src/index.ts'),
       '@genoffice/ai-provider/browser': local('../../packages/ai-provider/src/browser.ts'),
+      '@genoffice/ai-provider/codex-app-server': local(
+        '../../packages/ai-provider/src/codex-app-server.ts',
+      ),
+      '@genoffice/ai-provider/custom-models': local(
+        '../../packages/ai-provider/src/custom-models.ts',
+      ),
       '@genoffice/ai-provider': local('../../packages/ai-provider/src/index.ts'),
       '@genoffice/i18n': local('../../packages/i18n/src/index.ts'),
       '@genoffice/ui/chat-model-picker.css': local('../../packages/ui/src/chat-model-picker.css'),
       '@genoffice/ui': local('../../packages/ui/src/index.ts'),
-    },
+    }).map(([find, replacement]) => ({
+      // Exact matches keep unlisted exported subpaths from becoming index.ts/subpath.
+      find: new RegExp(`^${find.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`),
+      replacement,
+    })),
   },
   test: {
     include: ['tests/**/*.test.ts'],

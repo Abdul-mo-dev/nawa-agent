@@ -1,6 +1,10 @@
 import type { zh } from './zh'
 
 export const ko = {
+  appWorkbookImportNotice:
+    '.{format} 파일을 XLSX 사본으로 열었습니다. 원본은 변경되지 않습니다. 서식, 차트, 이미지, 매크로 및 이름이 지정된 범위는 가져오지 않습니다.',
+  appWorkbookImportFormulaLoss:
+    '캐시된 값으로 유지된 수식: {formulas}. 수식을 읽지 못한 시트: {sheets}.',
   appMergeWorkbooks: '통합 문서 병합',
   appMergeWorkbooksTip: '다른 Excel 파일의 시트를 현재 통합 문서에 추가합니다',
   appMergeWorkbooksPicking: '병합할 파일 선택…',

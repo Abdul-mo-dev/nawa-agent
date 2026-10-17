@@ -4,7 +4,8 @@
  * costs the reads of its XML parts and nothing else.
  */
 import { open, type FileHandle } from 'node:fs/promises'
-import { crc32, inflateRawSync } from 'node:zlib'
+import { crc32, deflateRawSync, inflateRawSync } from 'node:zlib'
+import { officePackageChanges, OFFICE_PACKAGE_METADATA_LIMIT } from '@genoffice/file-formats'
 import {
   LAZY_MEDIA_PLACEHOLDER_BYTES,
   isLazyMediaPart,
@@ -54,6 +55,51 @@ export function bufferSource(buf: Buffer): ByteSource {
     size: buf.length,
     read: async (offset, length) => buf.subarray(offset, offset + length),
   }
+}
+
+/** Normalize document/template Save As without recompressing any media parts. */
+export async function normalizeDocxFormat(bytes: Buffer, filePath: string): Promise<Buffer> {
+  const source = bufferSource(bytes)
+  const entries = await readZipEntries(source)
+  const metadata = new Map<string, string>()
+  for (const item of entries) {
+    if (item.name !== '[Content_Types].xml' && !item.name.endsWith('.rels')) continue
+    if (item.usize > OFFICE_PACKAGE_METADATA_LIMIT)
+      throw new Error('Office package metadata exceeds the size limit.')
+    const data = await source.read(item.dataOffset, item.csize)
+    if (item.method !== 0 && item.method !== 8) throw new Error('Unsupported ZIP compression.')
+    const content =
+      item.method === 8
+        ? inflateRawSync(data, { maxOutputLength: OFFICE_PACKAGE_METADATA_LIMIT })
+        : data
+    metadata.set(item.name, content.toString('utf8'))
+  }
+  const changes = officePackageChanges(
+    entries.map((item) => item.name),
+    metadata,
+    filePath,
+  )
+  if (changes.replaced.size === 0 && changes.removed.size === 0) return bytes
+  const out = []
+  for (const item of entries) {
+    if (changes.removed.has(item.name)) continue
+    const replacement = changes.replaced.get(item.name)
+    if (replacement !== undefined) {
+      const content = Buffer.from(replacement, 'utf8')
+      const compressed = deflateRawSync(content)
+      out.push({
+        meta: {
+          ...item,
+          method: 8,
+          crc: crc32(content),
+          csize: compressed.length,
+          usize: content.length,
+        },
+        data: compressed,
+      })
+    } else out.push({ meta: item, data: await source.read(item.dataOffset, item.csize) })
+  }
+  return writeZip(out)
 }
 
 function fileSource(fh: FileHandle, size: number): ByteSource {

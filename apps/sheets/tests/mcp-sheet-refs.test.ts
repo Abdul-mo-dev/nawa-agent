@@ -227,6 +227,7 @@ describe('mcp bridge sheet addressing', () => {
       focusSheet: vi.fn(),
       applyOps: vi.fn().mockResolvedValue({ ok: true }),
       saveTo: vi.fn().mockResolvedValue({ ok: true }),
+      saveCurrent: vi.fn().mockResolvedValue({ ok: true }),
       ...overrides,
     }
   }

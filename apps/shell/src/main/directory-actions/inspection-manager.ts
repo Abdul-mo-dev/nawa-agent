@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
-import { copyFile, mkdir, rm } from 'node:fs/promises'
+import { copyFile, mkdir, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join } from 'node:path'
 import {
   directoryToolAllowed,
@@ -11,9 +11,14 @@ import {
 import type { DirectoryInspection } from '../../shared/directory-actions-api'
 import type { ActionDependencies, NativeStage } from './manager'
 import { hashFile, samePath } from './file-safety'
-import { NATIVE_FILE_EXTENSIONS } from '../../shared/file-capabilities'
+import {
+  DIRECTORY_FILE_EXTENSIONS,
+  directoryImportTarget,
+  directoryImportPath,
+} from '../../shared/file-capabilities'
+import { importDirectoryCopy } from './import-copy'
 
-const FORMATS = new Set<string>(NATIVE_FILE_EXTENSIONS)
+const FORMATS = new Set<string>(DIRECTORY_FILE_EXTENSIONS)
 const MAX_SESSIONS_PER_RUN = 3
 interface Session {
   id: string
@@ -54,7 +59,7 @@ export class DirectoryInspectionManager {
     await this.authorize(owner, run, path)
     if (!FORMATS.has(extname(path).toLowerCase()))
       throw new Error(
-        'Native inspection supports DOCX, XLSX, PPTX, PDF, Markdown and HTML. Use read_file for other supported text formats.',
+        'Native inspection supports DOCX, DOCM, XLSX, XLSM, PPTX, PDF, Markdown, HTML and supported Office imports. Use read_file for other supported text formats.',
       )
     const existing = [...this.sessions.values()].find(
       (s) => s.owner === owner && s.run === run && samePath(s.path, path),
@@ -100,9 +105,21 @@ export class DirectoryInspectionManager {
       if ((await hashFile(stagePath)) !== item.hash)
         throw new Error('The file changed while its inspection snapshot was copied.')
       await this.validate(item)
-      item.native = await this.deps.open(stagePath)
+      let importWarnings: string[] = []
+      if (directoryImportTarget(path)) {
+        const { bytes, warnings } = await importDirectoryCopy(this.deps, stagePath)
+        importWarnings = warnings
+        await this.validate(item)
+        item.stagePath = directoryImportPath(stagePath)
+        await writeFile(item.stagePath, bytes, { flag: 'wx' })
+      }
+      item.native = await this.deps.open(item.stagePath)
       this.item(owner, run, id)
       const description = await item.native.describe('read')
+      if (directoryImportTarget(path))
+        description.context +=
+          '\nFile import: structure describes the converted modern copy. Original saved bytes remain unchanged.\n' +
+          importWarnings.join('\n')
       if (
         description.protocolVersion !== DIRECTORY_PROTOCOL_VERSION ||
         description.mode !== 'read' ||

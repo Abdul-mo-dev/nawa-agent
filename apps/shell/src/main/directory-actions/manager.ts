@@ -15,7 +15,13 @@ import type { AnalyticsReadAction, AnalyticsEnvelope, SourceRef } from '../../sh
 import { conversionSupported } from '../../../../../packages/cli/src/conversion-routes'
 import { directoryToolAllowed, DIRECTORY_PROTOCOL_VERSION } from '@genoffice/agent-core'
 import { DirectoryInspectionManager } from './inspection-manager'
-import { NATIVE_FILE_EXTENSIONS } from '../../shared/file-capabilities'
+import {
+  DIRECTORY_FILE_EXTENSIONS,
+  NATIVE_FILE_EXTENSIONS,
+  directoryImportTarget,
+  directoryImportPath,
+} from '../../shared/file-capabilities'
+import { importDirectoryCopy, type DirectoryImportedCopy } from './import-copy'
 import { randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
 import { copyFile, lstat, mkdir, rm, writeFile } from 'node:fs/promises'
@@ -98,6 +104,8 @@ export interface ActionDependencies {
   stateDirectory: string
   blank(ext: string): Promise<Uint8Array | string>
   open(path: string): Promise<NativeStage>
+  importOffice?(path: string): Promise<Uint8Array>
+  importWorkbook?(path: string): Promise<DirectoryImportedCopy>
   assertClosed(path: string): Promise<void>
   trash(path: string): Promise<void>
   extract(path: string): Promise<string>
@@ -130,6 +138,7 @@ interface Pending extends DirectoryApproval {
   filesystem?: FilesystemSnapshot
   run: string
   stagePath?: string
+  baselinePath?: string
   abort?: AbortController
   workflowWarnings?: string[]
   workflowOptions?: DirectoryWorkflowOptions
@@ -142,7 +151,8 @@ interface Pending extends DirectoryApproval {
   tools: Set<string>
   operations: { tool: string; summary: string; ok: boolean; input: string }[]
 }
-const FORMATS = new Set<string>(NATIVE_FILE_EXTENSIONS)
+const FORMATS = new Set<string>(DIRECTORY_FILE_EXTENSIONS)
+const CREATE_FORMATS = new Set<string>(NATIVE_FILE_EXTENSIONS)
 const error = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause))
 
 /** Main-process authority for immutable proposals. Renderer/model never supplies saved bytes. */
@@ -219,6 +229,7 @@ export class DirectoryActionManager {
       path,
       instruction,
       beforeHash,
+      sourcePath,
       afterHash,
       beforeText,
       afterText,
@@ -236,6 +247,7 @@ export class DirectoryActionManager {
       path,
       instruction,
       beforeHash,
+      sourcePath,
       afterHash,
       beforeText,
       afterText,
@@ -272,7 +284,13 @@ export class DirectoryActionManager {
       return
     }
     if (item.operation === 'create') {
+      const importedSibling =
+        item.sourcePath &&
+        run.scope.files.some((p) => samePath(p, item.sourcePath!)) &&
+        samePath(dirname(item.path), dirname(item.sourcePath)) &&
+        extname(item.path).toLowerCase() === `.${directoryImportTarget(item.sourcePath)}`
       if (
+        !importedSibling &&
         ![run.scope.opened, ...run.scope.directories].some(
           (p) => p && samePath(p, dirname(item.path)),
         )
@@ -308,6 +326,7 @@ export class DirectoryActionManager {
     }
     await this.verifySources(owner, item.run)
     await this.deps.assertClosed(item.path)
+    if (item.sourcePath) await this.deps.assertClosed(item.sourcePath)
     this.run(owner, item.run)
   }
   async propose(owner: number, runId: string, raw: DirectoryProposal): Promise<DirectoryApproval> {
@@ -367,7 +386,15 @@ export class DirectoryActionManager {
       !FORMATS.has(extname(raw.path).toLowerCase())
     )
       throw new Error(
-        'Staged editing supports DOCX, XLSX, PPTX, PDF, Markdown and HTML. Legacy spreadsheet formats must first be saved as XLSX.',
+        'Staged editing supports DOCX, DOCM, XLSX, XLSM, PPTX, PDF, Markdown, HTML, and the supported Office import formats.',
+      )
+    if (
+      raw.operation === 'create' &&
+      !raw.workflow?.conversion &&
+      !CREATE_FORMATS.has(extname(raw.path).toLowerCase())
+    )
+      throw new Error(
+        'Create new documents as DOCX, XLSX or PPTX; imports are copy-only, and DOCM/XLSM require existing files.',
       )
     if (raw.operation !== 'create' && !run.scope.files.some((p) => samePath(p, raw.path)))
       throw new Error('The target file is not explicitly selected.')
@@ -434,6 +461,25 @@ export class DirectoryActionManager {
       await regularFile(await this.deps.roots(), raw.path)
       item.beforeHash = await hashFile(raw.path)
     }
+    if (raw.operation === 'update' && directoryImportTarget(raw.path)) {
+      const modernPath = directoryImportPath(raw.path)
+      let destination = modernPath
+      for (let number = 1; await exists(destination); number++) {
+        if (number > 10000) throw new Error('Could not choose a new modern copy filename.')
+        destination = join(
+          dirname(modernPath),
+          `${basename(modernPath, extname(modernPath))}-edited${number === 1 ? '' : `-${number}`}${extname(modernPath)}`,
+        )
+      }
+      item.sourcePath = raw.path
+      item.sources = [
+        { path: raw.path, hash: item.beforeHash! },
+        ...(item.sources ?? []).filter((source) => !samePath(source.path, raw.path)),
+      ]
+      item.operation = 'create'
+      item.path = destination
+      item.beforeHash = null
+    }
     const imageDocument = raw.operation === 'update' ? raw.path : item.workflow?.conversion?.source
     if (imageDocument && this.deps.linkedImages) {
       item.imageDocument = imageDocument
@@ -475,103 +521,140 @@ export class DirectoryActionManager {
       const directory = join(this.deps.stateDirectory, 'directory-staging', item.id)
       await mkdir(directory, { recursive: true })
       item.stagePath = join(directory, basename(item.path))
-      if (item.operation === 'update')
-        await copyFile(item.path, item.stagePath, constants.COPYFILE_EXCL)
-      else if (!item.workflow?.conversion)
-        await writeFile(item.stagePath, await this.deps.blank(extname(item.path).toLowerCase()), {
-          flag: 'wx',
-        })
-      this.item(owner, id)
-      if (item.operation === 'update' && (await hashFile(item.stagePath)) !== item.beforeHash)
-        throw new Error('The original changed while preparing its staging copy.')
-      const sources: DirectoryWorkflowOptions['sources'] = []
-      const referenceDir = join(directory, 'references')
-      for (const [index, source] of (item.sources ?? []).entries()) {
-        await mkdir(referenceDir, { recursive: true })
-        const name = `${index + 1}-${basename(source.path)}`
-        const path = join(referenceDir, String(index + 1), basename(source.path))
-        await mkdir(dirname(path), { recursive: true })
-        await copyFile(source.path, path, constants.COPYFILE_EXCL)
-        if ((await hashFile(path)) !== source.hash)
-          throw new Error('Reference changed while copying it.')
-        sources.push({
-          path,
-          name,
-          ext: extname(path).slice(1).toLowerCase(),
-          sizeBytes: (await lstat(path)).size,
-        })
-      }
-      if (
-        context?.task !== undefined &&
-        (typeof context.task !== 'string' || context.task.length > 80000)
-      )
-        throw new Error('Invalid workflow task context.')
-      if (
-        context?.settings !== undefined &&
-        (!context.settings ||
-          typeof context.settings !== 'object' ||
-          JSON.stringify(context.settings).length > 256000)
-      )
-        throw new Error('Invalid workflow provider settings.')
-      item.workflowOptions = {
-        generation: true,
-        network: item.workflow?.network === true,
-        media: item.workflow?.media === true,
-        sources,
-        task: context?.task ?? item.instruction,
-        settings: context?.settings,
-      }
-      if (item.imageDocument && item.imageSources?.length && this.deps.stageImages) {
-        const copy =
-          item.operation === 'update'
-            ? item.stagePath
-            : sources[item.sources!.findIndex((s) => samePath(s.path, item.imageDocument!))]?.path
-        if (!copy) throw new Error('No private image-bearing source copy.')
-        await this.deps.stageImages(item.imageDocument, copy, item.imageSources)
-      }
-      item.abort = new AbortController()
-      if (item.workflow?.conversion) {
-        if (!this.deps.convert) throw new Error('Native conversion service is not configured.')
-        const sourceIndex = item.sources!.findIndex((s) =>
-          samePath(s.path, item.workflow!.conversion!.source),
-        )
-        if (sourceIndex < 0 || !sources[sourceIndex])
-          throw new Error('Conversion source is not selected.')
-        item.workflowWarnings = await this.deps.convert(
-          sources[sourceIndex]!.path,
-          item.stagePath,
-          item.workflow.conversion,
-          item.abort.signal,
-          item.workflow.network === true,
-        )
+      item.abort ??= new AbortController()
+      try {
+        if (item.sourcePath) {
+          const inputDirectory = join(directory, 'source')
+          await mkdir(inputDirectory)
+          const snapshot = join(inputDirectory, basename(item.sourcePath))
+          await copyFile(item.sourcePath, snapshot, constants.COPYFILE_EXCL)
+          const source = item.sources!.find((value) => samePath(value.path, item.sourcePath!))!
+          if ((await hashFile(snapshot)) !== source.hash)
+            throw new Error('The original changed while preparing its import snapshot.')
+          const imported = await importDirectoryCopy(this.deps, snapshot)
+          const { bytes } = imported
+          this.item(owner, id)
+          await this.validate(owner, item)
+          await writeFile(item.stagePath, bytes, { flag: 'wx' })
+          const beforeDirectory = join(directory, 'before')
+          await mkdir(beforeDirectory)
+          item.baselinePath = join(beforeDirectory, basename(item.path))
+          await writeFile(item.baselinePath, bytes, { flag: 'wx' })
+          item.workflowWarnings = imported.warnings
+        } else if (item.operation === 'update')
+          await copyFile(item.path, item.stagePath, constants.COPYFILE_EXCL)
+        else if (!item.workflow?.conversion)
+          await writeFile(item.stagePath, await this.deps.blank(extname(item.path).toLowerCase()), {
+            flag: 'wx',
+          })
         this.item(owner, id)
-        await this.validate(owner, item)
-        item.operations.push({
-          tool: 'convert',
-          summary: `Converted to ${item.workflow.conversion.to} with the GenOffice CLI`,
-          ok: true,
-          input: JSON.stringify(item.workflow.conversion),
-        })
-        item.phase = 'editing'
-        return null
-      }
-      item.native = await this.deps.open(item.stagePath)
-      const description = await item.native.describe('edit', item.workflowOptions)
-      this.item(owner, id)
-      if (
-        description.protocolVersion !== DIRECTORY_PROTOCOL_VERSION ||
-        description.mode !== 'edit' ||
-        !description.capabilities?.lifecycle
-      )
-        throw new Error(
-          'Native editing bridge is missing or stale. Rebuild every editor and the shell.',
+        if (item.operation === 'update' && (await hashFile(item.stagePath)) !== item.beforeHash)
+          throw new Error('The original changed while preparing its staging copy.')
+        const sources: DirectoryWorkflowOptions['sources'] = []
+        const referenceDir = join(directory, 'references')
+        for (const [index, source] of (item.sources ?? []).entries()) {
+          if (item.sourcePath && samePath(source.path, item.sourcePath)) {
+            // The target is already open as a converted copy; do not expose binary bytes as a reference.
+            continue
+          }
+          await mkdir(referenceDir, { recursive: true })
+          const name = `${index + 1}-${basename(source.path)}`
+          const path = join(referenceDir, String(index + 1), basename(source.path))
+          await mkdir(dirname(path), { recursive: true })
+          await copyFile(source.path, path, constants.COPYFILE_EXCL)
+          if ((await hashFile(path)) !== source.hash)
+            throw new Error('Reference changed while copying it.')
+          sources.push({
+            path,
+            name,
+            ext: extname(path).slice(1).toLowerCase(),
+            sizeBytes: (await lstat(path)).size,
+          })
+        }
+        if (
+          context?.task !== undefined &&
+          (typeof context.task !== 'string' || context.task.length > 80000)
         )
-      description.tools = description.tools.filter((tool) =>
-        directoryToolAllowed(description.kind, 'edit', tool.name, item.workflowOptions),
-      )
-      item.tools = new Set(description.tools.map((tool) => tool.name))
-      item.phase = 'editing'
-      return description
+          throw new Error('Invalid workflow task context.')
+        if (
+          context?.settings !== undefined &&
+          (!context.settings ||
+            typeof context.settings !== 'object' ||
+            JSON.stringify(context.settings).length > 256000)
+        )
+          throw new Error('Invalid workflow provider settings.')
+        item.workflowOptions = {
+          generation: true,
+          network: item.workflow?.network === true,
+          media: item.workflow?.media === true,
+          sources,
+          task: context?.task ?? item.instruction,
+          settings: context?.settings,
+        }
+        if (item.imageDocument && item.imageSources?.length && this.deps.stageImages) {
+          const copy =
+            item.operation === 'update'
+              ? item.stagePath
+              : sources[item.sources!.findIndex((s) => samePath(s.path, item.imageDocument!))]?.path
+          if (!copy) throw new Error('No private image-bearing source copy.')
+          await this.deps.stageImages(item.imageDocument, copy, item.imageSources)
+        }
+        item.abort ??= new AbortController()
+        if (item.workflow?.conversion) {
+          if (!this.deps.convert) throw new Error('Native conversion service is not configured.')
+          const sourceIndex = item.sources!.findIndex((s) =>
+            samePath(s.path, item.workflow!.conversion!.source),
+          )
+          if (sourceIndex < 0 || !sources[sourceIndex])
+            throw new Error('Conversion source is not selected.')
+          item.workflowWarnings = await this.deps.convert(
+            sources[sourceIndex]!.path,
+            item.stagePath,
+            item.workflow.conversion,
+            item.abort.signal,
+            item.workflow.network === true,
+          )
+          this.item(owner, id)
+          await this.validate(owner, item)
+          item.operations.push({
+            tool: 'convert',
+            summary: `Converted to ${item.workflow.conversion.to} with the GenOffice CLI`,
+            ok: true,
+            input: JSON.stringify(item.workflow.conversion),
+          })
+          item.phase = 'editing'
+          return null
+        }
+        item.native = await this.deps.open(item.stagePath)
+        const description = await item.native.describe('edit', item.workflowOptions)
+        this.item(owner, id)
+        if (
+          description.protocolVersion !== DIRECTORY_PROTOCOL_VERSION ||
+          description.mode !== 'edit' ||
+          !description.capabilities?.lifecycle
+        )
+          throw new Error(
+            'Native editing bridge is missing or stale. Rebuild every editor and the shell.',
+          )
+        description.tools = description.tools.filter((tool) =>
+          directoryToolAllowed(description.kind, 'edit', tool.name, item.workflowOptions),
+        )
+        item.tools = new Set(description.tools.map((tool) => tool.name))
+        item.phase = 'editing'
+        return description
+      } catch (cause) {
+        item.stagePath = undefined
+        item.baselinePath = undefined
+        item.abort = undefined
+        try {
+          await item.native?.close()
+        } catch {
+          /* Staging failed; drop the unapproved native stage. */
+        }
+        item.native = undefined
+        await rm(directory, { recursive: true, force: true }).catch(() => undefined)
+        throw cause
+      }
     })
   }
   async execute(owner: number, id: string, call: AgentToolCall): Promise<ToolExecution> {
@@ -656,17 +739,16 @@ export class DirectoryActionManager {
           .extract(path)
           .then((s) => s.slice(0, 12000))
           .catch((cause) => `Text preview unavailable: ${error(cause)}`)
-      item.beforeText = item.operation === 'update' ? await preview(item.path) : ''
+      const beforePath = item.baselinePath ?? (item.operation === 'update' ? item.path : null)
+      item.beforeText = beforePath ? await preview(beforePath) : ''
       item.afterText = await preview(item.stagePath)
-      item.review = await this.deps
-        .review?.(item.operation === 'update' ? item.path : null, item.stagePath)
-        .catch((cause) => ({
-          format: extname(item.path),
-          complete: false,
-          changed: 0,
-          entries: [],
-          warnings: [`Structured review unavailable: ${error(cause)}`],
-        }))
+      item.review = await this.deps.review?.(beforePath, item.stagePath).catch((cause) => ({
+        format: extname(item.path),
+        complete: false,
+        changed: 0,
+        entries: [],
+        warnings: [`Structured review unavailable: ${error(cause)}`],
+      }))
       if (!item.review)
         item.review = {
           format: extname(item.path),
@@ -779,6 +861,7 @@ export class DirectoryActionManager {
           filesystemResult ?? {
             path: item.path,
             operation: item.operation,
+            ...(item.sourcePath ? { sourcePath: item.sourcePath } : {}),
             ...(backupPath ? { backupPath } : {}),
           }
         )
@@ -1320,11 +1403,23 @@ export class DirectoryActionManager {
     }, 250)
     try {
       await mkdir(directory, { recursive: true })
-      const copy = join(directory, basename(path))
+      let copy = join(directory, basename(path))
       await copyFile(path, copy, constants.COPYFILE_EXCL)
       if ((await hashFile(copy)) !== hash)
         throw new Error('File changed while preparing validation.')
+      let importWarnings: string[] = []
+      if (directoryImportTarget(path)) {
+        const { bytes, warnings } = await importDirectoryCopy(this.deps, copy)
+        importWarnings = warnings
+        this.run(owner, id)
+        await regularFile(await this.deps.roots(), path)
+        if ((await hashFile(path)) !== hash)
+          throw new Error('File changed during conversion; validation discarded.')
+        copy = directoryImportPath(copy)
+        await writeFile(copy, bytes, { flag: 'wx' })
+      }
       const result = await this.deps.quality(copy, false, abort.signal)
+      result.warnings.push(...importWarnings)
       this.run(owner, id)
       await regularFile(await this.deps.roots(), path)
       if ((await hashFile(path)) !== hash)

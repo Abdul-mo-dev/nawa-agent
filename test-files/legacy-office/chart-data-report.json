@@ -1,0 +1,24 @@
+{
+  "testedAt": "2026-10-12T02:43:45.466Z",
+  "passed": true,
+  "cases": [
+    {
+      "file": "edited/presentation-sample-ppt.pptx",
+      "categories": ["Q1", "Q2", "Q3"],
+      "values": [4, 7, 3],
+      "passed": true
+    },
+    {
+      "file": "edited/presentation-sample-pps.pptx",
+      "categories": ["Q1", "Q2", "Q3"],
+      "values": [4, 7, 3],
+      "passed": true
+    },
+    {
+      "file": "edited/presentation-sample-pot.pptx",
+      "categories": ["Q1", "Q2", "Q3"],
+      "values": [4, 7, 3],
+      "passed": true
+    }
+  ]
+}

@@ -1,6 +1,10 @@
 import type { zh } from './zh'
 
 export const vi = {
+  appWorkbookImportNotice:
+    'Đã mở .{format} dưới dạng bản sao XLSX. Tệp gốc không thay đổi. Định dạng, biểu đồ, hình ảnh, macro và vùng có tên không được nhập.',
+  appWorkbookImportFormulaLoss:
+    'Công thức giữ dưới dạng giá trị lưu đệm: {formulas}. Trang tính có công thức không đọc được: {sheets}.',
   appMergeWorkbooks: 'Hợp nhất sổ làm việc',
   appMergeWorkbooksTip: 'Thêm các trang tính từ tệp Excel khác vào sổ làm việc này',
   appMergeWorkbooksPicking: 'Chọn các tệp để hợp nhất…',

@@ -1,0 +1,7 @@
+{
+  "file": "sample.xlsm",
+  "source": "test-files/spreadsheet-chat/source/binary.xlsx",
+  "sha256": "90b080e8698a2f48c3c5d9ddc837c96f03ad1c52113060993b143974dc2f3a9e",
+  "vbaSha256": "3ef33734daae0e353f132ff5f3241d8f86ba81f851c0b9685149f079c16eb45b",
+  "bytes": 2798
+}

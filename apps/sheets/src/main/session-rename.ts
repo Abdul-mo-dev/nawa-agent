@@ -4,7 +4,7 @@
  *
  * A session does not always point at the file the user sees. A .csv opens as
  * a converted copy in the temp dir with the original kept in `csvSourcePath`
- * (Save writes values back there); .xls/.tsv open the same way with the
+ * (Save writes values back there); .xls/.ods/.xlsb/.tsv open the same way with the
  * original's .xlsx sibling kept in `suggestSaveAs`; a crash-recovery restore
  * keeps the original in `restoreTarget`. Renaming only `path` would leave the
  * next Save writing to the old name, recreating a file the user just renamed
@@ -38,7 +38,7 @@ export function sessionAfterRename<S extends RenamableSession>(
   if (session.path === oldPath) patch({ path: newPath })
   if (session.csvSourcePath === oldPath) patch({ csvSourcePath: newPath })
   if (session.restoreTarget === oldPath) patch({ restoreTarget: newPath })
-  // A converted .xls/.tsv copy is tied to its original only through the Save
+  // A converted .xls/.ods/.xlsb/.tsv copy is tied to its original only through the Save
   // As default derived from it; re-derive from the new name.
   if (
     session.suggestSaveAs !== undefined &&

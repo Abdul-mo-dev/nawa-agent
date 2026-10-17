@@ -1,6 +1,9 @@
 import type { zh } from './zh'
 
 export const zhTW = {
+  appWorkbookImportNotice:
+    '已將 .{format} 開啟為 XLSX 副本，原始檔案未變更。格式、圖表、圖片、巨集及命名範圍不會匯入。',
+  appWorkbookImportFormulaLoss: '保留為快取值的公式：{formulas}。無法讀取公式的工作表：{sheets}。',
   appMergeWorkbooks: '合併活頁簿',
   appMergeWorkbooksTip: '將其他 Excel 檔案的工作表併入目前活頁簿',
   appMergeWorkbooksPicking: '選擇要合併的檔案…',

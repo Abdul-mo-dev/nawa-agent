@@ -5,6 +5,13 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, extname, join } from 'node:path'
 
 import { z } from 'zod'
+import { officePackageChanges, OFFICE_PACKAGE_METADATA_LIMIT } from '@genoffice/file-formats'
+export {
+  isMacroPartName,
+  macroPartRelsName,
+  removeMacroOverrides,
+  removeMacroRelationships,
+} from '@genoffice/file-formats'
 
 import { MAX_PATCH_ENTRY_BYTES } from '../shared/edit-schemas'
 import type { WorkbookChartEdit, WorkbookVisualEdit } from '../shared/edit-schemas'
@@ -83,6 +90,8 @@ export interface StreamingSaveRequest {
   readonly client: ArchiveClient
   readonly sourcePath: string
   readonly targetPath: string
+  /** Recovery copies keep the source's package type even when their temporary name is .xlsx. */
+  readonly preservePackageType?: boolean
   readonly edits: readonly CellEdit[]
   readonly bulkConstantFills?: readonly BulkConstantFill[] | undefined
   readonly structuralOps?: readonly SheetStructuralOps[] | undefined
@@ -138,9 +147,6 @@ export async function readArchiveEntryText(
   }
 }
 
-/// Streaming save channel: the gateway plans patched entry contents in
-/// memory, the sidecar reassembles the archive on disk — untouched entries
-/// are raw-copied compressed bytes, verified afterwards via CRC manifests.
 export async function saveWorkbookViaSidecar(
   request: StreamingSaveRequest,
 ): Promise<StreamingSaveResult> {
@@ -151,7 +157,7 @@ export async function saveWorkbookViaSidecar(
       await request.client.archiveManifest(request.sourcePath),
     ).entries
     const source = createSidecarEntrySource(request.client, request.sourcePath, manifest, workDir)
-    const plan = await planCellEditsToXlsx(
+    let plan = await planCellEditsToXlsx(
       source,
       request.edits,
       request.structuralOps ?? [],
@@ -181,6 +187,47 @@ export async function saveWorkbookViaSidecar(
       request.tableEdits ?? [],
     )
 
+    // Normalize the actual main part and remove the complete VBA metadata graph.
+    if (!request.preservePackageType) {
+      const metadata = new Map<string, string>()
+      for (const entry of manifest) {
+        if (entry.name !== '[Content_Types].xml' && !entry.name.endsWith('.rels')) continue
+        if (plan.removedEntries.includes(entry.name)) continue
+        if (entry.uncompressedSize > OFFICE_PACKAGE_METADATA_LIMIT)
+          throw new Error('Office package metadata exceeds the size limit.')
+        metadata.set(
+          entry.name,
+          plan.replaced.get(entry.name) ?? (await source.readText(entry.name)),
+        )
+      }
+      for (const [name, content] of plan.added)
+        if (name.endsWith('.rels')) metadata.set(name, content)
+      const names = [
+        ...manifest.map((entry) => entry.name),
+        ...plan.added.keys(),
+        ...plan.addedBinary.keys(),
+      ]
+      const changes = officePackageChanges(names, metadata, request.targetPath)
+      const removed = new Set([...plan.removedEntries, ...changes.removed])
+      const replaced = new Map(
+        [...plan.replaced, ...changes.replaced].filter(([name]) => !removed.has(name)),
+      )
+      const added = new Map([...plan.added].filter(([name]) => !removed.has(name)))
+      for (const [name, content] of changes.replaced)
+        if (added.has(name)) {
+          added.set(name, content)
+          replaced.delete(name)
+        }
+      plan = {
+        ...plan,
+        replaced,
+        added,
+        removedEntries: [...removed].sort(),
+        touchedEntries: [...new Set([...plan.touchedEntries, ...changes.replaced.keys()])]
+          .filter((name) => !removed.has(name))
+          .sort(),
+      }
+    }
     const replacements = await writePlanContents(workDir, 'replace', plan.replaced)
     const additions = [
       ...(await writePlanContents(workDir, 'add', plan.added)),

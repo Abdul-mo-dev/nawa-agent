@@ -1,0 +1,45 @@
+{
+  "generatedAt": "2026-10-12T02:19:22.602Z",
+  "converterVersion": "LibreOffice 26.2.6.3 8221e31b3ac356a1623c672912a3d2b492f7e3d1",
+  "files": [
+    {
+      "file": "document-sample.doc",
+      "extension": "doc",
+      "bytes": 14848,
+      "sha256": "0e4a9fc96d7c4dc25048d76cedcf4c8ff27b5d7e91fe41739ac4cbd6110a8791"
+    },
+    {
+      "file": "document-sample.dot",
+      "extension": "dot",
+      "bytes": 14848,
+      "sha256": "276b78da6ecf20d7ef6958da17ee32893d1c91702b4dd9bbc8ec85c60b226b65"
+    },
+    {
+      "file": "presentation-sample.ppt",
+      "extension": "ppt",
+      "bytes": 479744,
+      "sha256": "2027e59e587d8ed83012061b29c52138e23f05b443d4824501f5714125b434fd"
+    },
+    {
+      "file": "presentation-sample.pps",
+      "extension": "pps",
+      "bytes": 479744,
+      "sha256": "165f86ea467fc316bd376f5be1f7aca17b26571a0a7ed06bf56563457456a3d2"
+    },
+    {
+      "file": "presentation-sample.pot",
+      "extension": "pot",
+      "bytes": 479744,
+      "sha256": "f7bf1684bd3cbab2a33d40dae20a502784a36f5472aa55f01a7c8ba70e1d64f9"
+    }
+  ],
+  "expected": {
+    "title": "Nawa Legacy Office Test",
+    "documentPages": 2,
+    "presentationSlides": 3,
+    "tableRows": 4,
+    "tableColumns": 3,
+    "unicode": ["テスト文書", "مرحبا بالعالم"],
+    "image": "Blue and yellow checkerboard"
+  }
+}

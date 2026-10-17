@@ -54,18 +54,26 @@ function senderFor(id: number): FakeSender {
 }
 
 /** the command payload the bridge pushed to a tab */
-function lastCommand(wcId: number): { requestId: string; command: string } {
+function lastCommand(wcId: number): {
+  requestId: string
+  command: string
+  payload: Record<string, unknown>
+} {
   const sender = senders.get(wcId)!
   const call = (sender.send as ReturnType<typeof vi.fn>).mock.calls.at(-1)
   expect(call?.[0]).toBe('sheets:mcp-command')
-  return call?.[1] as { requestId: string; command: string }
+  return call?.[1] as { requestId: string; command: string; payload: Record<string, unknown> }
 }
 
 /**
  * runCommand awaits readiness before it registers the pending entry, so a test
  * must let that turn complete before it can observe or pre-empt the command.
  */
-async function nextCommand(wcId: number): Promise<{ requestId: string; command: string }> {
+async function nextCommand(wcId: number): Promise<{
+  requestId: string
+  command: string
+  payload: Record<string, unknown>
+}> {
   for (let i = 0; i < 50; i++) {
     const sender = senders.get(wcId)
     if ((sender?.send as ReturnType<typeof vi.fn> | undefined)?.mock.calls.length) {
@@ -88,6 +96,57 @@ beforeEach(() => {
   senders.clear()
   liveSenders.clear()
   handlers.clear()
+})
+
+describe('XLSM stage save authority', () => {
+  it('requires an approved stage and saves only its XLSM path in place', async () => {
+    const { installSheetsBridge, createSheetsControl } = await loadBridge()
+    const grants = await import('../../../../packages/electron-utils/src/directory-stage')
+    installSheetsBridge()
+    const target = senderFor(21)
+    handlers.get('sheets:mcp-ready')!({ sender: target })
+    const authorizeSave = vi.fn()
+    const control = createSheetsControl({ openBlankTab: async () => 21, authorizeSave })
+    const path = 'C:\\stage\\macro.xlsm'
+    await expect(control.saveStagedXlsm(21, path)).rejects.toThrow('directory stage')
+    grants.registerDirectoryStage(target, path)
+    grants.configureDirectoryStage(target, 'edit')
+    await expect(control.saveStagedXlsm(21, 'C:\\stage\\other.xlsm')).rejects.toThrow(
+      'staged output',
+    )
+    const pending = control.saveStagedXlsm(21, path)
+    const command = await nextCommand(21)
+    expect(command.command).toBe('save_sheet')
+    expect(command.payload).toEqual({ path, stageInPlace: true })
+    expect(authorizeSave).not.toHaveBeenCalled()
+    handlers.get('sheets:mcp-result')!(
+      { sender: target },
+      { requestId: command.requestId, ok: true },
+    )
+    await expect(pending).resolves.toBeUndefined()
+  })
+
+  it('strips the private save flag from ordinary agent save requests', async () => {
+    const { installSheetsBridge, createSheetsControl } = await loadBridge()
+    installSheetsBridge()
+    const target = senderFor(22)
+    handlers.get('sheets:mcp-ready')!({ sender: target })
+    const authorizeSave = vi.fn()
+    const control = createSheetsControl({ openBlankTab: async () => 22, authorizeSave })
+    const pending = control.runCommand(22, 'save_sheet', {
+      path: 'C:\\files\\macro.xlsm',
+      overwrite: true,
+      stageInPlace: true,
+    })
+    const command = await nextCommand(22)
+    expect(authorizeSave).toHaveBeenCalledWith(22, 'C:\\files\\macro.xlsm.xlsx')
+    expect(command.payload).toEqual({ path: 'C:\\files\\macro.xlsm', overwrite: true })
+    handlers.get('sheets:mcp-result')!(
+      { sender: target },
+      { requestId: command.requestId, ok: true },
+    )
+    await expect(pending).resolves.toBeUndefined()
+  })
 })
 
 describe('sheets bridge reply routing', () => {

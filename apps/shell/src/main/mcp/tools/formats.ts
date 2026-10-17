@@ -1,3 +1,4 @@
+import { EDITOR_EXTENSIONS, EDITOR_SAVE_EXTENSIONS } from '@genoffice/file-formats'
 /**
  * Format capability registry — the MCP layer's single source of truth for
  * "which document formats each editor can open, save and export".
@@ -55,8 +56,8 @@ export const FORMAT_FAMILIES: readonly FormatFamily[] = [
   {
     family: 'docx',
     label: 'Word document',
-    editorOpen: ['docx'],
-    editorSave: ['docx'],
+    editorOpen: EDITOR_EXTENSIONS.docs,
+    editorSave: EDITOR_SAVE_EXTENSIONS.docs,
     editorExport: ['pdf'],
     mcp: { generate: 'docx', save: ['docx'], read: 'docx' },
   },
@@ -65,19 +66,19 @@ export const FORMAT_FAMILIES: readonly FormatFamily[] = [
     label: 'spreadsheet',
     // .tsv opens as a converted copy and saves as .xlsx, so it is an open-only
     // format: it must not appear in editorSave
-    editorOpen: ['xlsx', 'xlsm', 'xls', 'csv', 'tsv'],
+    editorOpen: EDITOR_EXTENSIONS.sheets,
     // the interactive Save As also offers .xlsm/.csv; the explicit-path save the
     // MCP bridge uses writes .xlsx only (sheets-main.ts forces the extension),
     // so mcp.save stays xlsx until that pipeline is widened
-    editorSave: ['xlsx', 'xlsm', 'csv'],
+    editorSave: ['xlsx', 'xltx', 'xlsm', 'xltm', 'csv'],
     editorExport: ['pdf'],
     mcp: { generate: 'xlsx', save: ['xlsx'] },
   },
   {
     family: 'pptx',
     label: 'presentation',
-    editorOpen: ['pptx'],
-    editorSave: ['pptx'],
+    editorOpen: EDITOR_EXTENSIONS.slides,
+    editorSave: EDITOR_SAVE_EXTENSIONS.slides,
     editorExport: ['pdf'],
     mcp: { generate: 'pptx', save: ['pptx'] },
   },
@@ -86,8 +87,8 @@ export const FORMAT_FAMILIES: readonly FormatFamily[] = [
   {
     family: 'md',
     label: 'Markdown document',
-    editorOpen: ['md', 'markdown'],
-    editorSave: ['md', 'markdown'],
+    editorOpen: EDITOR_EXTENSIONS.markdown,
+    editorSave: EDITOR_EXTENSIONS.markdown,
     editorExport: ['docx', 'pdf'],
   },
   {

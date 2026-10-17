@@ -280,6 +280,8 @@ interface ExcelShellProps {
   /// Left side of the status bar (ready / streaming / AI progress messages).
   readonly statusMessage: string
   readonly emptyCsvNotice: boolean
+  readonly importNotice?: string | undefined
+  readonly onDismissImportNotice?: () => void
   readonly onOpenWorkbook: () => void
   readonly onDismissEmptyCsvNotice: () => void
   /// Zoom of the active sheet in percent, echoed by the status-bar slider.
@@ -509,6 +511,8 @@ export function ExcelShell({
   openingWorkbook,
   statusMessage,
   emptyCsvNotice,
+  importNotice,
+  onDismissImportNotice,
   onOpenWorkbook,
   onDismissEmptyCsvNotice,
   zoomPercent,
@@ -982,6 +986,19 @@ export function ExcelShell({
                   className="csv-empty-notice-close"
                   aria-label={t('appClose')}
                   onClick={onDismissEmptyCsvNotice}
+                >
+                  ×
+                </button>
+              </div>
+            )}
+            {importNotice && (
+              <div className="csv-empty-notice" role="status">
+                <span>{importNotice}</span>
+                <button
+                  type="button"
+                  className="csv-empty-notice-close"
+                  aria-label={t('appClose')}
+                  onClick={onDismissImportNotice}
                 >
                   ×
                 </button>

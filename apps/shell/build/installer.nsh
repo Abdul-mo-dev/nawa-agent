@@ -11,7 +11,14 @@
 
 !define GENOFFICE_PATH_MAX 7900
 
-; Scope templates to our ProgIDs (electron-builder uses fileAssociations.name).
+; electron-builder emits its association macros before customHeader expands.
+; Override them there so Open With registration never claims a user's defaults
+; and executable paths containing spaces remain valid Windows commands.
+!macro customHeader
+  !include "${BUILD_RESOURCES_DIR}\file-associations.nsh"
+!macroend
+
+; Scope templates to the product-specific ProgIDs from file-associations.nsh.
 ; A shared .ext\ShellNew would overwrite Office/WPS templates. OOXML files
 ; must be copied from valid packages, never created with NullFile.
 !macro GenOfficeRegisterShellNew EXT PROGID
@@ -30,9 +37,9 @@
 !macro customInstall
   Push "$INSTDIR\resources\cli"
   Call GenOfficeAddToUserPath
-  !insertmacro GenOfficeRegisterShellNew "docx" "Word Document"
-  !insertmacro GenOfficeRegisterShellNew "xlsx" "Excel Workbook"
-  !insertmacro GenOfficeRegisterShellNew "pptx" "PowerPoint Presentation"
+  !insertmacro GenOfficeRegisterShellNew "docx" "${APP_ID}.docx"
+  !insertmacro GenOfficeRegisterShellNew "xlsx" "${APP_ID}.xlsx"
+  !insertmacro GenOfficeRegisterShellNew "pptx" "${APP_ID}.pptx"
   !insertmacro UPDATEFILEASSOC
 !macroend
 
@@ -40,9 +47,9 @@
   Push "$INSTDIR\resources\cli"
   Call un.GenOfficeRemoveFromUserPath
   Push $0
-  !insertmacro GenOfficeUnregisterShellNew "docx" "Word Document"
-  !insertmacro GenOfficeUnregisterShellNew "xlsx" "Excel Workbook"
-  !insertmacro GenOfficeUnregisterShellNew "pptx" "PowerPoint Presentation"
+  !insertmacro GenOfficeUnregisterShellNew "docx" "${APP_ID}.docx"
+  !insertmacro GenOfficeUnregisterShellNew "xlsx" "${APP_ID}.xlsx"
+  !insertmacro GenOfficeUnregisterShellNew "pptx" "${APP_ID}.pptx"
   Pop $0
   !insertmacro UPDATEFILEASSOC
 !macroend

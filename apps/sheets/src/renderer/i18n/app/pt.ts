@@ -1,6 +1,10 @@
 import type { zh } from './zh'
 
 export const pt = {
+  appWorkbookImportNotice:
+    '.{format} aberto como uma cópia XLSX. O original permanece inalterado. Formatação, gráficos, imagens, macros e intervalos nomeados não são importados.',
+  appWorkbookImportFormulaLoss:
+    'Fórmulas mantidas como valores em cache: {formulas}. Planilhas com fórmulas ilegíveis: {sheets}.',
   appMergeWorkbooks: 'Mesclar pastas de trabalho',
   appMergeWorkbooksTip: 'Adicionar planilhas de outros arquivos do Excel a esta pasta de trabalho',
   appMergeWorkbooksPicking: 'Escolha os arquivos para mesclar…',

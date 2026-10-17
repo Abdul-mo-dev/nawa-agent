@@ -118,6 +118,8 @@ export interface DirectoryApproval {
   path: string
   instruction: string
   beforeHash: string | null
+  /** An update to an import format creates a modern copy at path. */
+  sourcePath?: string
   destination?: string
   permanent?: boolean
   inventory?: { files: number; folders: number; bytes: number; entries: string[] }
@@ -132,6 +134,8 @@ export interface DirectoryApproval {
 export interface DirectoryCommit {
   path: string
   operation: DirectoryOperation
+  /** Preserved original when the committed operation creates an edited copy. */
+  sourcePath?: string
   /** SHA-256 of the exact proposal, used to recognize a completed action on resume. */
   proposalHash?: string
   backupPath?: string

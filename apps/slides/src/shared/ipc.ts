@@ -89,6 +89,7 @@ export interface SetEffectsPatch {
 }
 
 export interface OpenResult {
+  importedFrom?: import('@genoffice/file-formats').OfficeImportExtension
   path: string
   slides: RenderSlide[]
   /** Slide page size in EMU */

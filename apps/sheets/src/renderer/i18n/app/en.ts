@@ -1,6 +1,10 @@
 import type { zh } from './zh'
 
 export const en = {
+  appWorkbookImportNotice:
+    'Opened .{format} as an XLSX copy. The original is unchanged. Formatting, charts, images, macros and named ranges are not imported.',
+  appWorkbookImportFormulaLoss:
+    'Formulas kept as cached values: {formulas}. Sheets with unreadable formulas: {sheets}.',
   appMergeWorkbooks: 'Merge Workbooks',
   appMergeWorkbooksTip: 'Append sheets from other Excel files into this workbook',
   appMergeWorkbooksPicking: 'Choose files to merge…',

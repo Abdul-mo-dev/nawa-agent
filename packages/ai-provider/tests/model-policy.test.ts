@@ -1,4 +1,4 @@
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { defaultAiSettings, activeProvider } from '../src/providers'
 import { applyChatModel } from '../src/chat-models'
 import {
@@ -12,10 +12,12 @@ import {
   prepareModelRequest,
   estimatedPromptTokens,
   estimatedOpenAiPromptTokens,
+  estimatedProxyPromptTokens,
   boundedToolEvidence,
 } from '../src/request-budget'
 import { streamForProvider } from '../src/stream'
 import { chatForProvider } from '../src/chat'
+import { simplifyUnionTypeArrays } from '../src/protocols/openai-compatible'
 import { jsonResponse } from './test-utils'
 import type { AgentMessage } from '@genoffice/agent-core'
 
@@ -74,7 +76,9 @@ it('allows a full cloud tool request that fits 16K despite a larger byte count',
       description: 'Query the selected table',
       inputSchema: {
         type: 'object',
-        properties: { datasetIds: { type: 'array', items: { type: 'string' } } },
+        properties: {
+          datasetIds: { type: 'array', items: { anyOf: [{ type: 'string' }, { type: 'null' }] } },
+        },
       },
     },
   ]
@@ -91,6 +95,42 @@ it('allows a full cloud tool request that fits 16K despite a larger byte count',
   )
   expect(prepared.promptTokens).toBeLessThan(11468)
   expect(prepared.messages).toEqual(messages)
+  expect(fetch).not.toHaveBeenCalled()
+})
+
+it('fits a Docs-scale system+tools prompt in a 32K local budget via the proxy estimate', async () => {
+  // Simulates a server without llama.cpp counting endpoints (e.g. Ollama).
+  const fetch = vi.fn().mockResolvedValue({ ok: false, json: async () => ({}) })
+  vi.stubGlobal('fetch', fetch)
+  // ~21KB system + 36 tools ≈ the Docs agent fixed overhead (measured 53KB JSON).
+  const system = `You are the document assistant built into the editor. ${'Guidance line with concrete editing detail. '.repeat(600)}`
+  const tools = Array.from({ length: 36 }, (_, i) => ({
+    name: `tool_${i}`,
+    description: `Tool ${i} reads or edits document blocks with several parameters. `.repeat(8),
+    inputSchema: {
+      type: 'object',
+      properties: { [`arg_${i}`]: { type: 'string', description: 'An argument value' } },
+    },
+  }))
+  const messages: AgentMessage[] = [
+    { role: 'user', text: 'Document block list:\n0|h1|Test Title\nwhat is the title' },
+  ]
+  const config = { ...local, policy: { contextTokens: 32000, outputTokens: 8192 } }
+  // The byte fallback alone (~40KB+) exceeds the 22208-token input limit.
+  expect(estimatedPromptTokens(system, messages, tools)).toBeGreaterThan(22208)
+  const prepared = await prepareModelRequest(
+    'custom',
+    config,
+    config.baseUrl,
+    system,
+    messages,
+    tools,
+    8192,
+    signal(),
+  )
+  expect(prepared.promptTokens).toBeLessThan(22208)
+  expect(prepared.messages).toEqual(messages)
+  // The proxy estimate fits, so no server token-count round trip is needed.
   expect(fetch).not.toHaveBeenCalled()
 })
 
@@ -331,7 +371,17 @@ it('budgets Gemini schemas after expanding repeated references', async () => {
       description: 'Inspect a record',
       inputSchema: {
         type: 'object',
-        $defs: { value: { type: 'string', description: 'X'.repeat(1000) } },
+        // Unique text per line so no tokenizer compresses the expansion away;
+        // inlined across 32 $refs this genuinely exceeds the 6656-token budget.
+        $defs: {
+          value: {
+            type: 'string',
+            description: Array.from(
+              { length: 40 },
+              (_, i) => `attribute_${i} detailed inspection note ${i}`,
+            ).join('\n'),
+          },
+        },
         properties: Object.fromEntries(
           Array.from({ length: 32 }, (_, i) => ['field_' + i, { $ref: '#/$defs/value' }]),
         ),
@@ -361,7 +411,12 @@ it('uses llama.cpp full chat token counting including every tool schema', async 
   const tools = [
     {
       name: 'native_tool',
-      description: 'X'.repeat(18000),
+      // Unique lines so the proxy tokenizer cannot compress the payload away;
+      // this genuinely exceeds the default local input limit, forcing a server count.
+      description: Array.from(
+        { length: 1200 },
+        (_, i) => `field_${i}: inspect attribute ${i} carefully`,
+      ).join('\n'),
       inputSchema: { type: 'object', properties: { value: { type: 'string' } } },
     },
   ]
@@ -403,7 +458,8 @@ it('preserves the current signed tool chain while dropping completed exchanges',
   ]
   const messages: AgentMessage[] = [
     { role: 'user', text: 'old' },
-    { role: 'assistant', text: 'X'.repeat(10000) },
+    // Unique text: repeated glyphs compress away under BPE and would now fit.
+    { role: 'assistant', text: 'old evidence line '.repeat(1500) },
     ...active,
   ]
   const result = await prepareModelRequest(
@@ -550,3 +606,129 @@ it('supports Custom max_completion_tokens consistently in stream and helper call
     expect(JSON.parse(init.body)).not.toHaveProperty('max_tokens')
   }
 })
+
+it('rejects a 100k single-char run that the capped proxy estimate would accept', async () => {
+  const fetch = vi.fn()
+  vi.stubGlobal('fetch', fetch)
+  // context 4096 / output 1024 leaves a 2560-token input limit; the capped BPE
+  // estimate alone reads ~608 tokens, but the full 100k run is transmitted.
+  const messages: AgentMessage[] = [{ role: 'user', text: 'X'.repeat(100000) }]
+  const error = await prepareModelRequest(
+    'gemini',
+    { apiKey: 'key', model: 'gemini-test', policy: { contextTokens: 4096, outputTokens: 1024 } },
+    'https://generativelanguage.googleapis.com/v1beta',
+    '',
+    messages,
+    [],
+    1024,
+    signal(),
+  ).then(
+    () => null,
+    (e) => e as Error,
+  )
+  expect(error?.message).toMatch(/context budget/)
+  expect(fetch).not.toHaveBeenCalled()
+})
+
+describe('simplifyUnionTypeArrays', () => {
+  it('preserves nested nullable contracts with scalar type alternatives', () => {
+    const out = simplifyUnionTypeArrays({
+      type: 'object',
+      properties: {
+        values: { type: 'array', items: { type: ['number', 'null'] } },
+        cats: { type: 'array', items: { type: ['string', 'null'] } },
+        nested: { type: 'object', properties: { v: { type: ['integer', 'null'] } } },
+      },
+    })
+    expect(out).toEqual({
+      type: 'object',
+      properties: {
+        values: { type: 'array', items: { anyOf: [{ type: 'number' }, { type: 'null' }] } },
+        cats: { type: 'array', items: { anyOf: [{ type: 'string' }, { type: 'null' }] } },
+        nested: {
+          type: 'object',
+          properties: { v: { anyOf: [{ type: 'integer' }, { type: 'null' }] } },
+        },
+      },
+    })
+  })
+
+  it('leaves empty type arrays alone', () => {
+    expect(simplifyUnionTypeArrays({ type: [] })).toEqual({ type: [] })
+  })
+
+  it('passes non-objects through', () => {
+    expect(simplifyUnionTypeArrays(null)).toBeNull()
+    expect(simplifyUnionTypeArrays('x')).toBe('x')
+    expect(simplifyUnionTypeArrays(42)).toBe(42)
+    expect(simplifyUnionTypeArrays([{ type: ['number', 'null'] }])).toEqual([
+      { anyOf: [{ type: 'number' }, { type: 'null' }] },
+    ])
+  })
+
+  it('does not mutate its input', () => {
+    const input = { type: 'object', properties: { v: { type: ['number', 'null'] } } }
+    const snapshot = structuredClone(input)
+    simplifyUnionTypeArrays(input)
+    expect(input).toEqual(snapshot)
+  })
+
+  it('retains existing anyOf constraints when translating a type array', () => {
+    expect(
+      simplifyUnionTypeArrays({
+        type: ['number', 'null'],
+        anyOf: [{ const: null }, { minimum: 1 }],
+      }),
+    ).toEqual({
+      anyOf: [{ const: null }, { minimum: 1 }],
+      allOf: [{ anyOf: [{ type: 'number' }, { type: 'null' }] }],
+    })
+  })
+})
+
+it.each(['X', '界', 'é', '😀'])(
+  'budgets every omitted UTF-8 byte in a repeated %s run',
+  async (character) => {
+    const messages: AgentMessage[] = [{ role: 'user', text: character.repeat(10_000) }]
+    const omittedBytes = new TextEncoder().encode(character.repeat(10_000 - 512)).length
+    expect(await estimatedProxyPromptTokens('', messages, [])).toBeGreaterThan(omittedBytes)
+    expect(await estimatedOpenAiPromptTokens('gpt-4o', '', messages, [])).toBeGreaterThan(
+      omittedBytes,
+    )
+  },
+)
+
+it.each([
+  ['http://127.0.0.1:8082/v1', true],
+  ['https://example.test/v1', false],
+] as const)(
+  'sends a nullable chart schema with valid local adaptation at %s',
+  async (baseUrl, adapted) => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () =>
+      jsonResponse({ choices: [{ message: { content: 'OK' }, finish_reason: 'stop' }] }),
+    )
+    vi.stubGlobal('fetch', fetch)
+    const tool = {
+      name: 'update_chart',
+      description: 'Null keeps a value',
+      inputSchema: {
+        type: 'object',
+        properties: { values: { type: 'array', items: { type: ['number', 'null'] } } },
+      },
+    }
+    await streamForProvider(
+      'custom',
+      { ...local, baseUrl },
+      '',
+      [{ role: 'user', text: 'Keep the first value.' }],
+      [tool],
+      1024,
+      { signal: signal(), onDelta() {}, onToolCall() {} },
+    )
+    const body = JSON.parse(fetch.mock.calls[0]![1]!.body as string)
+    expect(body.tools[0].function.parameters.properties.values.items).toEqual(
+      adapted ? { anyOf: [{ type: 'number' }, { type: 'null' }] } : { type: ['number', 'null'] },
+    )
+    expect(tool.inputSchema.properties.values.items.type).toEqual(['number', 'null'])
+  },
+)
