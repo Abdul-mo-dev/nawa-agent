@@ -1,4 +1,4 @@
-import type { zh } from './zh'
+import type { en } from './en'
 
 export const ar = {
   redactMenuLabel: 'إخفاء التحديد عن الذكاء الاصطناعي',
@@ -153,4 +153,4 @@ export const ar = {
   presentInTab: 'في هذه العلامة',
   presentFullscreen: 'ملء الشاشة',
   presentNewTab: 'علامة تبويب جديدة',
-} satisfies Record<keyof typeof zh, string>
+} satisfies Record<keyof typeof en, string>

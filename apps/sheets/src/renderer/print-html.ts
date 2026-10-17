@@ -67,10 +67,6 @@ function printCjkFonts(lang: Lang): string {
   switch (lang) {
     case 'ja':
       return "'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic UI', 'Yu Gothic', 'Meiryo'"
-    case 'ko':
-      return "'Apple SD Gothic Neo', 'Malgun Gothic'"
-    case 'zh-TW':
-      return "'PingFang TC', 'Microsoft JhengHei'"
     default:
       return "'PingFang SC'"
   }

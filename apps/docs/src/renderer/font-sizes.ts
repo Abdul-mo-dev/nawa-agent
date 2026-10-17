@@ -8,55 +8,17 @@ export interface NamedFontSize {
 export const FONT_SIZE_MIN_PT = 1
 export const FONT_SIZE_MAX_PT = 1638
 
-// Word's CJK size scale (chuhao ... bahao); zh-TW writes the "hao" character
-// in its Traditional form
-const CJK_SIZE_PTS = [42, 36, 26, 24, 22, 18, 16, 15, 14, 12, 10.5, 9, 7.5, 6.5, 5.5, 5]
-const CJK_SIZE_NAMES_ZH = [
-  '\u521d\u53f7',
-  '\u5c0f\u521d',
-  '\u4e00\u53f7',
-  '\u5c0f\u4e00',
-  '\u4e8c\u53f7',
-  '\u5c0f\u4e8c',
-  '\u4e09\u53f7',
-  '\u5c0f\u4e09',
-  '\u56db\u53f7',
-  '\u5c0f\u56db',
-  '\u4e94\u53f7',
-  '\u5c0f\u4e94',
-  '\u516d\u53f7',
-  '\u5c0f\u516d',
-  '\u4e03\u53f7',
-  '\u516b\u53f7',
-]
-const CJK_SIZE_NAMES_ZH_TW = CJK_SIZE_NAMES_ZH.map((n) => n.replace('\u53f7', '\u865f'))
-
-const NAMED_ZH: readonly NamedFontSize[] = CJK_SIZE_NAMES_ZH.map((name, i) => ({
-  name,
-  pt: CJK_SIZE_PTS[i],
-}))
-const NAMED_ZH_TW: readonly NamedFontSize[] = CJK_SIZE_NAMES_ZH_TW.map((name, i) => ({
-  name,
-  pt: CJK_SIZE_PTS[i],
-}))
-
-const SIZES_CJK_UI = [
-  5, 5.5, 6.5, 7.5, 8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72,
-]
 const SIZES_LATIN_UI = [8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72]
 const SIZES_JA_UI = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72]
 
-/** Word's named CJK sizes shown ahead of the numeric list; empty outside zh / zh-TW */
-export function namedFontSizes(lang: Lang): readonly NamedFontSize[] {
-  return lang === 'zh' ? NAMED_ZH : lang === 'zh-TW' ? NAMED_ZH_TW : []
+/** Supported UI languages use numeric font sizes. */
+export function namedFontSizes(_lang: Lang): readonly NamedFontSize[] {
+  return []
 }
 
 /** The numeric part of Word's size list for this UI language */
 export function fontSizeList(lang: Lang): readonly number[] {
   switch (lang) {
-    case 'zh':
-    case 'zh-TW':
-      return SIZES_CJK_UI
     case 'ja':
       return SIZES_JA_UI
     default:

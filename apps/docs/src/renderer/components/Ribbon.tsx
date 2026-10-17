@@ -495,7 +495,7 @@ export function applyPainterFormat(
 // bar (which we provide). Windows Word does have one, so keep it there.
 const IS_MAC = navigator.platform.toLowerCase().includes('mac')
 // Word offers Half-width / Full-width under Change Case only on CJK UIs
-const WIDTH_CASE_LANGS = new Set<Lang>(['zh', 'zh-TW', 'ja'])
+const WIDTH_CASE_LANGS = new Set<Lang>(['ja'])
 /** shell tab mode: the tab strip above owns traffic lights / caption buttons */
 const IN_TAB = new URLSearchParams(window.location.search).get('mode') === 'tab'
 

@@ -10,20 +10,7 @@ import { LocaleProvider } from '../src/renderer/src/locale'
 import { HelpScreen } from '../src/renderer/src/i18n/help/HelpScreen'
 import { helpBody } from '../src/renderer/src/i18n/help/help-registry'
 
-/**
- * The manual ships 21 editions — 294 bodies, 21 sets of titles, 21 figure
- * sets — and every one of them has to be reachable.
- *
- * The screen used to read `document.documentElement.lang`, which is the BCP-47
- * tag (`zh-CN`, `ja-JP`), and then pick between two branches: `zh` or `en`.
- * That left 19 editions unrendered, showed English titles over whatever body
- * matched `startsWith('zh')`, and gave zh-TW readers the zh-CN edition —
- * while the files sat in the bundle the whole time and the mechanical
- * language checker counted them as present.
- *
- * So these assert on rendered output in four languages, including one the old
- * code could not have got right by accident.
- */
+/** Every shipped manual edition must render its own body and titles. */
 
 const actEnvironment = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean
@@ -35,9 +22,7 @@ let root: Root
 
 import gettingStarted from '../src/renderer/src/i18n/help/topics/getting-started.en.md?raw'
 import gettingStartedJa from '../src/renderer/src/i18n/help/topics/getting-started.ja.md?raw'
-import gettingStartedZh from '../src/renderer/src/i18n/help/topics/getting-started.zh.md?raw'
-import gettingStartedZhTW from '../src/renderer/src/i18n/help/topics/getting-started.zh-TW.md?raw'
-import gettingStartedDe from '../src/renderer/src/i18n/help/topics/getting-started.de.md?raw'
+import gettingStartedAr from '../src/renderer/src/i18n/help/topics/getting-started.ar.md?raw'
 import { topicTitle } from '../src/renderer/src/i18n/help/help-titles'
 
 const TOPIC = 'getting-started'
@@ -67,17 +52,13 @@ function proseFrom(markdown: string): string {
 const BODIES: Partial<Record<Lang, string>> = {
   en: proseFrom(gettingStarted),
   ja: proseFrom(gettingStartedJa),
-  zh: proseFrom(gettingStartedZh),
-  'zh-TW': proseFrom(gettingStartedZhTW),
-  de: proseFrom(gettingStartedDe),
+  ar: proseFrom(gettingStartedAr),
 }
 
 const TITLES: Partial<Record<Lang, string>> = {
   en: topicTitle(TOPIC, 'en'),
   ja: topicTitle(TOPIC, 'ja'),
-  zh: topicTitle(TOPIC, 'zh'),
-  'zh-TW': topicTitle(TOPIC, 'zh-TW'),
-  de: topicTitle(TOPIC, 'de'),
+  ar: topicTitle(TOPIC, 'ar'),
 }
 
 beforeEach(() => {
@@ -170,13 +151,10 @@ describe('the manual renders in the reader’s language', () => {
     }
   })
 
-  it("does not hand back another language's body", async () => {
-    // zh and zh-TW are separate files, not a variant of one: the Simplified
-    // text appearing in the Traditional one is the failure `startsWith('zh')`
-    // would have shipped
-    const traditional = (await helpBody(TOPIC, 'zh-TW')) ?? ''
-    expect(traditional).toContain(BODIES['zh-TW']!)
-    expect(traditional).not.toContain(BODIES.zh!)
-    expect(traditional).not.toContain(BODIES.en!)
+  it('falls back to English for removed language selections', async () => {
+    for (const removed of ['zh', 'zh-TW', 'de', 'he', 'vi']) {
+      expect(await helpBody(TOPIC, removed)).toBe(await helpBody(TOPIC, 'en'))
+      expect(topicTitle(TOPIC, removed)).toBe(TITLES.en)
+    }
   })
 })

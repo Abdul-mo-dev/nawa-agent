@@ -1,4 +1,4 @@
-import type { zh } from './zh'
+import type { en } from './en'
 
 export const ar = {
   aiCollapsePanel: 'طي اللوحة',
@@ -173,4 +173,4 @@ export const ar = {
   aiStarterAnnouncementPrompt: 'صِغ لي إعلانًا عن منتج. المنتج والنقاط الرئيسية: ',
   aiStarterGuide: 'كتابة دليل إرشادي',
   aiStarterGuidePrompt: 'اكتب لي دليلًا إرشاديًا. العملية المطلوب شرحها: ',
-} satisfies Record<keyof typeof zh, string>
+} satisfies Record<keyof typeof en, string>

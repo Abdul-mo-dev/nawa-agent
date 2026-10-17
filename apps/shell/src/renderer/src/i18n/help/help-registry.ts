@@ -1,7 +1,7 @@
 /**
  * The in-app manual's topic registry (issue #1520).
  *
- * Each topic is one markdown file per language under ./topics (`<id>.zh.md`,
+ * Each topic is one markdown file per language under ./topics (`<id>.en.md`,
  * `<id>.en.md`), bundled at build time via import.meta.glob(?raw). A topic is
  * discovered by listing it here — the registry is what search indexes and the
  * sidebar renders, so a feature without a manual entry is a visible gap in
@@ -330,14 +330,7 @@ export function helpImage(href: string, lang?: string): string | undefined {
   return images[`./topics/${stem}.en${suffix}`] ?? images[`./topics/${name}`]
 }
 
-/**
- * The bundle suffix a UI language maps to.
- *
- * `zh-TW` is a real file suffix, not a `zh` variant: the two scripts are
- * written differently enough that one shared body would leave half of each
- * reading in the wrong orthography. Everything else is its own suffix, and an
- * unknown one falls through to English rather than to a file that is not there.
- */
+/** The bundle suffix for a supported UI language; removed or unknown codes use English. */
 export function helpLangSuffix(lang: string): string {
   return (LANGS as readonly string[]).includes(lang) ? lang : 'en'
 }

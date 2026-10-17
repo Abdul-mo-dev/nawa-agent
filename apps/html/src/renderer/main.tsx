@@ -14,6 +14,7 @@ import '@genoffice/ui/find-panel.css'
 import '@genoffice/ui/color-picker.css'
 import '@genoffice/ui/ribbon-collapse.css'
 import '@genoffice/ui/ai-panel-prefs.css'
+import '@genoffice/ui/ui-direction.css'
 import '@genoffice/ui/ai-scope-quote.css'
 import '@genoffice/ui/image-dialogs.css'
 import './styles.css'
@@ -27,7 +28,7 @@ function applyTheme(theme: UiTheme): void {
 
 void (async () => {
   const [lang, theme] = await Promise.all([
-    window.htmlApi.getLanguage().catch(() => 'zh' as const),
+    window.htmlApi.getLanguage().catch(() => 'en' as const),
     window.htmlApi.getTheme().catch(() => 'system' as const),
   ])
   document.documentElement.lang = htmlLang(lang as Lang)

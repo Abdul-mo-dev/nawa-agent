@@ -9,6 +9,7 @@
     ".": "./src/index.ts",
     "./ai-panel-prefs": "./src/ai-panel-prefs.ts",
     "./tokens.css": "./src/tokens.css",
+    "./ui-direction.css": "./src/ui-direction.css",
     "./screentip.css": "./src/screentip.css",
     "./color-picker.css": "./src/color-picker.css",
     "./dropdown.css": "./src/dropdown.css",

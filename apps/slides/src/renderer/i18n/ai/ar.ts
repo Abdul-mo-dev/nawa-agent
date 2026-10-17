@@ -1,4 +1,4 @@
-import type { zh } from './zh'
+import type { en } from './en'
 
 export const ar = {
   aiInputPlaceholderGen: 'صف العرض المطلوب إنشاؤه أو اطرح أي سؤال',
@@ -222,4 +222,4 @@ export const ar = {
   aiSumTemplatesEmpty: 'قوالب الأنماط (فارغ)',
   aiSumListTemplates: 'سرد {count} من قوالب الأنماط',
   aiPageCloudToLocal: 'السحابة غير متاحة — تم التوليد محليًا',
-} satisfies Record<keyof typeof zh, string>
+} satisfies Record<keyof typeof en, string>

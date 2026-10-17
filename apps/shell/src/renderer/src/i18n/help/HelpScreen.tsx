@@ -12,7 +12,7 @@ import './help.css'
  * over a markdown body per topic. Rendered by the shell renderer when the
  * view is loaded at ?mode=help (the Help tab / F1 / Help menu).
  *
- * Every one of the 21 locales has its own body, title and figure set; a
+ * Every supported locale has its own body and titles; a
  * locale with no body of its own falls back to English rather than showing a
  * gap, and the registry keeps the count visible either way.
  *
@@ -24,11 +24,8 @@ import './help.css'
 export function HelpScreen(): React.ReactElement {
   const { t, lang } = useI18n()
   // the help tab has no locale of its own: it renders in the shell's UI language.
-  // `lang` is the shell's own `Lang`, which is the short code every lookup here
-  // keys on — `zh`, `ja`, `zh-TW`. `document.documentElement.lang` is the BCP-47
-  // tag instead (`zh-CN`, `ja-JP`), and handing that to a table keyed by short
-  // codes silently misses every row, so the screen showed English titles over a
-  // body in whatever language matched `startsWith('zh')`.
+  // Lookups use the UI's short language code (en, ja, ar), rather than the
+  // document's regional tag (en-US, ja-JP, ar-SA).
   const [query, setQuery] = useState('')
   const [activeId, setActiveId] = useState(HELP_TOPICS[0]!.id)
   // Bodies are separate chunks, so both the article and the search results are

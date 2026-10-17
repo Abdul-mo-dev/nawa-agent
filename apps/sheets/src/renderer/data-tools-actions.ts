@@ -59,10 +59,7 @@ const CSV_IMPORT_MAX_CELLS = 50_000
 /// Excel writes CSV in the system's legacy charset; the UI language is the
 /// best tie-breaker we have (same map as the main-process open path).
 const CSV_CHARSET_BY_LANG: Record<string, string> = {
-  zh: 'gb18030',
-  'zh-TW': 'big5',
   ja: 'shift_jis',
-  ko: 'euc-kr',
 }
 
 /// Data → From Text/CSV: reads a delimited file (encoding and delimiter

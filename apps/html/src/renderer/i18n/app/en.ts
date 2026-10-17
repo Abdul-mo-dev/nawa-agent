@@ -1,5 +1,3 @@
-import type { zh } from './zh'
-
 export const en = {
   redactMenuLabel: 'Hide the selection from AI',
   redactDialogDesc:
@@ -154,4 +152,4 @@ export const en = {
   presentInTab: 'In this tab',
   presentFullscreen: 'Fullscreen',
   presentNewTab: 'New tab',
-} satisfies Record<keyof typeof zh, string>
+}

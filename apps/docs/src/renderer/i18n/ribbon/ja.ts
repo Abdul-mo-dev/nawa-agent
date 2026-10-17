@@ -1,4 +1,4 @@
-import type { zh } from './zh'
+import type { en } from './en'
 
 export const ja = {
   ribbonAiCreditNote: 'AI を呼び出し、クレジットを消費します',
@@ -691,26 +691,8 @@ export const ja = {
     '選択した内容を校正してください：誤字、句読点、文法の誤りを修正し、元の意味と段落構成は変えないでください。',
   ribbonTranslateTo: '{lang}に翻訳',
   ribbonLangEnglish: '英語',
-  ribbonLangSimplifiedChinese: '簡体字中国語',
   ribbonLangJapanese: '日本語',
-  ribbonLangKorean: '韓国語',
-  ribbonLangFrench: 'フランス語',
-  ribbonLangGerman: 'ドイツ語',
-  ribbonLangSpanish: 'スペイン語',
-  ribbonLangThai: 'タイ語',
-  ribbonLangIndonesian: 'インドネシア語',
-  ribbonLangRussian: 'ロシア語',
   ribbonLangArabic: 'アラビア語',
-  ribbonLangPortuguese: 'ポルトガル語',
-  ribbonLangItalian: 'イタリア語',
-  ribbonLangPolish: 'ポーランド語',
-  ribbonLangCzech: 'チェコ語',
-  ribbonLangDutch: 'オランダ語',
-  ribbonLangMalay: 'マレー語',
-  ribbonLangHebrew: 'ヘブライ語',
-  ribbonLangHindi: 'ヒンディー語',
-  ribbonLangTraditionalChinese: '繁体字中国語',
-  ribbonLangVietnamese: 'ベトナム語',
   ribbonGroupLanguage: '言語',
   ribbonNewComment: '新しいコメント',
   ribbonNewCommentTip: '選択範囲にコメントを追加',
@@ -935,4 +917,4 @@ export const ja = {
   ribbonSelectCell: 'セルの選択',
   ribbonRowHeightIs: '行の高さ',
   ribbonReadOnlyEdit: 'ドキュメントは読み取り専用のため表を変更できません',
-} satisfies Record<keyof typeof zh, string>
+} satisfies Record<keyof typeof en, string>

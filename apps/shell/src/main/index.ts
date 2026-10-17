@@ -514,7 +514,7 @@ function currentLang(): Lang {
     return uiLang
   }
   const saved = readAppSettings(APP_SETTINGS_PATH()).language
-  if (isLang(saved)) uiLang = saved
+  if (typeof saved === 'string') uiLang = normalizeLang(saved)
   uiLang ??= normalizeLang(app.getLocale())
   setUiLang(uiLang)
   return uiLang
@@ -3757,7 +3757,7 @@ app.whenReady().then(async () => {
   app.setAccessibilitySupportEnabled(true)
   // Settle the shared uiLang from saved settings BEFORE any tab renderer can
   // ask 'app:get-language': the editor handlers return the i18n module's
-  // mutable lang, whose 'zh' default otherwise wins the race for whichever
+  // mutable lang, whose 'en' default otherwise wins the race for whichever
   // tab loads first (e.g. sheets booting in Chinese while docs shows English).
   currentLang()
   // native menus/dialogs/scrollbars follow the persisted theme from first paint

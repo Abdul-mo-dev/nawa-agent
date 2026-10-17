@@ -1,4 +1,4 @@
-import type { zh } from './zh'
+import type { en } from './en'
 
 export const ja = {
   redactMenuLabel: '選択範囲をAIから隠す',
@@ -155,4 +155,4 @@ export const ja = {
   presentInTab: 'このタブで',
   presentFullscreen: '全画面',
   presentNewTab: '新しいタブ',
-} satisfies Record<keyof typeof zh, string>
+} satisfies Record<keyof typeof en, string>

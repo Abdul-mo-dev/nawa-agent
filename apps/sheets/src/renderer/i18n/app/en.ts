@@ -1,5 +1,3 @@
-import type { zh } from './zh'
-
 export const en = {
   appWorkbookImportNotice:
     'Opened .{format} as an XLSX copy. The original is unchanged. Formatting, charts, images, macros and named ranges are not imported.',
@@ -1492,4 +1490,4 @@ export const en = {
   appVisualFlipV: 'Flip Vertical',
   appVisualFlipH: 'Flip Horizontal',
   appCtxPasteVisual: 'Paste Picture or Shape',
-} satisfies Record<keyof typeof zh, string>
+}

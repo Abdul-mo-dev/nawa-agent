@@ -1,4 +1,4 @@
-import { zh } from './zh'
+import { en } from './en'
 
 export const ja = {
   'Run location': '実行場所',
@@ -25,4 +25,4 @@ export const ja = {
     'ネイティブ分析は XLSX、XLSM、CSV、TSV、JSON の表をサポートします。',
   'Codex output limits are advisory; large tool responses are rejected before execution.':
     'Codex の出力上限は目安です。大きすぎるツール応答は実行前に拒否されます。',
-} satisfies Record<keyof typeof zh, string>
+} satisfies Record<keyof typeof en, string>

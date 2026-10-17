@@ -1,4 +1,4 @@
-import type { zh } from './zh'
+import type { en } from './en'
 
 export const ar = {
   redactMenuLabel: 'إخفاء التحديد عن الذكاء الاصطناعي',
@@ -259,4 +259,4 @@ export const ar = {
   appStatusSummaryZoomInserted: 'تم إدراج شريحة تكبير/تصغير الملخص مع {count} مربعات',
   appSectionSummary: 'مقطع الملخص',
   appSectionN: 'المقطع {n}',
-} satisfies Record<keyof typeof zh, string>
+} satisfies Record<keyof typeof en, string>

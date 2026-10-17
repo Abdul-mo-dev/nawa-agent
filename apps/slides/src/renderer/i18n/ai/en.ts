@@ -1,5 +1,3 @@
-import type { zh } from './zh'
-
 export const en = {
   aiInputPlaceholderGen: 'Describe the deck to generate, or ask anything',
   aiEmptyGenTitle: 'Let AI generate your presentation',
@@ -224,4 +222,4 @@ export const en = {
   aiSumTemplatesEmpty: 'Style templates (empty)',
   aiSumListTemplates: 'Listed {count} style templates',
   aiPageCloudToLocal: 'cloud unavailable — generated locally',
-} satisfies Record<keyof typeof zh, string>
+}

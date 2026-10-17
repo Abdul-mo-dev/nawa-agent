@@ -297,7 +297,7 @@ export function AiChatPanel({
     submit: (text, atts) => onSendQueued?.(text, atts) ?? false,
   })
   // Panel chrome follows the UI language; message text follows its own content (dir=auto below)
-  const isRtl = lang === 'ar' || lang === 'he'
+  const isRtl = lang === 'ar'
   const chatRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
   const stickToBottomRef = useRef(true)

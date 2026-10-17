@@ -487,6 +487,7 @@ const config = {
   // never leave a stale hard-coded pin behind (packaging would silently ship
   // the old runtime).
   electronVersion: require('electron/package.json').version,
+  electronLanguages: ['en-US', 'en-GB', 'ja', 'ar'],
   directories: {
     output: process.env.BUILD_DIR || 'release',
   },

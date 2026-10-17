@@ -47,7 +47,7 @@ describe('paragraph direction buttons', () => {
     act(() => root.unmount())
     container.remove()
     editor.destroy()
-    setModuleLang('zh')
+    setModuleLang('en')
   })
 
   function render(lang: Lang) {
@@ -79,6 +79,6 @@ describe('paragraph direction buttons', () => {
 
   it('always shows them under an RTL UI language', () => {
     placeCursor(2)
-    expect(render('he')).not.toBeNull()
+    expect(render('ar')).not.toBeNull()
   })
 })

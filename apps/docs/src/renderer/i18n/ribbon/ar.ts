@@ -1,4 +1,4 @@
-import type { zh } from './zh'
+import type { en } from './en'
 
 export const ar = {
   ribbonAiCreditNote: 'يستدعي الذكاء الاصطناعي ويستهلك الرصيد',
@@ -671,26 +671,8 @@ export const ar = {
     'دقّق المحتوى المحدد: صحّح الأخطاء الإملائية وعلامات الترقيم والأخطاء النحوية مع الحفاظ على المعنى الأصلي وبنية الفقرات.',
   ribbonTranslateTo: 'ترجمة إلى {lang}',
   ribbonLangEnglish: 'الإنجليزية',
-  ribbonLangSimplifiedChinese: 'الصينية المبسطة',
   ribbonLangJapanese: 'اليابانية',
-  ribbonLangKorean: 'الكورية',
-  ribbonLangFrench: 'الفرنسية',
-  ribbonLangGerman: 'الألمانية',
-  ribbonLangSpanish: 'الإسبانية',
-  ribbonLangThai: 'التايلاندية',
-  ribbonLangIndonesian: 'الإندونيسية',
-  ribbonLangRussian: 'الروسية',
   ribbonLangArabic: 'العربية',
-  ribbonLangPortuguese: 'البرتغالية',
-  ribbonLangItalian: 'الإيطالية',
-  ribbonLangPolish: 'البولندية',
-  ribbonLangCzech: 'التشيكية',
-  ribbonLangDutch: 'الهولندية',
-  ribbonLangMalay: 'الملايوية',
-  ribbonLangHebrew: 'العبرية',
-  ribbonLangHindi: 'الهندية',
-  ribbonLangTraditionalChinese: 'الصينية التقليدية',
-  ribbonLangVietnamese: 'الفيتنامية',
   ribbonGroupLanguage: 'اللغة',
   ribbonNewComment: 'تعليق جديد',
   ribbonNewCommentTip: 'إضافة تعليق على التحديد',
@@ -914,4 +896,4 @@ export const ar = {
   ribbonSelectCell: 'تحديد الخلية',
   ribbonRowHeightIs: 'ارتفاع الصف',
   ribbonReadOnlyEdit: 'المستند للقراءة فقط؛ لا يمكن تغيير الجداول',
-} satisfies Record<keyof typeof zh, string>
+} satisfies Record<keyof typeof en, string>

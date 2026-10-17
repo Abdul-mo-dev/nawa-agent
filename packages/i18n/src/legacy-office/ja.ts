@@ -1,4 +1,4 @@
-import { zh } from './zh'
+import { en } from './en'
 
 export const ja = {
   modernCopy:
@@ -18,4 +18,4 @@ export const ja = {
     'ファイルを変換できませんでした。破損、パスワード保護、または未対応の形式の可能性があります。',
   encrypted:
     'パスワード保護されたファイルは読み込めません。元のアプリで暗号化されていないコピーを保存してください。',
-} satisfies Record<keyof typeof zh, string>
+} satisfies Record<keyof typeof en, string>

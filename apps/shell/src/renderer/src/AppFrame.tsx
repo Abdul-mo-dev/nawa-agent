@@ -28,7 +28,7 @@ export function AppFrame({ initialOnboardingSeen }: AppFrameProps) {
     }
   }, [])
   useEffect(() => {
-    // The document home provides full-text search and the starred knowledge base.
+    // The document home provides full-text search.
     if (legacy) window.nawaExplorer?.setLayout(DEFAULT_EXPLORER_LAYOUT)
   }, [legacy])
   const finishOnboarding = async (): Promise<boolean> => {

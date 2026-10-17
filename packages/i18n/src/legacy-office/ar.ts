@@ -1,4 +1,4 @@
-import { zh } from './zh'
+import { en } from './en'
 
 export const ar = {
   modernCopy: 'ستُحفظ التعديلات في نسخة .{to} الجديدة هذه. يبقى ملف .{from} الأصلي دون تغيير.',
@@ -15,4 +15,4 @@ export const ar = {
   failed: 'تعذّر تحويل الملف. قد يكون تالفًا أو محميًا بكلمة مرور أو غير مدعوم.',
   encrypted:
     'لا يمكن استيراد الملفات المحمية بكلمة مرور. احفظ نسخة غير مشفرة في التطبيق الأصلي أولًا.',
-} satisfies Record<keyof typeof zh, string>
+} satisfies Record<keyof typeof en, string>

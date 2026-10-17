@@ -1,4 +1,4 @@
-import type { zh } from './zh'
+import type { en } from './en'
 
 export const ja = {
   ribbonAiCreditNote: 'AI を呼び出し、クレジットを消費します',
@@ -405,26 +405,8 @@ export const ja = {
   ribbonTranslatePrompt:
     '現在のスライドのすべてのテキストを{lang}に翻訳してください。ツールで原文を直接置き換え、レイアウト・フォントサイズ・配色は変えないこと。',
   ribbonLangEnglish: '英語',
-  ribbonLangSimplifiedChinese: '簡体字中国語',
-  ribbonLangTraditionalChinese: '繁体字中国語',
   ribbonLangJapanese: '日本語',
-  ribbonLangKorean: '韓国語',
-  ribbonLangFrench: 'フランス語',
-  ribbonLangGerman: 'ドイツ語',
-  ribbonLangSpanish: 'スペイン語',
-  ribbonLangThai: 'タイ語',
-  ribbonLangIndonesian: 'インドネシア語',
-  ribbonLangRussian: 'ロシア語',
   ribbonLangArabic: 'アラビア語',
-  ribbonLangPortuguese: 'ポルトガル語',
-  ribbonLangItalian: 'イタリア語',
-  ribbonLangPolish: 'ポーランド語',
-  ribbonLangCzech: 'チェコ語',
-  ribbonLangDutch: 'オランダ語',
-  ribbonLangMalay: 'マレー語',
-  ribbonLangHebrew: 'ヘブライ語',
-  ribbonLangHindi: 'ヒンディー語',
-  ribbonLangVietnamese: 'ベトナム語',
   ribbonNewComment: '新しいコメント',
   ribbonCommentsPane: 'コメント ウィンドウ',
   ribbonCommentsPaneTip: 'コメント ウィンドウの表示/非表示',
@@ -783,4 +765,4 @@ export const ja = {
   ribbonZoomSectionItem: 'スライド {n} セクション {k}: {name}',
   ribbonZoomSelectedSlides: '{n} 枚のスライドを選択中',
   ribbonZoomSelectedSections: '{n} 個のセクションを選択中',
-} satisfies Record<keyof typeof zh, string>
+} satisfies Record<keyof typeof en, string>

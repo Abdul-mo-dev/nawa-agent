@@ -12,11 +12,10 @@ import {
   type SheetProtectionPermission,
 } from '@genoffice/xlsx-gateway/gateway/xlsx-protection'
 
-import { useI18n } from './i18n/locale'
-import type { zh } from './i18n/dialogs/zh'
+import { useI18n, type StringKey } from './i18n/locale'
 import { useModalDialog } from './modal-dialog'
 
-const PERMISSION_LABELS: Record<SheetProtectionPermission, keyof typeof zh> = {
+const PERMISSION_LABELS: Record<SheetProtectionPermission, StringKey> = {
   selectLockedCells: 'dlgProtAllowSelectLockedCells',
   selectUnlockedCells: 'dlgProtAllowSelectUnlockedCells',
   formatCells: 'dlgProtAllowFormatCells',

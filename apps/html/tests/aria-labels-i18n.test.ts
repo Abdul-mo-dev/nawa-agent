@@ -1,12 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
+import { LocaleProvider } from '../src/renderer/i18n/locale'
 import { Breadcrumb } from '../src/renderer/components/Breadcrumb'
 import { PreviewFrame } from '../src/renderer/preview/PreviewFrame'
 import { DraftPreview } from '../src/renderer/preview/DraftPreview'
 import { buildParseMap } from '../src/renderer/document/parse-map'
 
-beforeEach(() => vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true))
+beforeEach(() => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  vi.stubGlobal('htmlApi', { onLanguageChanged: () => () => {} })
+})
 const cleanups: Array<() => void> = []
 afterEach(() => {
   cleanups.splice(0).forEach((cleanup) => cleanup())
@@ -17,7 +21,7 @@ function mount(element: React.ReactElement): HTMLElement {
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root = createRoot(container)
-  act(() => root.render(element))
+  act(() => root.render(createElement(LocaleProvider, { initial: 'ja', children: element })))
   cleanups.push(() => {
     act(() => root.unmount())
     container.remove()
@@ -41,7 +45,7 @@ describe('aria-label/title i18n (existing keys)', () => {
     )
     const nav = container.querySelector('.crumbs')
     expect(nav).not.toBeNull()
-    expect(nav!.getAttribute('aria-label')).toBe('\u5143\u7d20\u8def\u5f84')
+    expect(nav!.getAttribute('aria-label')).toBe('要素のパス')
     expect(nav!.getAttribute('aria-label')).not.toBe('element path')
   })
 
@@ -56,7 +60,7 @@ describe('aria-label/title i18n (existing keys)', () => {
     )
     const frame = container.querySelector('iframe.preview-frame')
     expect(frame).not.toBeNull()
-    expect(frame!.getAttribute('title')).toBe('\u9884\u89c8')
+    expect(frame!.getAttribute('title')).toBe('プレビュー')
     expect(frame!.getAttribute('title')).not.toBe('preview')
   })
 
@@ -64,7 +68,7 @@ describe('aria-label/title i18n (existing keys)', () => {
     const container = mount(createElement(DraftPreview, { html: '<p>hi</p>' }))
     const frame = container.querySelector('iframe.draft-preview-frame')
     expect(frame).not.toBeNull()
-    expect(frame!.getAttribute('title')).toBe('\u9884\u89c8')
+    expect(frame!.getAttribute('title')).toBe('プレビュー')
     expect(frame!.getAttribute('title')).not.toBe('draft')
   })
 })

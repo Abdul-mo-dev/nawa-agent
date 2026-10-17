@@ -30,13 +30,12 @@ function filterMarkdownIn(locale: string): string {
 }
 
 describe('the text-file dialog filter', () => {
-  it('is Portuguese in the pt block', () => {
-    expect(filterMarkdownIn('pt')).toBe('Arquivos de texto (Markdown, TXT, JSON)')
+  it('uses English in the English block', () => {
+    expect(filterMarkdownIn('en')).toBe('Text Files (Markdown, TXT, JSON)')
   })
 
-  it('is still Spanish in the es block', () => {
-    // the es string is correct there; fixing pt must not "fix" es as well
-    expect(filterMarkdownIn('es')).toBe('Archivos de texto (Markdown, TXT, JSON)')
+  it('omits removed language blocks', () => {
+    expect(source).not.toMatch(/\n {2}(?:zh|ko|fr|de|es|pt|he): \{/)
   })
 })
 
@@ -49,7 +48,7 @@ describe('the text-file dialog filter', () => {
 describe('the File > New menu label', () => {
   it('reads AI Markdown in every locale', () => {
     const labels = [...source.matchAll(/menuNewMarkdown: '([^']*)'/g)].map((match) => match[1])
-    expect(labels.length).toBeGreaterThanOrEqual(19)
+    expect(labels.length).toBe(3)
     expect(new Set(labels)).toEqual(new Set(['AI Markdown']))
   })
 })

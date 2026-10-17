@@ -1084,26 +1084,6 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
             pressed={navigationVisible}
             onClick={() => changePrefs({ navigationVisible: !prefs.navigationVisible })}
           />
-          <button
-            type="button"
-            className="ex-tool ex-assistant-toggle"
-            aria-label={t('assistant')}
-            title={t('assistant')}
-            disabled={editorActive}
-            aria-pressed={inspectorVisible && prefs.pane === 'ai'}
-            onClick={() => changePrefs({ pane: prefs.pane === 'ai' ? 'none' : 'ai' })}
-          >
-            <Icon name="sparkles" />
-            {panelActivity && (
-              <span
-                className="nawa-toolbar-activity"
-                title={panelActivity.text}
-                aria-label={panelActivity.text}
-              >
-                ●
-              </span>
-            )}
-          </button>
         </div>
         <label className="ex-search">
           <Icon name="search" size={17} />
@@ -1152,10 +1132,6 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
                 >
                   <Icon name="search" size={18} />
                   <span>{homeText('searchFilesPlaceholder')}</span>
-                </button>
-                <button className="ex-nav-item" onClick={() => onOpenLegacy({ mode: 'ask' })}>
-                  <Icon name="sparkles" size={18} />
-                  <span>{homeText('navAsk')}</span>
                 </button>
               </nav>
               <div className="ex-nav-section">
@@ -1323,6 +1299,25 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
                     <Icon name="plus" />
                     <span>{t('new')}</span>
                     <Icon name="down" size={12} />
+                  </button>
+                  <button
+                    type="button"
+                    className="ex-tool ex-assistant-toggle"
+                    aria-label={t('assistant')}
+                    title={t('assistant')}
+                    aria-pressed={inspectorVisible && prefs.pane === 'ai'}
+                    onClick={() => changePrefs({ pane: prefs.pane === 'ai' ? 'none' : 'ai' })}
+                  >
+                    <Icon name="sparkles" />
+                    {panelActivity && (
+                      <span
+                        className="nawa-toolbar-activity"
+                        title={panelActivity.text}
+                        aria-label={panelActivity.text}
+                      >
+                        ●
+                      </span>
+                    )}
                   </button>
                   <button
                     type="button"

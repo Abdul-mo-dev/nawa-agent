@@ -208,9 +208,9 @@ describe('shared CropDialog keyboard and focus', () => {
   })
 
   it('localizes the edge names', () => {
-    mountCrop('zh')
-    expect(edge(host, 'w').getAttribute('aria-label')).toBe('\u5de6\u8fb9\u7f18')
-    expect(edge(host, 'se').getAttribute('aria-label')).toBe('\u53f3\u4e0b\u8fb9\u7f18')
+    mountCrop('ja')
+    expect(edge(host, 'w').getAttribute('aria-label')).toBe('左辺')
+    expect(edge(host, 'se').getAttribute('aria-label')).toBe('右下の辺')
     expect(CROP_EDGE_LABELS.en.nw).toBe('Top left edge')
   })
 

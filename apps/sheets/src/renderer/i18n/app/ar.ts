@@ -1,4 +1,4 @@
-import type { zh } from './zh'
+import type { en } from './en'
 
 export const ar = {
   appWorkbookImportNotice:
@@ -1475,4 +1475,4 @@ export const ar = {
   appVisualFlipV: 'قلب رأسي',
   appVisualFlipH: 'قلب أفقي',
   appCtxPasteVisual: 'لصق صورة أو شكل',
-} satisfies Record<keyof typeof zh, string>
+} satisfies Record<keyof typeof en, string>

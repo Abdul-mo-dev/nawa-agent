@@ -1,4 +1,4 @@
-import type { zh } from './zh'
+import type { en } from './en'
 
 export const ja = {
   aiInputPlaceholderGen: '作りたいプレゼンを説明するか、質問を入力',
@@ -223,4 +223,4 @@ export const ja = {
   aiSumTemplatesEmpty: 'スタイル テンプレート一覧（空）',
   aiSumListTemplates: '{count} 個のスタイル テンプレートを一覧表示',
   aiPageCloudToLocal: 'クラウド生成不可効 — ローカルで生成',
-} satisfies Record<keyof typeof zh, string>
+} satisfies Record<keyof typeof en, string>

@@ -1,0 +1,95 @@
+/* Language changes text flow; the application keeps its physical layout.
+   Restore the language direction inside each row so labels, fields and prose
+   read naturally. The low-specificity child rule lets nested layout rows and
+   document surfaces keep their own direction. */
+:root {
+  --ui-text-direction: ltr;
+}
+
+html[dir='rtl'] {
+  --ui-text-direction: rtl;
+}
+
+:is(
+  .tab-bar,
+  .tab-strip,
+  .tab-item,
+  .home,
+  .nav-item,
+  .sidebar-logo,
+  .account-btn,
+  .quick-grid,
+  .list-header,
+  .file-row,
+  .ex-address-row,
+  .ex-history,
+  .ex-address,
+  .ex-breadcrumbs,
+  .ex-crumb,
+  .ex-search,
+  .ex-layout-controls,
+  .ex-brand,
+  .ex-nav-item,
+  .ex-nav-section,
+  .ex-root-tabs,
+  .ex-tree-row,
+  .ex-content-heading,
+  .ex-file-controls,
+  .ex-row-layout,
+  .ex-file-name,
+  .ex-list-heading button,
+  .ex-status,
+  .nawa-workspace-tabs-header,
+  .nawa-workspace-tablist,
+  .ex-inspector-tabs,
+  .nawa-workspace-tablist > button,
+  .nawa-workspace-chat-options,
+  .nawa-chat-primary-actions,
+  .nawa-chat-model-control,
+  .set-header,
+  .set-body,
+  .set-nav,
+  .set-nav-item,
+  .set-pane,
+  .set-field,
+  .set-footer,
+  .set-actions,
+  .help-root,
+  .help-search-row,
+  .ribbon,
+  .ribbon-tabs,
+  .ribbon-body,
+  .ribbon-group,
+  .ribbon-group-content,
+  .ribbon-group-items,
+  .ribbon-tool,
+  .ribbon-rows,
+  .ribbon-row,
+  .table-ribbon-body,
+  .rb-row,
+  .rb-small,
+  .rb-btn,
+  .rb-split,
+  .rb-big,
+  .status-bar,
+  .status-left,
+  .status-right,
+  .status-views,
+  .ai-panel-header,
+  .ai-panel-header-actions,
+  .ai-composer-actions,
+  .ai-input-actions,
+  .ws-chat-head,
+  .ws-chat-compose-actions,
+  .ws-chat-input-tools,
+  .gs-dd-btn,
+  .gs-dd-item
+) {
+  direction: ltr;
+
+  :where(
+    & > :not([dir], bdi, input:is([type='range'], [type='number'], [type='url'], [type='email']))
+  ) {
+    direction: var(--ui-text-direction);
+  }
+}

@@ -1,4 +1,4 @@
-import type { zh } from './zh'
+import type { en } from './en'
 
 export const ar = {
   appScTitle: 'اختصارات لوحة المفاتيح',
@@ -338,26 +338,8 @@ export const ar = {
   appTranslate: 'ترجمة',
   appTranslateTo: 'ترجمة إلى {lang}',
   appLangEnglish: 'الإنجليزية',
-  appLangSimplifiedChinese: 'الصينية المبسطة',
   appLangJapanese: 'اليابانية',
-  appLangKorean: 'الكورية',
-  appLangFrench: 'الفرنسية',
-  appLangGerman: 'الألمانية',
-  appLangSpanish: 'الإسبانية',
-  appLangThai: 'التايلاندية',
-  appLangIndonesian: 'الإندونيسية',
-  appLangRussian: 'الروسية',
   appLangArabic: 'العربية',
-  appLangPortuguese: 'البرتغالية',
-  appLangItalian: 'الإيطالية',
-  appLangPolish: 'البولندية',
-  appLangCzech: 'التشيكية',
-  appLangDutch: 'الهولندية',
-  appLangMalay: 'الملايوية',
-  appLangHebrew: 'العبرية',
-  appLangHindi: 'الهندية',
-  appLangTraditionalChinese: 'الصينية التقليدية',
-  appLangVietnamese: 'الفيتنامية',
   appWrapTextMenu: 'التفاف النص',
   appViewImage: 'عرض الصورة',
   appSaveImageAs: 'حفظ الصورة باسم…',
@@ -511,4 +493,4 @@ export const ar = {
   appUpdateStyleTip: 'تحديث هذا النمط بتنسيق التحديد الحالي (يُكتب مرة أخرى في styles.xml)',
   appNewStyleFromSelection: 'نمط جديد من التحديد الحالي',
   appStyleNamePlaceholder: 'اسم النمط',
-} satisfies Record<keyof typeof zh, string>
+} satisfies Record<keyof typeof en, string>

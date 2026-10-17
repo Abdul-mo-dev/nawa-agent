@@ -1,4 +1,4 @@
-import type { zh } from './zh'
+import type { en } from './en'
 
 export const ar = {
   aiEmptyDraftTitle: 'دع الذكاء الاصطناعي يكتب مسودة هذا المستند لك',
@@ -179,4 +179,4 @@ export const ar = {
   aiCmdImages: 'تم تحديث {count} صورة',
   aiCmdToc: 'تم إدراج جدول محتويات ({count} إدخالًا)',
   aiCmdSkipped: ' (تم تخطي {count} كتلة محمية)',
-} satisfies Record<keyof typeof zh, string>
+} satisfies Record<keyof typeof en, string>

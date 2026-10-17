@@ -1,4 +1,4 @@
-import type { zh } from './zh'
+import type { en } from './en'
 
 export const ja = {
   redactMenuLabel: '選択範囲をAIから隠す',
@@ -262,4 +262,4 @@ export const ja = {
   appStatusSummaryZoomInserted: 'サマリー ズーム スライドを挿入しました（タイル {count} 個）',
   appSectionSummary: 'サマリー セクション',
   appSectionN: 'セクション {n}',
-} satisfies Record<keyof typeof zh, string>
+} satisfies Record<keyof typeof en, string>

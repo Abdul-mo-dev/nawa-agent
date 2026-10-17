@@ -1,5 +1,3 @@
-import type { zh } from './zh'
-
 export const en = {
   appScTitle: 'Keyboard Shortcuts',
   appScFilter: 'Search shortcuts',
@@ -338,26 +336,8 @@ export const en = {
   appTranslate: 'Translate',
   appTranslateTo: 'Translate to {lang}',
   appLangEnglish: 'English',
-  appLangSimplifiedChinese: 'Simplified Chinese',
   appLangJapanese: 'Japanese',
-  appLangKorean: 'Korean',
-  appLangFrench: 'French',
-  appLangGerman: 'German',
-  appLangSpanish: 'Spanish',
-  appLangThai: 'Thai',
-  appLangIndonesian: 'Indonesian',
-  appLangRussian: 'Russian',
   appLangArabic: 'Arabic',
-  appLangPortuguese: 'Portuguese',
-  appLangItalian: 'Italian',
-  appLangPolish: 'Polish',
-  appLangCzech: 'Czech',
-  appLangDutch: 'Dutch',
-  appLangMalay: 'Malay',
-  appLangHebrew: 'Hebrew',
-  appLangHindi: 'Hindi',
-  appLangTraditionalChinese: 'Traditional Chinese',
-  appLangVietnamese: 'Vietnamese',
   appWrapTextMenu: 'Wrap Text',
   appViewImage: 'View Image',
   appSaveImageAs: 'Save Image As…',
@@ -511,4 +491,4 @@ export const en = {
   appUpdateStyleTip: 'Update this style from the current selection (written back to styles.xml)',
   appNewStyleFromSelection: 'New style from the current selection',
   appStyleNamePlaceholder: 'Style name',
-} satisfies Record<keyof typeof zh, string>
+}

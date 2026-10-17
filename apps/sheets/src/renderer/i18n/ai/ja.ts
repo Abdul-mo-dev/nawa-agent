@@ -1,4 +1,4 @@
-import type { zh } from './zh'
+import type { en } from './en'
 
 export const ja = {
   aiComposerPlaceholderBuild: '作りたい表・データ・グラフを入力…',
@@ -106,4 +106,4 @@ export const ja = {
   aiScopeRangeTip:
     'AI は「この列 / これらの行 / 選択部分」をこの範囲として解釈します。送信すると今回の実行中は固定されます',
   aiScopeClearTitle: '範囲指定を解除してシート全体を対象にする',
-} satisfies Record<keyof typeof zh, string>
+} satisfies Record<keyof typeof en, string>

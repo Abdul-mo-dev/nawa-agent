@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url'
 const ROOT = resolve(fileURLToPath(new URL('.', import.meta.url)), '..')
 const TOPICS = join(ROOT, 'apps/shell/src/renderer/src/i18n/help/topics')
 const REGISTRY = join(TOPICS, '..', 'help-registry.ts')
-const I18N = join(ROOT, 'packages/i18n/src/index.ts')
+const I18N = join(ROOT, 'packages/i18n/src/core.ts')
 
 /**
  * The topic ids, read out of the registry source.
@@ -42,7 +42,7 @@ function topicIdsFrom(source) {
 
 /**
  * The languages the manual has to ship, read from the i18n package rather than
- * listed here: a hand-kept copy of the 21 codes is a 21-code list that goes
+ * listed here: a hand-kept copy of the language codes goes
  * stale the day a language is added, and the failure is silent.
  *
  * `@genoffice/i18n` exports its TypeScript source, so node cannot import it

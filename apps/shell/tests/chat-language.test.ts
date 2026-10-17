@@ -1,16 +1,14 @@
 /** @vitest-environment jsdom */
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { IpcStreamChunk, IpcStreamStart } from '@genoffice/agent-core'
 import { defaultAiSettings, type AiSettings } from '@genoffice/ai-provider'
 import type { Lang } from '@genoffice/i18n'
 import type { ConversationRecord, HistorySave } from '../src/shared/conversation-api'
-import { KbAskPanel } from '../src/renderer/src/KbAskPanel'
 import { WorkspaceChat } from '../src/renderer/src/WorkspaceChat'
 import { LocaleProvider, useI18n } from '../src/renderer/src/locale'
 
-type Surface = 'workspace' | 'knowledge-base'
 const cleanup: (() => Promise<void>)[] = []
 
 beforeEach(() => {
@@ -22,7 +20,7 @@ afterEach(async () => {
   for (const close of cleanup.splice(0)) await close()
 })
 
-async function panel(surface: Surface, initial: Lang) {
+async function panel(initial: Lang) {
   const settings = defaultAiSettings()
   settings.provider = 'custom'
   settings.providers.custom = {
@@ -34,16 +32,6 @@ async function panel(surface: Surface, initial: Lang) {
   const api = {
     getAiSettings: vi.fn(async () => settings),
     setLanguage: vi.fn(async (_lang: Lang) => undefined),
-    kbList: vi.fn(async () => [
-      {
-        path: '/documents/note.txt',
-        name: 'note.txt',
-        folder: 'documents',
-        ext: '.txt',
-        sizeBytes: 20,
-      },
-    ]),
-    kbSearch: vi.fn(async () => []),
     aiStream: vi.fn(async (_request: IpcStreamStart<AiSettings>) => undefined),
     aiStreamCancel: vi.fn(),
     onAiStreamChunk: (listener: (chunk: IpcStreamChunk) => void) => {
@@ -86,16 +74,14 @@ async function panel(surface: Surface, initial: Lang) {
   let setLanguage!: (lang: Lang) => void
   function Chat() {
     setLanguage = useI18n().setLang
-    return surface === 'workspace'
-      ? createElement(WorkspaceChat, {
-          folder: null,
-          folderName: 'Workspace',
-          registeredRoots: [],
-          scopePaths: [],
-          onOpenFile: vi.fn(),
-          onClose: vi.fn(),
-        })
-      : createElement(KbAskPanel, { onOpenPath: vi.fn() })
+    return createElement(WorkspaceChat, {
+      folder: null,
+      folderName: 'Workspace',
+      registeredRoots: [],
+      scopePaths: [],
+      onOpenFile: vi.fn(),
+      onClose: vi.fn(),
+    })
   }
   const host = document.createElement('div')
   document.body.append(host)
@@ -137,27 +123,24 @@ const fallbacks: [Lang, string][] = [
     "Reply in the same language as the user's message; if it cannot be determined, reply in English.",
   ],
   ['ar', 'أجب بنفس لغة رسالة المستخدم؛ وإذا تعذر تحديدها، فأجب باللغة العربية.'],
-  ['zh-TW', '用與使用者訊息相同的語言回覆；無法判斷使用者訊息的語言時，用繁體中文回覆。'],
   [
-    'vi',
-    'Trả lời bằng ngôn ngữ của tin nhắn người dùng; nếu không xác định được, hãy trả lời bằng tiếng Việt.',
+    'ja',
+    'ユーザーのメッセージと同じ言語で返信してください。言語を判別できない場合は日本語で返信してください。',
   ],
 ]
 
-for (const surface of ['workspace', 'knowledge-base'] as const) {
+describe('workspace chat', () => {
   it.each(fallbacks)(
-    `${surface} sends the message unchanged with the %s reply-language fallback`,
+    'sends the message unchanged with the %s reply-language fallback',
     async (lang, directive) => {
-      const p = await panel(surface, lang)
+      const p = await panel(lang)
       const question = 'こんにちは'
       await p.send(question)
       expect(p.api.aiStream).toHaveBeenCalledOnce()
       const request = p.api.aiStream.mock.calls[0]![0]
       expect(request.system.endsWith(directive)).toBe(true)
       expect(request.system).toContain(
-        surface === 'workspace'
-          ? 'Only completed, currently verified evidence is restored as answer context.'
-          : 'Search and read current sources again before using file facts in this answer.',
+        'Only completed, currently verified evidence is restored as answer context.',
       )
       expect(request.messages.at(-1)).toMatchObject({ role: 'user' })
       expect(request.messages.at(-1)!.text.startsWith(question)).toBe(true)
@@ -165,8 +148,8 @@ for (const surface of ['workspace', 'knowledge-base'] as const) {
     },
   )
 
-  it(`${surface} uses the current language on tool continuations and subsequent questions`, async () => {
-    const p = await panel(surface, 'en')
+  it('uses the current language on tool continuations and subsequent questions', async () => {
+    const p = await panel('en')
     await p.send('こんにちは')
     expect(p.api.aiStream.mock.calls[0]![0].system).toContain('reply in English.')
     await p.switchLanguage('ja')
@@ -174,8 +157,8 @@ for (const surface of ['workspace', 'knowledge-base'] as const) {
       type: 'tool-call',
       toolCall: {
         id: 'read',
-        name: surface === 'workspace' ? 'list_files' : 'search_knowledge_base',
-        input: surface === 'workspace' ? {} : { query: 'note' },
+        name: 'list_files',
+        input: {},
       },
     })
     await p.emit({ type: 'done' })
@@ -190,4 +173,4 @@ for (const surface of ['workspace', 'knowledge-base'] as const) {
     expect(p.api.aiStream.mock.calls[2]![0].system.endsWith(fallbacks[1]![1])).toBe(true)
     await p.emit({ type: 'error', error: 'Test complete.' })
   })
-}
+})

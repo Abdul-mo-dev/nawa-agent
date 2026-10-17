@@ -1,4 +1,4 @@
-import type { zh } from './zh'
+import type { en } from './en'
 
 export const ar = {
   ribbonAiCreditNote: 'يستدعي الذكاء الاصطناعي ويستهلك الرصيد',
@@ -386,26 +386,8 @@ export const ar = {
   ribbonTranslatePrompt:
     'ترجم كل نص الشريحة الحالية إلى {lang}: استبدل النص الأصلي بالأدوات مع الحفاظ على التخطيط وأحجام الخطوط والألوان.',
   ribbonLangEnglish: 'الإنجليزية',
-  ribbonLangSimplifiedChinese: 'الصينية المبسطة',
-  ribbonLangTraditionalChinese: 'الصينية التقليدية',
   ribbonLangJapanese: 'اليابانية',
-  ribbonLangKorean: 'الكورية',
-  ribbonLangFrench: 'الفرنسية',
-  ribbonLangGerman: 'الألمانية',
-  ribbonLangSpanish: 'الإسبانية',
-  ribbonLangThai: 'التايلاندية',
-  ribbonLangIndonesian: 'الإندونيسية',
-  ribbonLangRussian: 'الروسية',
   ribbonLangArabic: 'العربية',
-  ribbonLangPortuguese: 'البرتغالية',
-  ribbonLangItalian: 'الإيطالية',
-  ribbonLangPolish: 'البولندية',
-  ribbonLangCzech: 'التشيكية',
-  ribbonLangDutch: 'الهولندية',
-  ribbonLangMalay: 'الملايوية',
-  ribbonLangHebrew: 'العبرية',
-  ribbonLangHindi: 'الهندية',
-  ribbonLangVietnamese: 'الفيتنامية',
   ribbonNewComment: 'تعليق جديد',
   ribbonCommentsPane: 'جزء التعليقات',
   ribbonCommentsPaneTip: 'إظهار أو إخفاء جزء التعليقات',
@@ -755,4 +737,4 @@ export const ar = {
   ribbonZoomSectionItem: 'الشريحة {n} المقطع {k}: {name}',
   ribbonZoomSelectedSlides: 'تم تحديد {n} شرائح',
   ribbonZoomSelectedSections: 'تم تحديد {n} مقاطع',
-} satisfies Record<keyof typeof zh, string>
+} satisfies Record<keyof typeof en, string>

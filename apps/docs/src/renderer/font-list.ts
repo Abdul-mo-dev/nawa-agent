@@ -33,14 +33,8 @@ export function isEastAsianFontName(name: string): boolean {
  */
 export function defaultEastAsiaFontFor(lang: Lang): string | undefined {
   switch (lang) {
-    case 'zh':
-      return '宋体'
     case 'ja':
       return 'Yu Mincho'
-    case 'ko':
-      return 'Malgun Gothic'
-    case 'zh-TW':
-      return 'PMingLiU'
     default:
       return undefined
   }

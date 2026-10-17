@@ -1,5 +1,3 @@
-import { zh } from './zh'
-
 export const en = {
   modernCopy: 'Edits will be saved to this new .{to} copy. The .{from} original stays unchanged.',
   workbookCopy: 'Edits will be saved to this new .xlsx copy. The .{from} original stays unchanged.',
@@ -15,4 +13,4 @@ export const en = {
   failed: 'The file could not be converted. It may be damaged, password protected, or unsupported.',
   encrypted:
     'Password-protected files cannot be imported. Save an unencrypted copy in the original app first.',
-} satisfies Record<keyof typeof zh, string>
+}

@@ -1,5 +1,3 @@
-import type { zh } from './zh'
-
 export const en = {
   ribbonAiCreditNote: 'Uses AI and consumes credits',
   ribbonAiRewriteConfirm:
@@ -673,26 +671,8 @@ export const en = {
     'Proofread the selected content: fix typos, punctuation and grammar errors while keeping the original meaning and paragraph structure unchanged.',
   ribbonTranslateTo: 'Translate to {lang}',
   ribbonLangEnglish: 'English',
-  ribbonLangSimplifiedChinese: 'Simplified Chinese',
   ribbonLangJapanese: 'Japanese',
-  ribbonLangKorean: 'Korean',
-  ribbonLangFrench: 'French',
-  ribbonLangGerman: 'German',
-  ribbonLangSpanish: 'Spanish',
-  ribbonLangThai: 'Thai',
-  ribbonLangIndonesian: 'Indonesian',
-  ribbonLangRussian: 'Russian',
   ribbonLangArabic: 'Arabic',
-  ribbonLangPortuguese: 'Portuguese',
-  ribbonLangItalian: 'Italian',
-  ribbonLangPolish: 'Polish',
-  ribbonLangCzech: 'Czech',
-  ribbonLangDutch: 'Dutch',
-  ribbonLangMalay: 'Malay',
-  ribbonLangHebrew: 'Hebrew',
-  ribbonLangHindi: 'Hindi',
-  ribbonLangTraditionalChinese: 'Traditional Chinese',
-  ribbonLangVietnamese: 'Vietnamese',
   ribbonGroupLanguage: 'Language',
   ribbonNewComment: 'New Comment',
   ribbonNewCommentTip: 'Add a comment on the selection',
@@ -916,4 +896,4 @@ export const en = {
   ribbonSelectCell: 'Select Cell',
   ribbonRowHeightIs: 'Row height is',
   ribbonReadOnlyEdit: 'The document is read-only; tables cannot be changed',
-} satisfies Record<keyof typeof zh, string>
+}

@@ -13,29 +13,7 @@ import {
  * `t()` returns the raw key name. These read the shipped files to catch that.
  */
 
-const LOCALES = [
-  'ar',
-  'cs',
-  'de',
-  'en',
-  'es',
-  'fr',
-  'he',
-  'hi',
-  'id',
-  'it',
-  'ja',
-  'ko',
-  'ms',
-  'nl',
-  'pl',
-  'pt',
-  'ru',
-  'th',
-  'vi',
-  'zh',
-  'zh-TW',
-] as const
+const LOCALES = ['ar', 'en', 'ja'] as const
 
 const DOCS_APP = join(__dirname, '..', 'src', 'renderer', 'i18n', 'app')
 const DOCS_RIBBON = join(__dirname, '..', 'src', 'renderer', 'i18n', 'ribbon')
@@ -59,15 +37,15 @@ function expectComplete(dir: string, family: 'appLang' | 'ribbonLang', label: st
 }
 
 describe('translate target strings exist for every locale', () => {
-  it('docs: the right-click menu has a name for all 21 languages, in all 21 locales', () => {
+  it('docs: the right-click menu has a name for all supported languages, in every locale', () => {
     expectComplete(DOCS_APP, 'appLang', 'docs app i18n')
   })
 
-  it('docs: the ribbon dropdown has a name for all 21 languages, in all 21 locales', () => {
+  it('docs: the ribbon dropdown has a name for all supported languages, in every locale', () => {
     expectComplete(DOCS_RIBBON, 'ribbonLang', 'docs ribbon i18n')
   })
 
-  it('slides: the ribbon dropdown has a name for all 21 languages, in all 21 locales', () => {
+  it('slides: the ribbon dropdown has a name for all supported languages, in every locale', () => {
     expectComplete(SLIDES_RIBBON, 'ribbonLang', 'slides ribbon i18n')
   })
 })
@@ -103,36 +81,19 @@ describe('the shipped strings are translated, not raw keys or copies', () => {
     }
   })
 
-  it('a non-latin locale writes its own script, not a latin transliteration', () => {
-    // guards the failure the review caught: a row that is really another
-    // language's text pasted in (Thai file shipping "Bahasa Indonesia")
-    const th = readFileSync(join(DOCS_APP, 'th.ts'), 'utf8')
-    const indonesian = /appLangIndonesian:\s*'([^']*)'/.exec(th)?.[1] ?? ''
-    expect(indonesian).not.toBe('Bahasa Indonesia')
-    expect(indonesian).toMatch(/[\u0E00-\u0E7F]/)
+  it('Arabic names use Arabic script', () => {
+    const src = readFileSync(join(DOCS_APP, 'ar.ts'), 'utf8')
+    expect(/appLangArabic:\s*'([^']*)'/.exec(src)?.[1]).toMatch(/[\u0600-\u06ff]/)
   })
 
-  it('zh-TW keeps the traditional forms', () => {
-    const src = readFileSync(join(DOCS_APP, 'zh-TW.ts'), 'utf8')
-    // The characters under test are exactly the ones that must differ between
-    // the two scripts. Written as \u escapes so this file stays ASCII and does
-    // not trip the comment-language gate, while still asserting the glyphs.
-    const italy = '\u7fa9\u5927\u5229'
-    const traditional = '\u7e41\u9ad4\u4e2d\u6587'
-    const koreanTraditional = '\u97d3\u6587'
-    const koreanSimplified = '\u97e9\u6587'
-    // substring, not equality: the wording may carry a suffix, what matters
-    // is that the glyphs are the traditional forms
-    const row = (key: string) => new RegExp(`${key}:\\s*'[^']*'`).exec(src)?.[0] ?? ''
-    expect(row('appLangItalian')).toContain(italy)
-    expect(row('appLangTraditionalChinese')).toContain(traditional)
-    expect(row('appLangKorean')).toContain(koreanTraditional)
-    expect(row('appLangKorean')).not.toContain(koreanSimplified)
+  it('Japanese names use Japanese script', () => {
+    const src = readFileSync(join(DOCS_APP, 'ja.ts'), 'utf8')
+    expect(/appLangJapanese:\s*'([^']*)'/.exec(src)?.[1]).toMatch(/[\u3040-\u30ff\u4e00-\u9fff]/)
   })
 })
 
 describe('locale files are in step with each other', () => {
-  it('every tree has all 21 files, so no locale silently misses the new rows', () => {
+  it('every tree has exactly the supported files, so no locale silently misses the new rows', () => {
     for (const dir of [DOCS_APP, DOCS_RIBBON, SLIDES_RIBBON]) {
       expect(readdirSync(dir).filter((f) => f.endsWith('.ts')).length).toBe(LOCALES.length)
     }

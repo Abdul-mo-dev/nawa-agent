@@ -104,14 +104,16 @@ describe('buildContextMenuItems', () => {
 
 describe('contextMenuLabels', () => {
   it('covers every language and falls back to English', () => {
-    expect(contextMenuLabels('zh').copy).toBe('复制')
-    expect(contextMenuLabels('zh-TW').paste).toBe('貼上')
+    expect(contextMenuLabels('ja').copy).toBe('コピー')
+    expect(contextMenuLabels('ar').paste).toBe('لصق')
     expect(contextMenuLabels('xx')).toEqual(contextMenuLabels('en'))
+    for (const removed of ['zh', 'zh-TW', 'fr', 'he'])
+      expect(contextMenuLabels(removed)).toEqual(contextMenuLabels('en'))
   })
 
   it('falls back to the base language for regional variants', () => {
-    expect(contextMenuLabels('pt-BR').copy).toBe(contextMenuLabels('pt').copy)
-    expect(contextMenuLabels('zh-Hant').copy).toBe(contextMenuLabels('zh').copy)
+    expect(contextMenuLabels('ar-SA').copy).toBe(contextMenuLabels('ar').copy)
+    expect(contextMenuLabels('ja-JP').copy).toBe(contextMenuLabels('ja').copy)
     expect(contextMenuLabels('de-AT').copy).toBe(contextMenuLabels('de').copy)
     expect(appMenuLabels('pt-BR').window).toBe(appMenuLabels('pt').window)
     expect(appMenuLabels('zh-Hant').window).toBe(appMenuLabels('zh').window)

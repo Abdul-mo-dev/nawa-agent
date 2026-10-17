@@ -1,5 +1,3 @@
-import { zh } from './zh'
-
 export const en = {
   'Run location': 'Run location',
   'Local server': 'Local server',
@@ -25,4 +23,4 @@ export const en = {
     'Native analysis supports XLSX, XLSM, CSV, TSV and JSON tables.',
   'Codex output limits are advisory; large tool responses are rejected before execution.':
     'Codex output limits are advisory; large tool responses are rejected before execution.',
-} satisfies Record<keyof typeof zh, string>
+}

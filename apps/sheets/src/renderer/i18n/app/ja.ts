@@ -1,4 +1,4 @@
-import type { zh } from './zh'
+import type { en } from './en'
 
 export const ja = {
   appWorkbookImportNotice:
@@ -1562,4 +1562,4 @@ export const ja = {
   appVisualFlipV: '上下反転',
   appVisualFlipH: '左右反転',
   appCtxPasteVisual: '図または図形を貼り付け',
-} satisfies Record<keyof typeof zh, string>
+} satisfies Record<keyof typeof en, string>

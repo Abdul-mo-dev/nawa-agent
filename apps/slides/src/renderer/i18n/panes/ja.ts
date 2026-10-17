@@ -1,4 +1,4 @@
-import type { zh } from './zh'
+import type { en } from './en'
 
 export const ja = {
   paneCancel: 'キャンセル',
@@ -288,4 +288,4 @@ export const ja = {
   paneShowMenuWhite: '白い画面',
   paneShowMenuEnd: 'スライドショーの終了',
   panePresenterWhiteOn: '白い画面（W キーで戻る）',
-} satisfies Record<keyof typeof zh, string>
+} satisfies Record<keyof typeof en, string>

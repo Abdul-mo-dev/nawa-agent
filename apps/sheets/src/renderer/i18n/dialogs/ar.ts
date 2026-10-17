@@ -1,4 +1,4 @@
-import type { zh } from './zh'
+import type { en } from './en'
 
 export const ar = {
   dlgAllowEditRangesTitle: 'السماح بتحرير النطاقات',
@@ -655,4 +655,4 @@ export const ar = {
   dlgSizeMoveOnly: 'نقل دون تغيير الحجم مع الخلايا',
   dlgSizeFixed: 'عدم النقل أو تغيير الحجم مع الخلايا',
   dlgSizeInvalid: 'أدخل حجمًا وتدويرًا صالحين.',
-} satisfies Record<keyof typeof zh, string>
+} satisfies Record<keyof typeof en, string>

@@ -14,6 +14,7 @@ import '@genoffice/ui/dropdown.css'
 import '@genoffice/ui/ribbon-collapse.css'
 import '@genoffice/ui/markdown.css'
 import '@genoffice/ui/ai-panel-prefs.css'
+import '@genoffice/ui/ui-direction.css'
 import '@genoffice/ui/ai-scope-quote.css'
 import './styles.css'
 import { applyAiPanelPrefs, installScreenTips } from '@genoffice/ui'
@@ -41,13 +42,13 @@ function applyTheme(theme: UiTheme): void {
 }
 
 async function bootstrap(): Promise<void> {
-  let lang: Lang = 'zh'
+  let lang: Lang = 'en'
   let theme: UiTheme = 'system'
   try {
     // per-promise catch: standalone runs have no app:get-theme handler, and
     // that rejection must not drop a resolved language
     ;[lang, theme] = await Promise.all([
-      window.slidesApi.getLanguage().catch(() => 'zh' as const),
+      window.slidesApi.getLanguage().catch(() => 'en' as const),
       window.slidesApi.getTheme().catch(() => 'system' as const),
     ])
   } catch {

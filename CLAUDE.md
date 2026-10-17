@@ -53,8 +53,8 @@ system mode).
 ## UI strings (i18n)
 
 - Large dictionaries are sharded per locale: `i18n/strings-<domain>.ts` is a
-  thin aggregator over `i18n/<domain>/<lang>.ts` (one file per language, `zh`
-  defines the key set). Add a new key to `zh.ts` and to every sibling shard;
-  the `satisfies Record<keyof typeof zh, string>` on each shard turns a
+  thin aggregator over `i18n/<domain>/<lang>.ts` (one file per language, `en`
+  defines the key set). Add a new key to `en.ts` and to every sibling shard;
+  the `satisfies Record<keyof typeof en, string>` on each shard turns a
   missing or extra key into a type error. Never grow the aggregator back into
-  a single 19-locale object.
+  a single multi-language object.

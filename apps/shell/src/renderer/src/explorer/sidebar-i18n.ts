@@ -819,23 +819,6 @@ export const sidebarArabic: Record<string, string> = {
 
 const tabs: Record<string, [string, string, string]> = {
   ja: ['チャット', 'ナレッジ', 'モデル'],
-  zh: ['聊天', '知识', '模型'],
-  'zh-TW': ['聊天', '知識', '模型'],
-  ko: ['채팅', '지식', '모델'],
-  fr: ['Discussion', 'Connaissances', 'Modèles'],
-  de: ['Chat', 'Wissen', 'Modelle'],
-  es: ['Chat', 'Conocimiento', 'Modelos'],
-  pt: ['Chat', 'Conhecimento', 'Modelos'],
-  it: ['Chat', 'Conoscenza', 'Modelli'],
-  ru: ['Чат', 'Знания', 'Модели'],
-  pl: ['Czat', 'Wiedza', 'Modele'],
-  cs: ['Chat', 'Znalosti', 'Modely'],
-  nl: ['Chat', 'Kennis', 'Modellen'],
-  he: ['צ׳אט', 'ידע', 'מודלים'],
-  hi: ['चैट', 'ज्ञान', 'मॉडल'],
-  th: ['แชต', 'ความรู้', 'โมเดล'],
-  id: ['Obrolan', 'Pengetahuan', 'Model'],
-  ms: ['Sembang', 'Pengetahuan', 'Model'],
 }
 export function sidebarText(
   lang: string,
@@ -854,6 +837,6 @@ export function useSidebarText() {
   const { lang } = useI18n()
   return {
     s: (text: string, params?: Record<string, string | number>) => sidebarText(lang, text, params),
-    dir: lang === 'ar' || lang === 'he' ? ('rtl' as const) : ('ltr' as const),
+    dir: lang === 'ar' ? ('rtl' as const) : ('ltr' as const),
   }
 }

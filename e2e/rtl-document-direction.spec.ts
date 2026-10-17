@@ -1,8 +1,11 @@
 import { test, expect, type Page } from '@playwright/test'
+import { mkdtemp } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { launchShell, closeAndSaveVideo, waitForPageWithUrl } from './helpers'
 
 /**
- * An RTL UI must mirror the chrome, never the document (genoffice#1861).
+ * Arabic changes UI text direction while the layout and document stay in place.
  *
  * `dir="rtl"` on <html> is inherited by everything, so an English document
  * opened under the Arabic UI was laid out — and, for the canvas editors, drawn —
@@ -12,14 +15,14 @@ import { launchShell, closeAndSaveVideo, waitForPageWithUrl } from './helpers'
  * `ctx.direction`.
  */
 
-/** The Home screen's new-document cards, in the order the shell lists them. */
+/** Create each document through the same API used by the shell's New menu. */
 const APPS = [
-  { name: 'docs', card: 0, url: '://docs/', host: '.editor-scroll' },
-  { name: 'sheets', card: 1, url: '://sheets/', host: '#univer-container' },
-  { name: 'slides', card: 2, url: '://slides/', host: '.stage-wrap' },
-  { name: 'markdown', card: 3, url: '://markdown/', host: '.editor-scroll' },
-  { name: 'html', card: 4, url: '://html/', host: '.preview-stage' },
-  { name: 'pdf', card: 5, url: '://pdf/', host: '.pdf-scroll' },
+  { name: 'docs', create: 'newDoc', url: '://docs/', host: '.editor-scroll' },
+  { name: 'sheets', create: 'newSheet', url: '://sheets/', host: '#univer-container' },
+  { name: 'slides', create: 'newSlide', url: '://slides/', host: '.stage-wrap' },
+  { name: 'markdown', create: 'newMarkdown', url: '://markdown/', host: '.editor-scroll' },
+  { name: 'html', create: 'newHtml', url: '://html/', host: '.preview-stage' },
+  { name: 'pdf', create: 'newPdf', url: '://pdf/', host: '.pdf-scroll' },
 ] as const
 
 const directionOf = (page: Page, host: string) =>
@@ -28,7 +31,7 @@ const directionOf = (page: Page, host: string) =>
     return el ? getComputedStyle(el).direction : null
   }, host)
 
-test('the UI chrome itself mirrors under ar', async () => {
+test('the UI uses Arabic text direction under ar', async () => {
   test.setTimeout(180_000)
   const launched = await launchShell({ onboardingSeen: true, lang: 'ar', videoDir: 'rtl-chrome' })
   try {
@@ -38,19 +41,35 @@ test('the UI chrome itself mirrors under ar', async () => {
   }
 })
 
-for (const { name, card, url, host } of APPS) {
-  test(`${name}: a new document's surface stays ltr`, async () => {
+for (const { name, create, url, host } of APPS) {
+  test(`${name}: Arabic keeps the toolbar layout and document direction`, async () => {
     test.setTimeout(240_000)
+    const defaultSaveDir = await mkdtemp(join(tmpdir(), 'nawa-rtl-layout-'))
     const launched = await launchShell({
       onboardingSeen: true,
-      lang: 'ar',
+      lang: 'en',
+      settings: { defaultSaveDir },
       videoDir: `rtl-${name}`,
     })
     try {
-      await launched.page.locator('.quick-card').nth(card).click()
+      await launched.page.evaluate((method) => window.aiOffice[method](), create)
       const page = await waitForPageWithUrl(launched.app, url)
       const surface = page.locator(host).first()
       await expect(surface).toBeVisible({ timeout: 45_000 })
+      const tabs = page.locator('.ribbon-tabs')
+      const firstTab = tabs.locator(':scope > button').first()
+      const originalTabs = await tabs.boundingBox()
+      await launched.page.evaluate(() => window.aiOffice.setLanguage('ar'))
+      await expect(page.locator('html')).toHaveAttribute('dir', 'rtl')
+      await expect(tabs).toHaveCSS('direction', 'ltr')
+      await expect(page.locator('[data-ribbon-body]').first()).toHaveCSS('direction', 'ltr')
+      await expect(firstTab).toHaveCSS('direction', 'rtl')
+      const localizedTabs = await tabs.boundingBox()
+      expect(localizedTabs!.x).toBeCloseTo(originalTabs!.x, 0)
+      // Translated labels can change width; the first tab stays at the leading edge.
+      expect((await firstTab.boundingBox())!.x).toBeLessThan(
+        localizedTabs!.x + localizedTabs!.width / 2,
+      )
       // the assertion the review asked for
       expect(await directionOf(page, host)).toBe('ltr')
       // and what depends on it: an RTL scroller reports a negative scrollLeft,

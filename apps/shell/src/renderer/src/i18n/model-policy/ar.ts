@@ -1,4 +1,4 @@
-import { zh } from './zh'
+import { en } from './en'
 
 export const ar = {
   'Run location': 'مكان التشغيل',
@@ -25,4 +25,4 @@ export const ar = {
     'يدعم التحليل الأصلي جداول XLSX وXLSM وCSV وTSV وJSON.',
   'Codex output limits are advisory; large tool responses are rejected before execution.':
     'حد إخراج Codex إرشادي؛ تُرفض استجابات الأدوات الكبيرة قبل التنفيذ.',
-} satisfies Record<keyof typeof zh, string>
+} satisfies Record<keyof typeof en, string>

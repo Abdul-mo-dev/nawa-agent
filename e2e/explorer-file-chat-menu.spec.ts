@@ -143,8 +143,10 @@ test('file context actions prepare exact tables, index only selected files and r
     await panel.locator('.nawa-workspace-close').click()
     await expect(panel).toBeHidden()
     const assistantToggle = page
-      .locator('.ex-address-row')
+      .locator('.ex-file-controls')
       .getByRole('button', { name: 'Nawa assistant', exact: true })
+    await expect(page.locator('.ex-address-row .ex-assistant-toggle')).toHaveCount(0)
+    await expect(page.locator('.ex-new-button + .ex-assistant-toggle')).toBeVisible()
     await expect(assistantToggle).toHaveAttribute('aria-pressed', 'false')
     await assistantToggle.click()
     await expect(draft).toHaveValue('Draft retained while expanding and switching chats')

@@ -1,4 +1,4 @@
-import type { zh } from './zh'
+import type { en } from './en'
 
 export const ja = {
   appScTitle: 'キーボードショートカット',
@@ -363,26 +363,8 @@ export const ja = {
   appTranslate: '翻訳',
   appTranslateTo: '{lang}に翻訳',
   appLangEnglish: '英語',
-  appLangSimplifiedChinese: '簡体字中国語',
   appLangJapanese: '日本語',
-  appLangKorean: '韓国語',
-  appLangFrench: 'フランス語',
-  appLangGerman: 'ドイツ語',
-  appLangSpanish: 'スペイン語',
-  appLangThai: 'タイ語',
-  appLangIndonesian: 'インドネシア語',
-  appLangRussian: 'ロシア語',
   appLangArabic: 'アラビア語',
-  appLangPortuguese: 'ポルトガル語',
-  appLangItalian: 'イタリア語',
-  appLangPolish: 'ポーランド語',
-  appLangCzech: 'チェコ語',
-  appLangDutch: 'オランダ語',
-  appLangMalay: 'マレー語',
-  appLangHebrew: 'ヘブライ語',
-  appLangHindi: 'ヒンディー語',
-  appLangTraditionalChinese: '繁体字中国語',
-  appLangVietnamese: 'ベトナム語',
   appWrapTextMenu: '文字列の折り返し',
   appViewImage: '画像を表示',
   appSaveImageAs: '名前を付けて画像を保存…',
@@ -542,4 +524,4 @@ export const ja = {
   appUpdateStyleTip: '現在の選択範囲の書式でこのスタイルを更新します(styles.xml に書き戻し)',
   appNewStyleFromSelection: '選択範囲から新しいスタイルを作成',
   appStyleNamePlaceholder: 'スタイル名',
-} satisfies Record<keyof typeof zh, string>
+} satisfies Record<keyof typeof en, string>

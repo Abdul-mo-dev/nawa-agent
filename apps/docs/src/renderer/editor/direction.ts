@@ -33,7 +33,7 @@ export function effectiveBidi(attrs: Record<string, unknown>): boolean {
 
 /** UI languages whose users get the paragraph direction buttons by default */
 export function isRtlUiLang(lang: Lang): boolean {
-  return lang === 'ar' || lang === 'he'
+  return lang === 'ar'
 }
 
 /** whether any paragraph-like block touched by the selection is RTL */

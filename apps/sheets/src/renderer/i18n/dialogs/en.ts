@@ -1,5 +1,3 @@
-import type { zh } from './zh'
-
 export const en = {
   dlgAllowEditRangesTitle: 'Allow Edit Ranges',
   dlgAllowEditRangesHint:
@@ -661,4 +659,4 @@ export const en = {
   dlgSizeMoveOnly: "Move but don't size with cells",
   dlgSizeFixed: "Don't move or size with cells",
   dlgSizeInvalid: 'Enter a valid size and rotation.',
-} satisfies Record<keyof typeof zh, string>
+}

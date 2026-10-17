@@ -262,14 +262,14 @@ it('localizes the strip labels', () => {
     root.render(
       createElement(AiQueueStrip, {
         items: [{ id: 'q1', text: 'x' }],
-        labels: AI_QUEUE_LABELS.zh,
+        labels: AI_QUEUE_LABELS.ja,
         onUpdate: () => {},
         onRemove: () => {},
         onClear: () => {},
       }),
     ),
   )
-  expect(host.querySelector('.ai-queue-toggle')!.textContent).toContain('1 条排队中')
+  expect(host.querySelector('.ai-queue-toggle')!.textContent).toContain('1 件が待機中')
 })
 
 /**

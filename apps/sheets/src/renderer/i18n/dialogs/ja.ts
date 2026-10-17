@@ -1,4 +1,4 @@
-import type { zh } from './zh'
+import type { en } from './en'
 
 export const ja = {
   dlgAllowEditRangesTitle: '範囲の編集の許可',
@@ -659,4 +659,4 @@ export const ja = {
   dlgSizeMoveOnly: 'セルに合わせて移動するがサイズ変更はしない',
   dlgSizeFixed: 'セルに合わせて移動やサイズ変更をしない',
   dlgSizeInvalid: '有効なサイズと回転角度を入力してください。',
-} satisfies Record<keyof typeof zh, string>
+} satisfies Record<keyof typeof en, string>

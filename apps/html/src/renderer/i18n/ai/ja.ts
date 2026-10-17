@@ -1,4 +1,4 @@
-import type { zh } from './zh'
+import type { en } from './en'
 
 export const ja = {
   aiCollapsePanel: 'パネルを折りたたむ',
@@ -176,4 +176,4 @@ export const ja = {
   aiStarterAnnouncementPrompt: '製品のお知らせを起草してください。製品と要点：',
   aiStarterGuide: '手順ガイドを書く',
   aiStarterGuidePrompt: '手順ガイドを書いてください。説明する手順：',
-} satisfies Record<keyof typeof zh, string>
+} satisfies Record<keyof typeof en, string>

@@ -12,34 +12,12 @@ import type {
   CodexModelCatalog,
 } from '@genoffice/ai-provider'
 import type { UpdateChannel, UpdateUiState } from './update-api'
-import type { KbFileInfo, KbReadPage, KbSearchHit } from '@genoffice/agent-core'
 import type { AiPanelPrefs } from '@genoffice/ui/ai-panel-prefs'
 import type { WorkspaceApi } from './workspace-api'
 
 /** UI language; kept self-contained here (mirrors Lang in @genoffice/i18n) */
 
-export type UiLanguage =
-  | 'zh'
-  | 'en'
-  | 'ja'
-  | 'ko'
-  | 'fr'
-  | 'de'
-  | 'es'
-  | 'th'
-  | 'id'
-  | 'ru'
-  | 'ar'
-  | 'pt'
-  | 'it'
-  | 'pl'
-  | 'cs'
-  | 'nl'
-  | 'ms'
-  | 'he'
-  | 'hi'
-  | 'zh-TW'
-  | 'vi'
+export type UiLanguage = 'en' | 'ja' | 'ar'
 
 /** UI theme preference */
 export type UiTheme = 'light' | 'dark' | 'system'
@@ -210,13 +188,6 @@ export interface HomeApi extends WorkspaceApi {
   statPaths(paths: string[]): Promise<RecentEntry[]>
   /** star / unstar a file */
   toggleStar(path: string): Promise<void>
-  // ---- knowledge-base ask panel: the reader's starred corpus, askable ----
-  /** the starred corpus as the AI's knowledge base */
-  kbList(): Promise<KbFileInfo[]>
-  /** full-text search over the corpus */
-  kbSearch(query: { q: string; limit?: number }): Promise<KbSearchHit[]>
-  /** one page of a corpus file's parsed text (path must be in kbList) */
-  kbRead(path: string, offset: number): Promise<KbReadPage>
   /** the user's AI provider settings (shared with every app's panel) */
   aiGetSettings(): Promise<AiSettings>
   /** one streamed model turn over the shared ai:stream handler */

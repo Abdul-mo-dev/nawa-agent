@@ -18,6 +18,10 @@ runInNewContext(readFileSync(resolve(import.meta.dirname, '../electron-builder.c
 })
 const config = configModule.exports
 
+it('packages only English, Japanese and Arabic runtime language resources', () => {
+  expect(config.electronLanguages).toEqual(['en-US', 'en-GB', 'ja', 'ar'])
+})
+
 describe('packaged file associations', () => {
   // The OS can only offer GenOffice in "Open With" (mac CFBundleDocumentTypes,
   // the Linux desktop MimeType list, the NSIS ProgIds) for types the bundle

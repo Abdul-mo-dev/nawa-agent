@@ -12,6 +12,7 @@ import '@genoffice/ui/find-panel.css'
 import '@genoffice/ui/ribbon-collapse.css'
 import '@genoffice/ui/markdown.css'
 import '@genoffice/ui/ai-panel-prefs.css'
+import '@genoffice/ui/ui-direction.css'
 import '@genoffice/ui/ai-scope-quote.css'
 import '@genoffice/ui/image-viewer.css'
 import 'katex/dist/katex.min.css'
@@ -33,7 +34,7 @@ function applyDocumentTheme(theme: DocTheme): void {
 
 void (async () => {
   const [lang, theme, docTheme] = await Promise.all([
-    window.markdownApi.getLanguage().catch(() => 'zh' as const),
+    window.markdownApi.getLanguage().catch(() => 'en' as const),
     window.markdownApi.getTheme().catch(() => 'system' as const),
     window.markdownApi.getDocumentTheme?.().catch(() => 'follow' as const),
   ])

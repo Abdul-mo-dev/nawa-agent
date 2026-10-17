@@ -51,29 +51,7 @@ import { TABS_CHANNELS } from '../shared/tabs-api'
 
 installDirectoryActionsApi()
 
-const UI_LANGUAGES: readonly UiLanguage[] = [
-  'zh',
-  'en',
-  'ja',
-  'ko',
-  'fr',
-  'de',
-  'es',
-  'th',
-  'id',
-  'ru',
-  'ar',
-  'pt',
-  'it',
-  'pl',
-  'cs',
-  'nl',
-  'ms',
-  'he',
-  'hi',
-  'zh-TW',
-  'vi',
-]
+const UI_LANGUAGES: readonly UiLanguage[] = ['en', 'ja', 'ar']
 
 function isUiLanguage(value: unknown): value is UiLanguage {
   return UI_LANGUAGES.includes(value as UiLanguage)
@@ -210,17 +188,6 @@ const homeApi: HomeApi = {
   async openHelp() {
     await ipcRenderer.invoke(HOME_CHANNELS.openHelp)
   },
-  // knowledge-base ask panel (handlers live in the shell main, same process
-  // that owns the index and the shared ai:stream registration)
-  async kbList() {
-    return ipcRenderer.invoke('kb:list')
-  },
-  async kbSearch(query) {
-    return ipcRenderer.invoke('kb:search', query)
-  },
-  async kbRead(path, offset) {
-    return ipcRenderer.invoke('kb:read', { path, offset })
-  },
   async aiGetSettings() {
     return ipcRenderer.invoke('ai:get-settings')
   },
@@ -326,7 +293,7 @@ const homeApi: HomeApi = {
   },
   async getLanguage() {
     const result: unknown = await ipcRenderer.invoke(HOME_CHANNELS.getLanguage)
-    return isUiLanguage(result) ? result : 'zh'
+    return isUiLanguage(result) ? result : 'en'
   },
   async setLanguage(lang) {
     if (!isUiLanguage(lang)) throw new Error('Invalid language.')

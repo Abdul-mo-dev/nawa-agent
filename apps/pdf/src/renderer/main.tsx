@@ -12,6 +12,7 @@ import '@genoffice/ui/dropdown.css'
 import '@genoffice/ui/ribbon-collapse.css'
 import '@genoffice/ui/markdown.css'
 import '@genoffice/ui/ai-panel-prefs.css'
+import '@genoffice/ui/ui-direction.css'
 import '@genoffice/ui/ai-scope-quote.css'
 import './styles.css'
 import { applyAiPanelPrefs, installScreenTips } from '@genoffice/ui'
@@ -25,7 +26,7 @@ function applyTheme(theme: UiTheme): void {
 
 void (async () => {
   const [lang, theme] = await Promise.all([
-    window.pdfApi.getLanguage().catch(() => 'zh' as const),
+    window.pdfApi.getLanguage().catch(() => 'en' as const),
     window.pdfApi.getTheme().catch(() => 'system' as const),
   ])
   document.documentElement.lang = htmlLang(lang as Lang)

@@ -29,12 +29,11 @@ function filterMarkdownIn(locale: string): string {
 }
 
 describe('the text-file save-dialog filter', () => {
-  it('is Portuguese in the pt block', () => {
-    expect(filterMarkdownIn('pt')).toBe('Arquivos de texto (Markdown, TXT, JSON)')
+  it('uses English in the English block', () => {
+    expect(filterMarkdownIn('en')).toBe('Text Files (Markdown, TXT, JSON)')
   })
 
-  it('is still Spanish in the es block', () => {
-    // the es string is correct there; fixing pt must not "fix" es as well
-    expect(filterMarkdownIn('es')).toBe('Archivos de texto (Markdown, TXT, JSON)')
+  it('omits removed language blocks', () => {
+    expect(source).not.toMatch(/\n {2}(?:zh|ko|fr|de|es|pt|he): \{/)
   })
 })

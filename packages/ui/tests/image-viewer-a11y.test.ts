@@ -72,8 +72,8 @@ describe('shared ImageViewer modal focus', () => {
   })
 
   it('localizes the dialog name', () => {
-    mountViewer('zh')
-    expect(dialog(host).getAttribute('aria-label')).toBe('\u56fe\u7247\u67e5\u770b\u5668')
+    mountViewer('ar')
+    expect(dialog(host).getAttribute('aria-label')).toBe(IMAGE_VIEWER_TITLES.ar)
     mountViewer('ja')
     expect(dialog(host).getAttribute('aria-label')).toBe(IMAGE_VIEWER_TITLES.ja)
   })

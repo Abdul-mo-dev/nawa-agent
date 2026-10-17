@@ -2,7 +2,6 @@ import { EDITOR_FILE_EXTENSIONS, EDITOR_FILTER_FAMILIES } from '@genoffice/file-
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { DragEvent as ReactDragEvent, ReactElement } from 'react'
 import logoLockup from './assets/nawa-logo.svg'
-import { KbAskPanel } from './KbAskPanel'
 import iconDocx from './assets/file-docx.svg'
 import iconXlsx from './assets/file-xlsx.svg'
 import iconPptx from './assets/file-pptx.svg'
@@ -1226,7 +1225,7 @@ function DropToOpenOverlay(): ReactElement | null {
 // ── Main component ──────────────────────────────────────
 
 export interface HomeTarget {
-  mode?: 'search' | 'ask'
+  mode?: 'search'
   query?: string
 }
 
@@ -1241,10 +1240,6 @@ export function Home({ initialTarget }: { initialTarget?: HomeTarget } = {}) {
   const [navCounts, setNavCounts] = useState({ recent: 0, starred: 0 })
   const [loadingMore, setLoadingMore] = useState(false)
   const [view, setView] = useState<'recent' | 'starred'>('recent')
-  // Genspark web projects take over the content area (like a selected folder)
-  const [cloudMode, setCloudMode] = useState(false)
-  // the knowledge-base ask panel takes over the content area the same way
-  const [askMode, setAskMode] = useState(initialTarget?.mode === 'ask')
   const [filter, setFilter] = useState('all')
   // ── Starred groups (named buckets the Starred view can filter on) ──
   // groups that currently have at least one starred file (drives the pills)
@@ -1832,8 +1827,6 @@ export function Home({ initialTarget }: { initialTarget?: HomeTarget } = {}) {
   const changeView = (next: 'recent' | 'starred') => {
     setView(next)
     setSelectedFolder(null)
-    setCloudMode(false)
-    setAskMode(false)
     setSelected(new Set())
     setRowMenu(null)
     setGroupFilter(null)
@@ -3328,7 +3321,7 @@ export function Home({ initialTarget }: { initialTarget?: HomeTarget } = {}) {
           : hour < 18
             ? 'greetAfternoon'
             : 'greetEvening'
-    const cjk = lang === 'zh' || lang === 'zh-TW' || lang === 'ja'
+    const cjk = lang === 'ja'
     const greeting = `${t(greetKey)}${accountName ? (cjk ? '，' : ', ') + accountName : ''}${cjk ? '。' : '. '}`
     return (
       <main className="content">
@@ -3538,32 +3531,6 @@ export function Home({ initialTarget }: { initialTarget?: HomeTarget } = {}) {
             </svg>
             <span className="nav-label">{t('navUserGuide')}</span>
           </button>
-          <button
-            className={`nav-item${askMode && !selectedFolder && !cloudMode ? ' active' : ''}`}
-            onClick={() => {
-              setAskMode(true)
-              setSelectedFolder(null)
-              setCloudMode(false)
-              setSelected(new Set())
-              setRowMenu(null)
-            }}
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path
-                d="M14 10.5c0 .9-.7 1.6-1.6 1.6H5.4L2 14.5V3.6C2 2.7 2.7 2 3.6 2h8.8c.9 0 1.6.7 1.6 1.6z"
-                stroke="currentColor"
-                strokeWidth="1.3"
-                strokeLinejoin="round"
-              />
-              <path
-                d="M5 6.2h6M5 8.6h4"
-                stroke="currentColor"
-                strokeWidth="1.3"
-                strokeLinecap="round"
-              />
-            </svg>
-            <span className="nav-label">{t('navAsk')}</span>
-          </button>
         </nav>
         <div className="sidebar-divider" />
         {renderFolderPanel()}
@@ -3615,8 +3582,6 @@ export function Home({ initialTarget }: { initialTarget?: HomeTarget } = {}) {
             </main>
           )}
         </div>
-      ) : askMode ? (
-        <KbAskPanel onOpenPath={(path) => void window.aiOffice.openPath(path)} />
       ) : (
         renderGlobalContent()
       )}
