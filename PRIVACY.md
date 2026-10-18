@@ -6,6 +6,20 @@ GenOffice opens, edits, and saves documents locally. Document editing does not
 upload files to GenOffice. AI features require a network connection and send
 requests only when you use them.
 
+Local HTML previews block remote resources, connections and external popups by
+default. You can enable remote content for an individual open file; its scripts
+and resources can then contact remote services and transmit content available to
+that page. Closing the file clears this permission. This setting does not grant
+access to Nawa's privileged APIs. Optional search, media, account and update
+features also contact their configured services when used or enabled.
+
+**Settings → AI & Models** can download llama.cpp engines from GitHub and GGUF
+weights from public Hugging Face repositories when requested. Catalog searches
+send the entered search term or repository ID to those services. These requests
+do not include document content. Managed local servers listen on `127.0.0.1`;
+using them for chat or embeddings sends the selected context to that local
+process. Models and profiles are stored locally, separately from the installer.
+
 ## Usage analytics
 
 Usage analytics is enabled by default in packaged official builds, including

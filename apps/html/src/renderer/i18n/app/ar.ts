@@ -1,6 +1,11 @@
 import type { en } from './en'
 
 export const ar = {
+  previewRemoteBlocked: 'المحتوى البعيد محظور لهذا الملف.',
+  previewRemoteEnabled: 'المحتوى البعيد مفعّل لهذا الملف.',
+  previewAllowRemote: 'السماح بالمحتوى البعيد',
+  previewBlockRemote: 'حظر المحتوى البعيد',
+  previewPolicyFailed: 'تعذر تغيير إعداد المحتوى البعيد.',
   redactMenuLabel: 'إخفاء التحديد عن الذكاء الاصطناعي',
   redactDialogDesc:
     'تبقى الكلمات في المستند وفي الملف؛ يرى النموذج العلامة أدناه. سمِّها ليعرف ما تمثّله.',

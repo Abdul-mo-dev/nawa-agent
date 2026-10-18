@@ -2,29 +2,7 @@ import type { OcrLine, OcrRecognition } from '../../../../../packages/pdf2docx/s
 import { renderPagePng } from '../../../../../packages/pdf2docx/src/extract'
 import { withPdfDocument } from '../../../../../packages/pdf2docx/src/extract/pdfium'
 import { ensureOcrEngine, ensurePdfium } from '../pdf2docx-local'
-import { existsSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
-
-async function imagePng(bytes: Uint8Array): Promise<Buffer> {
-  const packaged = process.resourcesPath
-    ? join(process.resourcesPath, 'embedding', 'node_modules', 'sharp', 'package.json')
-    : ''
-  const sharpModule =
-    packaged && existsSync(packaged)
-      ? await import(pathToFileURL(createRequire(packaged).resolve('sharp')).href)
-      : await import('sharp')
-  const sharp = sharpModule.default as unknown as (
-    input: Uint8Array,
-    options: { limitInputPixels: number; animated: boolean },
-  ) => import('sharp').Sharp
-  const image = sharp(bytes, { limitInputPixels: 20_000_000, animated: false })
-  const metadata = await image.metadata()
-  if (!metadata.width || !metadata.height)
-    throw new Error('Image dimensions are unavailable for local OCR.')
-  return image.rotate().png().toBuffer()
-}
+import { normalizeImagePng } from '../image-runtime'
 
 function recognizedText(result: OcrRecognition | null): string | null {
   if (!result) return null
@@ -81,7 +59,7 @@ export async function ocrImage(bytes: Uint8Array, signal: AbortSignal): Promise<
   const engine = ensureOcrEngine()
   if (!engine) return null
   // Normalize still frames to PNG; the packaged helpers share a PNG input contract.
-  const png = await imagePng(bytes)
+  const png = await normalizeImagePng(bytes)
   signal.throwIfAborted()
   const text = recognizedText(engine(png, { widthPt: 0, heightPt: 0 }))
   signal.throwIfAborted()

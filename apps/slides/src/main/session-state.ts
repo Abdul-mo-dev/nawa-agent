@@ -49,6 +49,8 @@ export function configureSlidesRuntime(paths: RuntimePaths): void {
 // One session per renderer process (standalone window or shell tab), keyed by webContents.id
 export interface Session {
   path: string
+  /** Last opened or committed disk revision; absent for an unsaved document. */
+  diskRevision?: string | null
   opened: OpenedPptx
   fitWidthPx: number
   undoStack: HistorySnapshot[]

@@ -3358,7 +3358,7 @@ function Ribbon({
             <NawaMark size={26} />
           </span>
           <span>
-            <strong>Genspark AI</strong>
+            <strong>Nawa AI</strong>
           </span>
         </button>
         <button

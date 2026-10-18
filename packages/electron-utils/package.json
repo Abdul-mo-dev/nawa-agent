@@ -8,6 +8,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./atomic-write": "./src/atomic-write.ts",
+    "./file-transaction": "./src/file-transaction.ts",
+    "./text-file-session": "./src/text-file-session.ts",
+    "./session-network-policy": "./src/session-network-policy.ts",
     "./ai-settings-store": "./src/ai-settings-store.ts",
     "./drop-open": "./src/drop-open.ts",
     "./generated-images": "./src/generated-images.ts",

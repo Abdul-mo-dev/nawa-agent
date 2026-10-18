@@ -1,0 +1,15 @@
+export const en = {
+  historyOpening: 'Opening conversation history…',
+  historyEmpty: 'No conversation loaded.',
+  stopped: 'Stopped.',
+  stoppedPartial: 'Stopped. The partial response is saved in this conversation.',
+  interrupted: 'Stopped before a response was completed.',
+  noReply: 'No reply was returned.',
+  outputLimit: 'The model reached its output limit. This answer is incomplete.',
+  turnLimit: 'The agent reached its tool-turn limit. This answer is incomplete.',
+  requestFailed: 'The AI request failed.',
+  requestTimeout: 'The AI request timed out.',
+  noCredits: 'The AI provider has no credits available.',
+  networkError: 'The AI provider could not be reached.',
+  overloadedError: 'The AI provider is temporarily overloaded.',
+}

@@ -1,3 +1,5 @@
+import { AiPanelResizer } from '@genoffice/ui'
+import { ChatPanelHeader } from '@genoffice/ui'
 import { useEditorConversations } from '@genoffice/ui'
 import { registerDirectoryEditor, directoryModelSettings } from '@genoffice/agent-core'
 import { ChatModelPicker } from '@genoffice/ui'
@@ -19,9 +21,6 @@ import {
 } from '@genoffice/ui'
 import { aiLangDirective, t as tGlobal, useI18n } from '../i18n/locale'
 import { createFileNav, Markdown } from '@genoffice/ui'
-import sendEnterOn from '../assets/send-enter-on.png'
-import sendEnterOff from '../assets/send-enter-off.png'
-import sendStop from '../assets/send-stop.png'
 import { createPdfSkill } from './pdf-skill'
 import { createElectronTransport, loadChatModelSettings } from './transport'
 import { PDF_NAV_SCHEME, parsePdfNavHref } from './pdf-nav'
@@ -256,7 +255,8 @@ export function AiPanel({
         /* silent */
       })
   }, [filePath])
-  const { asideRef, resizing, startResize } = useAiPanelWidth(PANEL_WIDTH_KEY)
+  const panelWidth = useAiPanelWidth(PANEL_WIDTH_KEY)
+  const { asideRef, resizing } = panelWidth
   const settingsRef = useRef<AiSettings | null>(null)
 
   /** gsk login state for the cloud-tools gate (refreshed on mount and window focus) */
@@ -629,56 +629,30 @@ export function AiPanel({
 
   return (
     <aside
+      id={panelWidth.panelId}
       ref={asideRef}
-      className={`copilot${resizing ? ' ai-panel-resizing' : ''}`}
+      className={`copilot nawa-chat-panel${resizing ? ' ai-panel-resizing' : ''}`}
       style={{ width: '100%' }}
       dir={lang === 'ar' ? 'rtl' : undefined}
     >
-      <div
-        className="ai-panel-resizer"
-        onPointerDown={startResize}
-        role="separator"
-        aria-orientation="vertical"
-        aria-label={t('ribbonAiAssistant')}
-      />
-      <header className="ai-panel-header">
-        <span className="ai-panel-title">
-          <NawaMark size={22} />
-          Genspark
-        </span>
-        <div className="ai-panel-header-actions">
-          <AiPanelSideButton
-            lang={lang}
-            onMove={(side) => window.pdfApi.setAiPanelPrefs({ side })}
-          />
-          {chat.length > 0 && (
-            <button
-              className="ai-header-btn"
-              onClick={() => {
-                if (!chatManagement.newChat()) return
-                msgQueue.setPaused(false)
-                loopRef.current?.reset()
-                msgQueue.clear()
-                setBusy(false)
-                setChat([])
-              }}
-              data-tip={t('aiNewChat')}
-              aria-label={t('aiNewChat')}
-              disabled={busy}
-            >
-              <IconNewChat />
-            </button>
-          )}
-          <button
-            className="ai-header-btn ai-panel-collapse"
-            onClick={onCollapse}
-            data-tip={t('aiCollapsePanel')}
-            aria-label={t('aiCollapsePanel')}
-          >
-            <IconCollapse />
-          </button>
-        </div>
-      </header>
+      <AiPanelResizer panel={panelWidth} lang={lang} />
+      <ChatPanelHeader
+        lang={lang}
+        brand={<NawaMark size={22} />}
+        onNewChat={() => {
+          if (!chatManagement.newChat()) return
+          msgQueue.setPaused(false)
+          loopRef.current?.reset()
+          msgQueue.clear()
+          setBusy(false)
+          setChat([])
+        }}
+        disabled={busy}
+        onCollapse={onCollapse}
+        collapseLabel={t('aiCollapsePanel')}
+      >
+        <AiPanelSideButton lang={lang} onMove={(side) => window.pdfApi.setAiPanelPrefs({ side })} />
+      </ChatPanelHeader>
 
       {chatManagement.toolbar}
       <div className="ai-chat" ref={chatRef} onScroll={onChatScroll}>
@@ -848,9 +822,6 @@ export function AiPanel({
           stopLabel={t('aiStop')}
           iconOnly
 
-          sendIconEnabled={<img src={sendEnterOn} alt="" aria-hidden />}
-          sendIconDisabled={<img src={sendEnterOff} alt="" aria-hidden />}
-          stopIcon={<img src={sendStop} alt="" aria-hidden />}
           onChange={setPrompt}
           onSend={() => send(prompt)}
           onStop={stop}
@@ -993,55 +964,7 @@ function ToolChipList({ tools }: { tools: ToolActivity[] }) {
   )
 }
 
-function Svg({ children }: { children: React.ReactNode }): ReactElement {
-  return (
-    <svg
-      width="15"
-      height="15"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.2"
-      strokeLinecap="round"
-      aria-hidden
-    >
-      {children}
-    </svg>
-  )
-}
-
-function IconNewChat(): ReactElement {
-  return (
-    <Svg>
-      <path
-        d="M13.5 7.2v-3A1.7 1.7 0 0 0 11.8 2.5H4.2a1.7 1.7 0 0 0-1.7 1.7v6.1a1.7 1.7 0 0 0 1.7 1.7h1.1v2l2.6-2h1.3"
-        strokeLinejoin="round"
-      />
-      <path d="M12.2 9.4v4M10.2 11.4h4" />
-    </Svg>
-  )
-}
-
 /* Same glyph as the sheets IconCollapse (16×16 viewBox, 1.2/1.3 stroke), rendered at 15px */
-function IconCollapse(): ReactElement {
-  return (
-    <svg
-      width={15}
-      height={15}
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.2"
-      strokeLinecap="round"
-      aria-hidden
-    >
-      {/* Mirrored: the AI panel docks on the LEFT, so the divider and arrow point left */}
-      <rect x="1.5" y="2.5" width="13" height="11" rx="1" />
-      <path d="M5.5 2.5v11" />
-      <path d="M12.5 8H8.1M9.8 5.9 7.7 8l2.1 2.1" strokeWidth="1.3" strokeLinejoin="round" />
-    </svg>
-  )
-}
 
 /** Nawa brand mark (dark tile, white bars, orange diagonal), inline so it renders
  * crisply at device resolution instead of going through <img> rasterization */

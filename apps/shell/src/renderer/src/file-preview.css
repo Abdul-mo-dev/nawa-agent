@@ -144,9 +144,10 @@
   user-select: none;
 }
 .file-preview-ai {
-  width: min(360px, 40%);
-  min-width: 220px;
-  max-width: 50%;
+  width: var(--ai-panel-width, 360px);
+  min-width: 280px;
+  max-width: 100%;
+  flex-shrink: 0;
   order: -1;
   min-height: 0;
   overflow: hidden;

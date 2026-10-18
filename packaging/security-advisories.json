@@ -1,0 +1,38 @@
+{
+  "mitigations": [
+    {
+      "advisory": "GHSA-vfj7-8cjw-p6xm",
+      "package": "braces",
+      "version": "3.0.3",
+      "reviewBy": "2026-11-17T00:00:00Z",
+      "reason": "Build-only static-copy/chokidar dependency. Patterns come from checked-in Vite configuration; document contents and user paths are not brace patterns. No upstream patched release on 2026-10-18.",
+      "evidence": [
+        "docs/reviews/dependency-security-2026-10-18.md",
+        "apps/docs/electron.vite.config.ts"
+      ]
+    },
+    {
+      "advisory": "GHSA-86w9-cpqp-85rv",
+      "package": "node-forge",
+      "version": "1.4.0",
+      "reviewBy": "2026-11-17T00:00:00Z",
+      "reason": "PDF signature verification uses Node/OpenSSL crypto.verify, not the affected forge RSA verifier. Forge remains for ASN.1, certificates and signing. No upstream patched release on 2026-10-18.",
+      "evidence": [
+        "apps/pdf/src/main/pdf-signatures.ts",
+        "apps/pdf/tests/pdf-signatures.test.ts",
+        "docs/reviews/dependency-security-2026-10-18.md"
+      ]
+    },
+    {
+      "advisory": "GHSA-hp3w-g68c-fv3c",
+      "package": "sprintf-js",
+      "version": "1.1.3",
+      "reviewBy": "2026-11-17T00:00:00Z",
+      "reason": "Reached through global-agent/roarr in the ONNX installer and optional Electron download proxy. Runtime ONNX resources contain dist and platform binaries only. No user-controlled format string is passed by Nawa. No upstream patched release on 2026-10-18.",
+      "evidence": [
+        "apps/shell/electron-builder.cjs",
+        "docs/reviews/dependency-security-2026-10-18.md"
+      ]
+    }
+  ]
+}

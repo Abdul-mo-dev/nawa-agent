@@ -22,7 +22,7 @@ interface Props {
 
 /**
  * The document runs in a sandboxed frame with an opaque origin: scripts and
- * network are allowed (CDN-dependent pages must render), the app itself is out
+ * local scripts can run; remote content follows the per-view main-process policy. The app is out
  * of reach. Reloads go through the src attribute because the frame's window is
  * cross-origin to us; the inspector talks back over postMessage.
  */

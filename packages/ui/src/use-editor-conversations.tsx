@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Lang } from '@genoffice/i18n'
 import { ChatMessageActions, CHAT_LABELS } from './ChatMessageActions'
+import { ChatConversationSelector } from './ChatPanelHeader'
 import {
   exportConversation,
   isFinalAnswer,
@@ -552,6 +553,13 @@ export function useEditorConversations<T extends Message>(args: {
   const actions = (index: number, renderMessage?: (editor: ReactNode) => ReactNode) => {
     const message = args.messages[index]
     if (!message) return null
+    const hasReply = args.messages
+      .slice(index + 1, turnEnd(args.messages, index))
+      .some(
+        (item) =>
+          item.role === 'assistant' && !!(item.text.trim() || item.tools?.length || item.error),
+      )
+    const exchangeActions = message.role === 'assistant' || !hasReply
     const finalAnswer = isFinalAnswer(
       args.messages,
       index,
@@ -594,37 +602,43 @@ export function useEditorConversations<T extends Message>(args: {
             : undefined
         }
         onDelete={
-          questionIndex(args.messages, index) >= 0 ? () => revise(index, 'delete') : undefined
+          exchangeActions && questionIndex(args.messages, index) >= 0
+            ? () => revise(index, 'delete')
+            : undefined
         }
-        onBranch={() => {
-          const document = ensure(),
-            chat = document.chats.find((item) => item.id === document.active)!,
-            id = newId(),
-            version = newId()
-          if (document.chats.length >= 100) throw new Error('Conversation storage is full.')
-          const messages = snapshot(
-            args.messages.slice(
-              0,
-              turnEnd(args.messages, index) < 0 ? index + 1 : turnEnd(args.messages, index),
-            ),
-          )
-          persist({
-            ...document,
-            active: id,
-            chats: [
-              ...document.chats,
-              {
-                id,
-                title: `${chat.title} (branch)`,
-                source: chat.id,
-                actions: fileChanges(document),
-                active: version,
-                versions: [{ id: version, label: labels.original, messages, draft: '' }],
-              },
-            ],
-          })
-          replace(messages, '')
-        }}
+        onBranch={
+          !exchangeActions
+            ? undefined
+            : () => {
+                const document = ensure(),
+                  chat = document.chats.find((item) => item.id === document.active)!,
+                  id = newId(),
+                  version = newId()
+                if (document.chats.length >= 100) throw new Error('Conversation storage is full.')
+                const messages = snapshot(
+                  args.messages.slice(
+                    0,
+                    turnEnd(args.messages, index) < 0 ? index + 1 : turnEnd(args.messages, index),
+                  ),
+                )
+                persist({
+                  ...document,
+                  active: id,
+                  chats: [
+                    ...document.chats,
+                    {
+                      id,
+                      title: `${chat.title} (branch)`,
+                      source: chat.id,
+                      actions: fileChanges(document),
+                      active: version,
+                      versions: [{ id: version, label: labels.original, messages, draft: '' }],
+                    },
+                  ],
+                })
+                replace(messages, '')
+              }
+        }
       />
     )
   }
@@ -661,7 +675,35 @@ export function useEditorConversations<T extends Message>(args: {
   const toolbar = (
     <>
       <div className="chat-session-toolbar">
-        <strong>{active?.title ?? labels.newChat}</strong>
+        <div className="nawa-chat-conversation-row">
+          <ChatConversationSelector
+            label={labels.history}
+            value={active?.id ?? ''}
+            title={active?.title ?? labels.newChat}
+            disabled={args.busy}
+            options={
+              session?.chats
+                .filter((chat) => !chat.trashed && (!chat.archived || chat.id === session.active))
+                .map((chat) => ({ id: chat.id, title: chat.title })) ?? [
+                { id: '', title: labels.newChat },
+              ]
+            }
+            onSelect={(id) => attempt(() => switchChat(id))}
+          />
+          <button
+            type="button"
+            disabled={args.busy}
+            aria-expanded={open}
+            onClick={() =>
+              attempt(() => {
+                persist(ensure())
+                setOpen(!open)
+              })
+            }
+          >
+            {labels.history}
+          </button>
+        </div>
         <span role="status">
           {error
             ? args.lang === 'ar'
@@ -681,18 +723,6 @@ export function useEditorConversations<T extends Message>(args: {
                   ? 'ローカルに保存済み'
                   : 'Saved locally'}
         </span>
-        <button
-          type="button"
-          disabled={args.busy}
-          onClick={() =>
-            attempt(() => {
-              persist(ensure())
-              setOpen(!open)
-            })
-          }
-        >
-          {labels.history}
-        </button>
         {active && active.versions.length > 1 && (
           <select
             aria-label={labels.versions}

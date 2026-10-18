@@ -179,6 +179,9 @@ describe('requestMarkdownClose asset cleanup', () => {
     showMessageBox.mockResolvedValue({ response: 0 })
 
     const closing = requestMarkdownClose(contents as never)
+    // The renderer reads the source before it can edit or save it. This captures
+    // the encoding and disk revision used to guard the eventual close-save.
+    await handlers.get(MARKDOWN_CHANNELS.readFile)?.({ sender: contents }, documentPath)
     await vi.waitFor(() =>
       expect(contents.send).toHaveBeenCalledWith(MARKDOWN_CHANNELS.closeSaveRequest),
     )

@@ -73,6 +73,7 @@ export default defineConfig({
     ],
   },
   renderer: {
+    build: { minify: 'esbuild' },
     resolve: { alias: workspaceAlias },
     plugins: [react()],
     server: {

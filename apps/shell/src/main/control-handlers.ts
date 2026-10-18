@@ -8,6 +8,8 @@ import type {
   RendererControlRequest,
 } from '@genoffice/cli/control-protocol'
 import type { TabKind } from '../shared/tabs-api'
+import { officeImportTarget } from '@genoffice/file-formats'
+import { CONTROL_IMPORT_READY_MS } from '@genoffice/cli/control-protocol'
 
 export interface ControlHost {
   reveal(): void
@@ -33,6 +35,8 @@ const TARGET_KIND_BY_TAB: Partial<Record<TabKind, ControlTarget['kind']>> = {
  */
 export function controlHandler(host: ControlHost): (req: ControlRequest) => Promise<ControlReply> {
   return async (req) => {
+    const timeout =
+      host.readyTimeoutMs ?? (officeImportTarget(req.path) ? CONTROL_IMPORT_READY_MS : undefined)
     if (!existsSync(req.path)) {
       return fail('file_not_found', `file not found: ${req.path}`)
     }
@@ -53,7 +57,7 @@ export function controlHandler(host: ControlHost): (req: ControlRequest) => Prom
           supported: expected ? [flagFor(expected)] : [],
         })
       }
-      return ask(tab.webContents, { cmd: 'goto', target: req.target }, host.readyTimeoutMs)
+      return ask(tab.webContents, { cmd: 'goto', target: req.target }, timeout)
     }
     const tab = host.findTab(req.path)
     if (!tab) {
@@ -61,7 +65,7 @@ export function controlHandler(host: ControlHost): (req: ControlRequest) => Prom
         suggestion: `Nawa open ${req.path}`,
       })
     }
-    return ask(tab.webContents, { cmd: 'selection' }, host.readyTimeoutMs)
+    return ask(tab.webContents, { cmd: 'selection' }, timeout)
   }
 }
 

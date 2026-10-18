@@ -6,7 +6,12 @@ export default defineConfig({
   main: {
     plugins: [
       externalizeDepsPlugin({
-        exclude: ['@genoffice/file-formats', '@genoffice/i18n', '@genoffice/electron-utils'],
+        exclude: [
+          '@genoffice/file-formats',
+          '@genoffice/file-parse',
+          '@genoffice/i18n',
+          '@genoffice/electron-utils',
+        ],
       }),
     ],
   },
@@ -18,6 +23,7 @@ export default defineConfig({
     ],
   },
   renderer: {
+    build: { minify: 'esbuild' },
     plugins: [react()],
     server: {
       port: Number(process.env.HTML_DEV_PORT) || 5178,

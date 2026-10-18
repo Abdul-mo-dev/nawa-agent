@@ -6,6 +6,9 @@ The workspace and six editor panels share message actions, turn boundaries, expo
 
 - Send appends a question and its response. A turn includes the question, response segments, and tool receipts.
 - Questions keep their actions below the bubble. Only the final visible assistant segment in each exchange shows answer actions, after the reply finishes; intermediate text and tool segments do not add action rows.
+- Directory and file editors use the shared Nawa header, conversation selector above the transcript, typography, message geometry, and composer styling. Model controls stay in the composer; directory indexing and knowledge tools remain separate context controls.
+- Chat backgrounds follow the main Nawa application background in light, dark, and system themes. Every editor and image/email preview has a draggable inner edge; widths are remembered and constrained to leave room for the file.
+- Answered questions show Copy and Edit. Branch and Delete stay with the final answer; unanswered questions retain these recovery actions.
 - Edit and resend saves the original continuation and starts a new version before the edited question. Abandoned replies never enter the new model context.
 - Retry preserves the failed attempt as a version and displays one copy of the retried question. Attachments and recorded scope travel with the question.
 - Regenerate creates an alternative explanation. The agent core advertises no tools and rejects unsolicited tool calls during regeneration. Retrying an editor turn with tool activity also uses explanation mode to avoid repeating completed edits.

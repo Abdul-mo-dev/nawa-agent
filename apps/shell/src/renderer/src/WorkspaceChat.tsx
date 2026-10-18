@@ -19,12 +19,19 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import { ChatHeaderTarget } from './explorer/chat-header'
-import { AgentLoop, type AgentMessage, type AgentTransport } from '@genoffice/agent-core'
+import {
+  AgentLoop,
+  agentRunCompletion,
+  type AgentMessage,
+  type AgentTransport,
+} from '@genoffice/agent-core'
 import { applyChatModel, chatModelLabel, agentPolicyOf } from '@genoffice/ai-provider/browser'
 import {
   AiComposer,
   Markdown,
   ChatModelPicker,
+  ChatPanelHeader,
+  ChatNewButton,
   ChatMessageActions,
   CHAT_LABELS,
   questionIndex,
@@ -34,6 +41,7 @@ import {
   AiQueueStrip,
   AI_QUEUE_LABELS,
   useChatRunQueue,
+  agentStatusText,
 } from '@genoffice/ui'
 import '@genoffice/ui/ai-queue-strip.css'
 import '@genoffice/ui/markdown.css'
@@ -179,6 +187,7 @@ export function WorkspaceChat(props: WorkspaceChatProps) {
 
 function HistoryWorkspace(props: WorkspaceChatProps) {
   const { s } = useSidebarText()
+  const { lang } = useI18n()
   const [session, setSession] = useState<ConversationRecord | null>(null)
   const [mountVersion, setMountVersion] = useState(0)
   const [historyVersion, setHistoryVersion] = useState(0)
@@ -336,13 +345,17 @@ function HistoryWorkspace(props: WorkspaceChatProps) {
     })
   if (!session)
     return (
-      <section className="ws-chat workspace-chat-main" aria-label={s('Nawa conversation history')}>
+      <section
+        className="ws-chat workspace-chat-main nawa-chat-panel"
+        aria-label={s('Nawa conversation history')}
+      >
         <header className="ws-chat-head">
           <NawaIcon size={27} />
           <h2>{s('Nawa assistant')}</h2>
         </header>
         <div className="ws-chat-notice" role={error ? 'alert' : 'status'}>
-          {error || (loading ? 'Opening conversation history…' : 'No conversation loaded.')}
+          {error ||
+            (loading ? agentStatusText(lang).historyOpening : agentStatusText(lang).historyEmpty)}
         </div>
         {error && (
           <button
@@ -631,7 +644,7 @@ function DirectoryChat({
                 ...message,
                 streaming: false,
                 error: true,
-                text: message.text || 'Stopped before a response was completed.',
+                text: message.text || agentStatusText(langRef.current).interrupted,
               }
             : message,
         ),
@@ -646,7 +659,7 @@ function DirectoryChat({
       )
   }, [buffer, updateMessages])
   const stop = useCallback(
-    (reason = 'Stopped. The partial response is saved in this conversation.') => {
+    (reason = agentStatusText(langRef.current).stoppedPartial) => {
       queueControl.current.setPaused(true)
       invalidateRun()
       sealPartial()
@@ -923,7 +936,10 @@ function DirectoryChat({
         request: { id: trace.id, phase: 'intermediate', outcome: 'running' },
       })
       const transport = (): AgentTransport => {
-        const base = createShellTransport(() => settings)
+        const base = createShellTransport(
+          () => settings,
+          () => langRef.current,
+        )
         return {
           stream(request, callbacks) {
             const id = `model:${crypto.randomUUID()}`,
@@ -1556,16 +1572,16 @@ function DirectoryChat({
                     ],
               )
           },
-          onDone: ({ text, cancelled, turnLimit, truncated }) => {
+          onDone: (result) => {
             if (!current()) return
+            const completion = agentRunCompletion(result)
+            const labels = agentStatusText(langRef.current)
             finish(
-              text || (cancelled ? 'Stopped.' : ''),
-              cancelled,
-              !!turnLimit || !!truncated || !text.trim(),
+              result.text || (completion.notice ? labels[completion.notice] : ''),
+              completion.outcome === 'cancelled',
+              completion.outcome === 'incomplete',
             )
-            if (turnLimit) setNotice('The agent reached its tool-turn limit.')
-            else if (truncated)
-              setNotice('The model reached its output limit. This answer is incomplete.')
+            if (completion.notice) setNotice(labels[completion.notice])
           },
           onError: (error) => finish(error, true),
         },
@@ -1702,15 +1718,7 @@ function DirectoryChat({
   const activeVersion = data.versions?.find((version) => version.id === data.activeVersionId)
 
   const newChatAction = (
-    <button
-      type="button"
-      className="ws-chat-close"
-      disabled={transitioning}
-      onClick={onNew}
-      title={s('New chat')}
-    >
-      {s('New chat')}
-    </button>
+    <ChatNewButton lang={lang} disabled={busy || actionPending || transitioning} onClick={onNew} />
   )
   const optionsAction = (
     <button
@@ -1726,7 +1734,7 @@ function DirectoryChat({
   )
   return (
     <section
-      className="ws-chat workspace-chat-main"
+      className="ws-chat workspace-chat-main nawa-chat-panel"
       aria-label={s('Chat with {folder}', { folder: folderName })}
     >
       {headerTarget ? (
@@ -1735,16 +1743,37 @@ function DirectoryChat({
           {createPortal(optionsAction, headerTarget.options)}
         </>
       ) : (
-        <header className="ws-chat-head">
-          <div className="nawa-chat-primary-actions">
-            {newChatAction}
-            {optionsAction}
-          </div>
-        </header>
+        <ChatPanelHeader
+          lang={lang}
+          brand={<NawaIcon size={22} />}
+          newChatControl={newChatAction}
+          onCollapse={onHide}
+          collapseLabel={s('Hide chat')}
+        >
+          {optionsAction}
+        </ChatPanelHeader>
       )}
       {historyPanel}
       <div className="chat-session-toolbar">
-        <strong>{data.title}</strong>
+        <fieldset
+          className="nawa-chat-conversation-row"
+          disabled={busy || actionPending || transitioning}
+        >
+          {historyDropdown}
+          <button type="button" aria-expanded={historyOpen} onClick={toggleHistory}>
+            {labels.history}
+          </button>
+        </fieldset>
+        <span role="status">
+          {s(
+            buffer.error
+              ? 'Save needs attention'
+              : buffer.dirty
+                ? 'Saving locally…'
+                : 'Saved locally',
+          )}{' '}
+          · {s('{count} messages', { count: data.messages.length })}
+        </span>
         {(data.versions?.length ?? 0) > 1 && (
           <label>
             {labels.versions}{' '}
@@ -1956,6 +1985,10 @@ function DirectoryChat({
               onCitation={openCitation}
               actions={(renderMessage) => {
                 const index = messages.indexOf(message)
+                const hasReply = messages
+                  .slice(index + 1, turnEnd(messages, index))
+                  .some((item) => item.role === 'assistant' && !!item.text.trim())
+                const exchangeActions = message.role === 'assistant' || !hasReply
                 if (
                   message.role === 'assistant' &&
                   (!isFinalAnswer(messages, index) ||
@@ -1992,8 +2025,8 @@ function DirectoryChat({
                         ? () => reviseMessage(message, 'regenerate')
                         : undefined
                     }
-                    onBranch={() => branchMessage(message)}
-                    onDelete={() => reviseMessage(message, 'delete')}
+                    onBranch={exchangeActions ? () => branchMessage(message) : undefined}
+                    onDelete={exchangeActions ? () => reviseMessage(message, 'delete') : undefined}
                   />
                 )
               }}
@@ -2078,7 +2111,6 @@ function DirectoryChat({
             queuePlaceholder={AI_QUEUE_LABELS[lang].queuePlaceholder}
             footerStart={
               <div className="nawa-composer-controls">
-                <div className="nawa-conversation-picker">{historyDropdown}</div>
                 <ChatModelPicker
                   translate={s}
                   emptyHint={s('Add saved models in Models.')}
@@ -2113,16 +2145,6 @@ function DirectoryChat({
             onStop={() => stop()}
           />
         </fieldset>
-        <div className="nawa-history-save-status" role="status">
-          {s(
-            buffer.error
-              ? 'Save needs attention'
-              : buffer.dirty
-                ? 'Saving locally…'
-                : 'Saved locally',
-          )}{' '}
-          · {s('{count} messages', { count: data.messages.length })}
-        </div>
       </footer>
     </section>
   )

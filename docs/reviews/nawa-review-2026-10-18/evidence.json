@@ -1,0 +1,535 @@
+{
+  "date": "2026-10-18",
+  "platform": "Windows",
+  "node": "v24.19.0",
+  "scope": "Current working tree; renderer artifacts from this session; spare-view prewarming disabled for measurement",
+  "inventory": {
+    "sourceFiles": 1725,
+    "sourceLines": 596538,
+    "testFiles": 1871,
+    "largest": [
+      {
+        "path": "apps/pdf/src/renderer/App.tsx",
+        "lines": 10545,
+        "bytes": 447520
+      },
+      {
+        "path": "apps/docs/src/renderer/App.tsx",
+        "lines": 8088,
+        "bytes": 344740
+      },
+      {
+        "path": "apps/sheets/src/renderer/univer-sync.ts",
+        "lines": 8048,
+        "bytes": 326324
+      },
+      {
+        "path": "packages/docx-engine/src/parse.ts",
+        "lines": 8033,
+        "bytes": 336005
+      },
+      {
+        "path": "apps/docs/src/renderer/editor/extensions.ts",
+        "lines": 6847,
+        "bytes": 292669
+      },
+      {
+        "path": "apps/sheets/src/renderer/App.tsx",
+        "lines": 5524,
+        "bytes": 237582
+      },
+      {
+        "path": "apps/slides/src/main/slides-main.ts",
+        "lines": 5374,
+        "bytes": 207056
+      },
+      {
+        "path": "apps/sheets/src/renderer/WorkbookVisuals.tsx",
+        "lines": 5223,
+        "bytes": 195347
+      },
+      {
+        "path": "packages/pptx-engine/src/index.ts",
+        "lines": 4813,
+        "bytes": 186849
+      },
+      {
+        "path": "apps/slides/src/renderer/App.tsx",
+        "lines": 4701,
+        "bytes": 193089
+      },
+      {
+        "path": "apps/sheets/src/renderer/ExcelShell.tsx",
+        "lines": 4443,
+        "bytes": 166453
+      },
+      {
+        "path": "packages/pptx-engine/src/parse.ts",
+        "lines": 4267,
+        "bytes": 170846
+      },
+      {
+        "path": "apps/docs/src/renderer/components/Ribbon.tsx",
+        "lines": 4218,
+        "bytes": 171277
+      },
+      {
+        "path": "apps/docs/src/main/docs-main.ts",
+        "lines": 4051,
+        "bytes": 157312
+      },
+      {
+        "path": "apps/shell/src/main/index.ts",
+        "lines": 3976,
+        "bytes": 149570
+      },
+      {
+        "path": "apps/sheets/src/preload/index.ts",
+        "lines": 3963,
+        "bytes": 155040
+      },
+      {
+        "path": "apps/sheets/src/main/sheets-main.ts",
+        "lines": 3840,
+        "bytes": 154864
+      },
+      {
+        "path": "packages/docx-engine/src/generate.ts",
+        "lines": 3749,
+        "bytes": 156635
+      }
+    ],
+    "bundles": [
+      {
+        "app": "docs",
+        "jsFiles": 4,
+        "totalJS": 8743304,
+        "largest": [
+          {
+            "name": "index-BvfedTI1.js",
+            "bytes": 6411356,
+            "gzip": 1473119
+          },
+          {
+            "name": "parse-worker-BlVHyDdK.js",
+            "bytes": 1319897,
+            "gzip": 297626
+          }
+        ]
+      },
+      {
+        "app": "html",
+        "jsFiles": 1,
+        "totalJS": 2473905,
+        "largest": [
+          {
+            "name": "index-CjDV93pb.js",
+            "bytes": 2473905,
+            "gzip": 584562
+          }
+        ]
+      },
+      {
+        "app": "markdown",
+        "jsFiles": 64,
+        "totalJS": 12549421,
+        "largest": [
+          {
+            "name": "index-7LI2xB3u.js",
+            "bytes": 5069488,
+            "gzip": 1166791
+          },
+          {
+            "name": "cynefin-OW5HDTMX-C0NaXLoe.js",
+            "bytes": 1304473,
+            "gzip": 213990
+          }
+        ]
+      },
+      {
+        "app": "pdf",
+        "jsFiles": 1,
+        "totalJS": 2727561,
+        "largest": [
+          {
+            "name": "index-B3r6ptcm.js",
+            "bytes": 2727561,
+            "gzip": 560784
+          }
+        ]
+      },
+      {
+        "app": "sheets",
+        "jsFiles": 96,
+        "totalJS": 23872914,
+        "largest": [
+          {
+            "name": "index-_iZZA0D1.js",
+            "bytes": 18350287,
+            "gzip": 3602625
+          },
+          {
+            "name": "hu-DVk7Y_ka-DX3GX0Md.js",
+            "bytes": 765419,
+            "gzip": 172863
+          }
+        ]
+      },
+      {
+        "app": "shell",
+        "jsFiles": 58,
+        "totalJS": 2423534,
+        "largest": [
+          {
+            "name": "index-1nu8_apx.js",
+            "bytes": 1963909,
+            "gzip": 426568
+          },
+          {
+            "name": "shortcuts.ar-BSnjEeUS.js",
+            "bytes": 51502,
+            "gzip": 10695
+          }
+        ]
+      },
+      {
+        "app": "slides",
+        "jsFiles": 1,
+        "totalJS": 4054272,
+        "largest": [
+          {
+            "name": "index-BDbM7MuJ.js",
+            "bytes": 4054272,
+            "gzip": 861547
+          }
+        ]
+      }
+    ]
+  },
+  "memory": [
+    {
+      "step": "home",
+      "liveWebContents": 1,
+      "workingSetMiB": 521,
+      "privateMiB": 407
+    },
+    {
+      "step": "two_text_tabs",
+      "liveWebContents": 3,
+      "workingSetMiB": 846,
+      "privateMiB": 641
+    },
+    {
+      "step": "docs_1_open",
+      "liveWebContents": 4,
+      "workingSetMiB": 1064,
+      "privateMiB": 820
+    },
+    {
+      "step": "docs_1_closed",
+      "liveWebContents": 4,
+      "workingSetMiB": 1066,
+      "privateMiB": 839
+    },
+    {
+      "step": "docs_2_open",
+      "liveWebContents": 5,
+      "workingSetMiB": 1255,
+      "privateMiB": 990
+    },
+    {
+      "step": "docs_2_closed",
+      "liveWebContents": 5,
+      "workingSetMiB": 1257,
+      "privateMiB": 991
+    },
+    {
+      "step": "docs_3_open",
+      "liveWebContents": 6,
+      "workingSetMiB": 1489,
+      "privateMiB": 1197
+    },
+    {
+      "step": "docs_3_closed",
+      "liveWebContents": 6,
+      "workingSetMiB": 1491,
+      "privateMiB": 1198
+    }
+  ],
+  "separateUiSession": [
+    {
+      "step": "home",
+      "liveWebContents": 1,
+      "workingSetMiB": 521,
+      "privateMiB": 408
+    },
+    {
+      "step": "sheets_open",
+      "liveWebContents": 2,
+      "workingSetMiB": 876,
+      "privateMiB": 702
+    }
+  ],
+  "observedChromeReadyMs": {
+    "firstSession": 1147,
+    "separateUiSession": 946,
+    "markdown": 590,
+    "sheets": 1497,
+    "qualification": "DOM chrome readiness, not full file-ready latency; single-machine observations"
+  },
+  "probes": {
+    "interruptedPptxSave": {
+      "before": 102645,
+      "after": 32,
+      "originalPreserved": false
+    },
+    "utf16": {
+      "decodedHasReplacement": true,
+      "decodedHasNuls": true,
+      "saveResult": {
+        "ok": true
+      },
+      "bytesBefore": 52,
+      "bytesAfter": 62,
+      "sameBytes": false,
+      "first16": "efbfbdefbfbd7b0022006d0065007300"
+    },
+    "externalConflict": {
+      "opened": "# Original\n\nOriginal source.\n",
+      "saveReturnedSuccess": true,
+      "afterSave": "# Nawa edit\n\nLocal editor version.\n"
+    },
+    "resizer": {
+      "role": "separator",
+      "tabIndex": -1,
+      "ariaNow": null,
+      "ariaMin": null,
+      "ariaMax": null
+    },
+    "narrow": {
+      "viewport": 1024,
+      "scrollWidth": 1024,
+      "chat": {
+        "x": 12.666666984558105,
+        "y": 147.33334350585938,
+        "width": 438.66668701171875,
+        "height": 608,
+        "top": 147.33334350585938,
+        "right": 451.33335399627686,
+        "bottom": 755.3333435058594,
+        "left": 12.666666984558105
+      },
+      "buttonsWithoutNames": [],
+      "escapeClosesDrawer": true
+    },
+    "htmlNetwork": {
+      "requestsBeforeAi": [
+        {
+          "path": "/preview-beacon?content=review-fixture",
+          "method": "GET"
+        }
+      ],
+      "receiver": "local loopback-only test server"
+    },
+    "previewTruncation": {
+      "finishReason": "length",
+      "storedText": "Hello. This response stops in the middle of",
+      "storedStreaming": false,
+      "storedError": false,
+      "chatRequests": 1,
+      "mockProvider": "local loopback-only deterministic endpoint"
+    },
+    "placeholderContrast": {
+      "foreground": "#909499",
+      "background": "#ffffff",
+      "ratio": 3.05,
+      "fontSizeCssPx": 16
+    }
+  },
+  "validation": {
+    "typecheck": "passed",
+    "lint": {
+      "errors": 0,
+      "warnings": 21
+    },
+    "boundaries": {
+      "passed": true,
+      "packageSourceFiles": 521
+    },
+    "helpLanguages": {
+      "passed": true,
+      "topics": 18,
+      "languages": ["en", "ja", "ar"]
+    },
+    "suites": {
+      "shell": {
+        "passed": 1268,
+        "skipped": 4
+      },
+      "agentCore": {
+        "passed": 189
+      },
+      "fileParse": {
+        "passed": 149
+      },
+      "fileFormats": {
+        "passed": 32
+      },
+      "docx": {
+        "initialPassed": 1713,
+        "initialTimeouts": 3,
+        "skipped": 1,
+        "focusedRerunPassed": 27,
+        "resolvedTimeouts": 3
+      },
+      "pptx": {
+        "passed": 1245,
+        "skipped": 17
+      },
+      "xlsxGateway": {
+        "passed": 253
+      }
+    },
+    "distinctPassedAfterFocusedRerun": 4852,
+    "skipped": 22,
+    "limits": [
+      "Not the complete root test command",
+      "No fresh installer build",
+      "Not the full Electron E2E or Rust suites",
+      "No macOS/Linux runtime checks",
+      "No paid/external AI-model accuracy benchmark",
+      "No screen-reader certification"
+    ]
+  },
+  "dependencyAudit": {
+    "all": {
+      "info": 0,
+      "low": 0,
+      "moderate": 10,
+      "high": 5,
+      "critical": 0,
+      "total": 15
+    },
+    "omitDev": {
+      "info": 0,
+      "low": 0,
+      "moderate": 5,
+      "high": 0,
+      "critical": 0,
+      "total": 5
+    },
+    "qualification": "Dependency graph alerts, not exploitability findings; Electron bundles can include devDependencies; PDF verification already uses Node/OpenSSL instead of the affected forge verifier",
+    "dependencies": [
+      {
+        "name": "@electron/get",
+        "severity": "moderate",
+        "direct": false,
+        "advisories": []
+      },
+      {
+        "name": "@huggingface/transformers",
+        "severity": "moderate",
+        "direct": true,
+        "advisories": []
+      },
+      {
+        "name": "app-builder-lib",
+        "severity": "moderate",
+        "direct": false,
+        "advisories": []
+      },
+      {
+        "name": "braces",
+        "severity": "high",
+        "direct": false,
+        "advisories": [
+          {
+            "title": "braces vulnerable to stack-exhaustion denial of service through deeply nested patterns",
+            "url": "https://github.com/advisories/GHSA-vfj7-8cjw-p6xm"
+          }
+        ]
+      },
+      {
+        "name": "chokidar",
+        "severity": "high",
+        "direct": false,
+        "advisories": []
+      },
+      {
+        "name": "dmg-builder",
+        "severity": "moderate",
+        "direct": false,
+        "advisories": []
+      },
+      {
+        "name": "electron-builder",
+        "severity": "moderate",
+        "direct": true,
+        "advisories": []
+      },
+      {
+        "name": "electron-builder-squirrel-windows",
+        "severity": "moderate",
+        "direct": false,
+        "advisories": []
+      },
+      {
+        "name": "global-agent",
+        "severity": "moderate",
+        "direct": false,
+        "advisories": []
+      },
+      {
+        "name": "http-cache-semantics",
+        "severity": "high",
+        "direct": false,
+        "advisories": [
+          {
+            "title": "http-cache-semantics max-stale handling can disclose cross-user cached responses",
+            "url": "https://github.com/advisories/GHSA-ch52-4w7c-c8xp"
+          }
+        ]
+      },
+      {
+        "name": "node-forge",
+        "severity": "high",
+        "direct": true,
+        "advisories": [
+          {
+            "title": "node-forge RSA PKCS#1 v1.5 signature verification accepts extra nested DigestAlgorithm elements",
+            "url": "https://github.com/advisories/GHSA-86w9-cpqp-85rv"
+          }
+        ]
+      },
+      {
+        "name": "onnxruntime-node",
+        "severity": "moderate",
+        "direct": false,
+        "advisories": []
+      },
+      {
+        "name": "roarr",
+        "severity": "moderate",
+        "direct": false,
+        "advisories": []
+      },
+      {
+        "name": "sprintf-js",
+        "severity": "moderate",
+        "direct": false,
+        "advisories": [
+          {
+            "title": "sprintf-js vulnerable to denial of service through unbounded precision specifiers",
+            "url": "https://github.com/advisories/GHSA-hp3w-g68c-fv3c"
+          }
+        ]
+      },
+      {
+        "name": "vite-plugin-static-copy",
+        "severity": "high",
+        "direct": true,
+        "advisories": []
+      }
+    ]
+  }
+}

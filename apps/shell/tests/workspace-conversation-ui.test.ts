@@ -89,7 +89,7 @@ afterEach(async () => {
 })
 
 it('deletes a continuation through the rendered message menu and restores it with Undo', async () => {
-  const user = host.querySelectorAll('.chat-question-row')[1]
+  const user = host.querySelectorAll('.ws-chat-assistant')[1]
   act(() => user.querySelector<HTMLButtonElement>('.chat-message-tools .chat-destructive')!.click())
   expect(user.textContent).toContain('Remove 1 exchange')
   expect(store.get(originalId).messages).toHaveLength(4)
@@ -117,10 +117,25 @@ it('branches from a rendered answer and links back to the original conversation'
   await flush()
   expect(store.list({}).total).toBe(2)
   expect(host.querySelectorAll('.ws-chat-user')).toHaveLength(1)
+  const selector = host.querySelector<HTMLSelectElement>(
+    '.chat-session-toolbar .nawa-chat-conversation',
+  )!
+  const branchId = selector.value
+  expect(selector.options).toHaveLength(2)
+  expect(host.querySelector('.ai-input-footer .nawa-chat-conversation')).toBeNull()
   const source = host.querySelector<HTMLButtonElement>('.chat-session-source')!
   act(() => source.click())
   await flush()
   expect(host.querySelectorAll('.ws-chat-user')).toHaveLength(2)
+  act(() => {
+    const current = host.querySelector<HTMLSelectElement>(
+      '.chat-session-toolbar .nawa-chat-conversation',
+    )!
+    current.value = branchId
+    current.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await flush()
+  expect(host.querySelectorAll('.ws-chat-user')).toHaveLength(1)
 })
 
 it('saves an edited version without the old continuation and retains the original version', async () => {

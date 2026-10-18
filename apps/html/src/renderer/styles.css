@@ -3770,3 +3770,28 @@ html.genoffice-popover-open .ribbon-tabs {
   min-width: 0;
   box-sizing: border-box;
 }
+
+.preview-network-controls {
+  display: flex;
+  flex: none;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 12px;
+  color: var(--text-secondary);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.preview-network-toggle {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-6);
+  color: var(--text-primary);
+  background: var(--surface);
+  cursor: pointer;
+}
+.preview-network-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

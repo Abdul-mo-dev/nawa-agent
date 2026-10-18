@@ -7,6 +7,7 @@ import { defaultAiSettings, type AiSettings } from '@genoffice/ai-provider'
 import type { Lang } from '@genoffice/i18n'
 import type { ConversationRecord, HistorySave } from '../src/shared/conversation-api'
 import { WorkspaceChat } from '../src/renderer/src/WorkspaceChat'
+import { agentStatusText } from '@genoffice/ui'
 import { LocaleProvider, useI18n } from '../src/renderer/src/locale'
 
 const cleanup: (() => Promise<void>)[] = []
@@ -130,6 +131,17 @@ const fallbacks: [Lang, string][] = [
 ]
 
 describe('workspace chat', () => {
+  it.each(['ja', 'ar'] as const)(
+    'uses the current %s language for a late transport error',
+    async (lang) => {
+      const p = await panel('en')
+      await p.send('Hello')
+      await p.switchLanguage(lang)
+      await p.emit({ type: 'error', errorCode: 'network', error: 'English network detail' })
+      expect(p.host.textContent).toContain(agentStatusText(lang).networkError)
+      expect(p.host.textContent).not.toContain('English network detail')
+    },
+  )
   it.each(fallbacks)(
     'sends the message unchanged with the %s reply-language fallback',
     async (lang, directive) => {

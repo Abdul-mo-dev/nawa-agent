@@ -41,6 +41,7 @@ import {
 import type { WebContents } from 'electron'
 import { execFile } from 'node:child_process'
 import { readFile, writeFile, rm, stat, mkdir, open } from 'node:fs/promises'
+import { fileRevision, replaceFileTransaction } from '@genoffice/electron-utils/file-transaction'
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { userInfo } from 'node:os'
@@ -504,8 +505,11 @@ export async function saveSessionDeckTo(session: Session, filePath: string): Pro
   for (const contents of stageContents) assertDirectoryStageWrite(contents, filePath)
   await withSessionSaveLock(session, async () => {
     const metaRevAtSave = session.metaRev ?? 0
-    const receipt = await savePptxToFile(session.opened, filePath)
+    const expectedRevision =
+      session.path === filePath ? (session.diskRevision ?? null) : await fileRevision(filePath)
+    const receipt = await savePptxToFile(session.opened, filePath, { expectedRevision })
     commitSaved(session.opened, receipt)
+    if (receipt.outputHash) session.diskRevision = receipt.outputHash
     if ((session.metaRev ?? 0) === metaRevAtSave) session.metaDirty = false
     session.path = filePath
     autosaveBackoff.delete(filePath)
@@ -977,6 +981,7 @@ async function openAndBuild(
   adoptEmbeddedFonts(opened)
   sessions.set(wc.id, {
     path,
+    diskRevision: createHash('sha256').update(raw).digest('hex'),
     opened,
     fitWidthPx,
     undoStack: [],
@@ -1060,9 +1065,13 @@ async function saveDraftAfterGenerate(
     assertDirectoryStageWrite(wc, stage.path)
     // Native generation normally creates a public draft. A directory workflow must
     // instead retain its private identity, even for replace mode's new Session object.
-    await writeFile(stage.path, Buffer.from(bytes))
+    await replaceFileTransaction(stage.path, (temp) => writeFile(temp, bytes, { flag: 'wx' }), {
+      expectedRevision: session.diskRevision ?? (await fileRevision(stage.path)),
+      beforeCommit: () => assertDirectoryStageWrite(wc, stage.path),
+    })
     assertDirectoryStageCapability(wc, 'edit')
     session.path = stage.path
+    session.diskRevision = createHash('sha256').update(bytes).digest('hex')
     return
   }
   try {
@@ -1078,8 +1087,11 @@ async function saveDraftAfterGenerate(
       draftPath = pickDraftPath(draftsDir, deckName)
     }
 
-    await writeFile(draftPath, Buffer.from(bytes))
+    await replaceFileTransaction(draftPath, (temp) => writeFile(temp, bytes, { flag: 'wx' }), {
+      expectedRevision: draftPath === session.path ? (session.diskRevision ?? null) : null,
+    })
     session.path = draftPath
+    session.diskRevision = createHash('sha256').update(bytes).digest('hex')
     await pushRecent(draftPath)
     slidesOpenedHook?.(wc, draftPath)
   } catch (err) {
@@ -4622,7 +4634,10 @@ export function registerSlidesIpc(): void {
       const metaRevAtSave = session.metaRev ?? 0
       assertDirectoryStageWrite(e.sender, session.path)
       await withSessionSaveLock(session, async () => {
-        const receipt = await savePptxToFile(session.opened, session.path)
+        const receipt = await savePptxToFile(session.opened, session.path, {
+          expectedRevision: session.diskRevision ?? null,
+        })
+        if (receipt.outputHash) session.diskRevision = receipt.outputHash
         autosaveBackoff.delete(session.path)
         void rm(autosavePathFor(session.path), { force: true }).catch(() => {})
         dropUntitledRecovery(e.sender.id)

@@ -47,6 +47,7 @@ import type { AccountStatus, AiCatalogEntry, DocTheme, UiTheme } from '../../sha
 import { ProviderLogo } from './provider-logos'
 import { IntegrationsPane, skillUpdateDue } from './IntegrationsPane'
 import { MyAgentSettings } from './myagent/MyAgentSettings'
+import { LocalModelsSettings } from './local-models/LocalModelsSettings'
 import { KnowledgeSettings } from './KnowledgeSettings'
 import './settings.css'
 
@@ -292,7 +293,7 @@ function foldModels(providerId: string, models: string[]) {
 }
 
 /** AI model pane: provider / model / key / base URL, saved to userData/ai-settings.json */
-export function AiModelPane({ t }: { t: TFunc }) {
+export function AiModelPane({ t, embedded = false }: { t: TFunc; embedded?: boolean }) {
   const id = useId()
   const fieldId = (name: string) => `${id}-${name}`
   const { s } = useSidebarText()
@@ -650,7 +651,7 @@ export function AiModelPane({ t }: { t: TFunc }) {
   return (
     <div className="nawa-model-pane">
       <fieldset className="nawa-model-scroll" disabled={saving || testing}>
-        <h3 className="set-pane-title">{s('Nawa chat model')}</h3>
+        {!embedded && <h3 className="set-pane-title">{s('Nawa chat model')}</h3>}
         <div className="set-field">
           <div className="set-field-text">
             <label className="set-field-label">{t('setAiProvider')}</label>
@@ -1742,6 +1743,7 @@ export function SettingsModal({
     () => new Set([target?.section ?? initialSection]),
   )
   const [myAgentVisited, setMyAgentVisited] = useState(false)
+  const [embeddingRequest, setEmbeddingRequest] = useState(0)
   const [activities, setActivities] = useState<Record<string, PanelActivity>>({})
   const [closePrompt, setClosePrompt] = useState(false)
   const modal = useRef<HTMLDivElement>(null)
@@ -2055,7 +2057,18 @@ export function SettingsModal({
                 </>
               )}
               <div hidden={section !== 'aiModel'}>
-                {visited.has('aiModel') && <AiModelPane t={t} />}
+                {visited.has('aiModel') && (
+                  <LocalModelsSettings
+                    chat={<AiModelPane t={t} embedded />}
+                    applyBlocked={
+                      !!activities.settings ||
+                      !!activities['search-settings'] ||
+                      activities['myagent-settings']?.kind === 'busy'
+                    }
+                    embeddingSuspended={activities['myagent-settings']?.kind === 'busy'}
+                    openEmbeddingRequest={embeddingRequest}
+                  />
+                )}
               </div>
               <div hidden={section !== 'aiMedia'}>
                 {visited.has('aiMedia') && (
@@ -2068,7 +2081,13 @@ export function SettingsModal({
               </div>
               <div hidden={section !== 'knowledge'}>
                 {visited.has('knowledge') && (
-                  <KnowledgeSettings suspended={activities['myagent-settings']?.kind === 'busy'} />
+                  <KnowledgeSettings
+                    onOpenModels={() => {
+                      setSection('aiModel')
+                      setVisited((previous) => new Set([...previous, 'aiModel']))
+                      setEmbeddingRequest((value) => value + 1)
+                    }}
+                  />
                 )}
               </div>
               {section === 'general' && (

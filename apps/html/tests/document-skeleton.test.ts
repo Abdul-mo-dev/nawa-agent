@@ -11,10 +11,9 @@ describe('documentSkeleton', () => {
   })
 
   it('declares the document language as the UI language', () => {
-    expect(documentSkeleton('zh')).toContain('<html lang="zh-CN">')
+    expect(documentSkeleton('ar')).toContain('<html lang="ar-SA">')
     expect(documentSkeleton('en')).toContain('<html lang="en-US">')
-    // a region-less tag would be wrong for a locale that has one
-    expect(documentSkeleton('zh-TW')).toContain('<html lang="zh-TW">')
+    expect(documentSkeleton('ja')).toContain('<html lang="ja-JP">')
   })
 
   it('declares the encoding before any content', () => {
@@ -25,7 +24,7 @@ describe('documentSkeleton', () => {
   })
 
   it('carries the three structural elements a page needs', () => {
-    const html = documentSkeleton('de')
+    const html = documentSkeleton('ja')
     expect(html).toContain('<head>')
     expect(html).toContain('<title></title>')
     expect(html).toContain('<body></body>')
@@ -38,9 +37,9 @@ describe('documentSkeleton', () => {
   })
 
   it('differs only in the lang tag across languages', () => {
-    const zh = documentSkeleton('zh')
-    const fr = documentSkeleton('fr')
-    expect(zh.replace('zh-CN', 'LANG')).toBe(fr.replace('fr-FR', 'LANG'))
+    const ar = documentSkeleton('ar')
+    const ja = documentSkeleton('ja')
+    expect(ar.replace('ar-SA', 'LANG')).toBe(ja.replace('ja-JP', 'LANG'))
   })
 
   it('ends with a newline, so appending to it does not join lines', () => {

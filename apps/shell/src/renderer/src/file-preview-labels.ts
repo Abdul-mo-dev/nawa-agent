@@ -25,6 +25,11 @@ const en = {
   retry: 'Retry',
   historyError: 'Could not open file chat history.',
   noReply: 'No reply was returned.',
+  stopped: 'Stopped. The partial response is saved.',
+  outputLimit: 'The model reached its output limit. This answer is incomplete.',
+  turnLimit: 'The agent reached its tool-turn limit. This answer is incomplete.',
+  incomplete: 'This response is incomplete.',
+  previousSnapshot: 'Earlier file snapshot; excluded from the current answer context.',
   hide: 'Hide assistant',
 }
 const ja = {
@@ -52,6 +57,11 @@ const ja = {
   retry: '再試行',
   historyError: 'ファイルのチャット履歴を開けませんでした。',
   noReply: '応答がありませんでした。',
+  stopped: '停止しました。途中の応答は保存されています。',
+  outputLimit: 'モデルの出力上限に達しました。この回答は未完了です。',
+  turnLimit: 'ツールの実行回数上限に達しました。この回答は未完了です。',
+  incomplete: 'この応答は未完了です。',
+  previousSnapshot: '以前のファイル内容です。現在の回答の文脈には使用されません。',
   hide: 'アシスタントを隠す',
 } satisfies Record<keyof typeof en, string>
 const ar = {
@@ -78,6 +88,11 @@ const ar = {
   retry: 'إعادة المحاولة',
   historyError: 'تعذر فتح سجل محادثة الملف.',
   noReply: 'لم يتم إرجاع رد.',
+  stopped: 'تم الإيقاف. تم حفظ الرد الجزئي.',
+  outputLimit: 'بلغ النموذج حد الإخراج. هذه الإجابة غير مكتملة.',
+  turnLimit: 'بلغ المساعد حد استخدام الأدوات. هذه الإجابة غير مكتملة.',
+  incomplete: 'هذا الرد غير مكتمل.',
+  previousSnapshot: 'نسخة سابقة من الملف؛ لا تُستخدم في سياق الإجابة الحالية.',
   hide: 'إخفاء المساعد',
 } satisfies Record<keyof typeof en, string>
 export const previewText = (lang: Lang) => ({ en, ja, ar })[lang]

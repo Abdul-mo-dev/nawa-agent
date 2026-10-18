@@ -10,6 +10,9 @@
 export const CONTROL_FILE = 'control.json'
 export const CONTROL_PROTOCOL = 1
 export const CONTROL_MAX_REQUEST_BYTES = 64 * 1024
+/** Import conversion can consume 90s before the renderer starts loading. */
+export const CONTROL_IMPORT_READY_MS = 120_000
+export const CONTROL_RESPONSE_TIMEOUT_MS = CONTROL_IMPORT_READY_MS + 10_000
 
 export interface ControlEndpoint {
   protocol: number

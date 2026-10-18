@@ -60,8 +60,10 @@ import {
 import { createAiSettingsStore } from '@genoffice/electron-utils/ai-settings-store'
 import { generateImageTool, documentMediaRoots } from '@genoffice/ai-search'
 import { parseFileToText } from '@genoffice/file-parse'
+import { decodeSource } from '@genoffice/file-parse/source-text'
+import { TextFileSessions } from '@genoffice/electron-utils/text-file-session'
+import { registerSessionNetworkPolicy } from '@genoffice/electron-utils/session-network-policy'
 import { convertHtmlToDocx } from '../../../../packages/html2docx/src'
-import { atomicWriteFile } from './atomic-write'
 import { ElectronBrowserDriver } from '../../../../packages/html2docx/src/drivers/electron'
 import {
   copyImageIntoOwnedAssets,
@@ -406,10 +408,48 @@ const openPathByWc = new Map<number, string>()
 const allowedByWc = new Map<number, Set<string>>()
 /** Current save target per view; absent = untitled document */
 const savePathByWc = new Map<number, string>()
+const textFiles = new TextFileSessions(decodeSource)
 /** Unsaved-changes flags mirrored from the renderer; drives the save prompt before closing a tab/window */
 const dirtyByWc = new Set<number>()
 /** Latest buffer text pushed by each renderer; served by html-preview:// to the preview iframe */
 const previewTextByWc = new Map<number, string>()
+const previewViews = new Set<number>()
+const remotePreviewViews = new Set<number>()
+const previewSessions = new WeakSet<Electron.Session>()
+
+function protectPreviewNetwork(contents: WebContents): void {
+  previewViews.add(contents.id)
+  if (previewSessions.has(contents.session)) return
+  previewSessions.add(contents.session)
+  registerSessionNetworkPolicy(contents.session, 'html-preview', (request) => {
+    const id = request.webContentsId ?? request.webContents?.id
+    if (id === undefined || !previewViews.has(id)) return true
+    const owner = presentOwnerByWc.get(id) ?? id
+    if (remotePreviewViews.has(owner)) return true
+    // Vite assets and its socket belong to trusted app chrome, never the preview frame.
+    try {
+      if (runtime.rendererUrl && request.frame && !request.frame.parent) {
+        const url = new URL(request.url.replace(/^ws/, 'http'))
+        return url.origin === new URL(runtime.rendererUrl).origin
+      }
+    } catch {
+      /* A missing/destroyed frame does not grant remote content access. */
+    }
+    return false
+  })
+  contents.session.setPermissionRequestHandler((sender, permission, callback, details) => {
+    callback(
+      !previewViews.has(sender.id) ||
+        (permission === 'clipboard-sanitized-write' && details.isMainFrame),
+    )
+  })
+  contents.session.setPermissionCheckHandler(
+    (sender, permission, _origin, details) =>
+      !sender ||
+      !previewViews.has(sender.id) ||
+      (permission === 'clipboard-sanitized-write' && details.isMainFrame),
+  )
+}
 const closeSaveWaiters = new Map<number, (ok: boolean) => void>()
 /** Resolvers for menu-triggered saves, resolved when the renderer's save invoke completes */
 const saveWaiters = new Map<number, (ok: boolean) => void>()
@@ -578,6 +618,7 @@ export function htmlAdoptSavedPath(contents: WebContents, filePath: string): voi
 
 /** The file was renamed on disk — re-grant the new path and tell the renderer */
 export function htmlFileRenamed(contents: WebContents, oldPath: string, newPath: string): void {
+  textFiles.rename(contents.id, oldPath, newPath)
   const wcId = contents.id
   if (savePathByWc.get(wcId) === oldPath) savePathByWc.set(wcId, newPath)
   if (openPathByWc.get(wcId) === oldPath) openPathByWc.set(wcId, newPath)
@@ -760,10 +801,6 @@ export function htmlSaveToPath(contents: WebContents, filePath: string): Promise
   })
 }
 
-async function writeTextAtomic(path: string, text: string): Promise<void> {
-  await atomicWriteFile(path, Buffer.from(text, 'utf8'))
-}
-
 function fileNameBase(name: string | undefined): string {
   return (name ?? '')
     .replace(/[/\\:*?"<>|]/g, '_')
@@ -870,7 +907,11 @@ function registerHtmlIpc(): void {
     const text = previewTextByWc.get(wcId)
     if (text === undefined) return null
     const doc = savePathByWc.get(wcId)
-    return { text, baseHref: doc ? assetBaseHref(dirname(doc)) : null }
+    return {
+      text,
+      baseHref: doc ? assetBaseHref(dirname(doc)) : null,
+      remoteContent: remotePreviewViews.has(wcId),
+    }
   })
 
   ipcMain.handle(HTML_CHANNELS.consumePending, (e) => openPathByWc.get(e.sender.id) ?? null)
@@ -900,7 +941,25 @@ function registerHtmlIpc(): void {
 
   ipcMain.handle(HTML_CHANNELS.previewInfo, (e) => ({
     url: previewUrlFor(presentOwnerByWc.get(e.sender.id) ?? e.sender.id),
+    remoteContent: remotePreviewViews.has(presentOwnerByWc.get(e.sender.id) ?? e.sender.id),
+    canEnableRemoteContent: !presentOwnerByWc.has(e.sender.id) && !directoryStageFor(e.sender),
   }))
+  ipcMain.handle(HTML_CHANNELS.previewRemoteContent, (event, enabled: unknown) => {
+    if (
+      event.senderFrame !== event.sender.mainFrame ||
+      !previewViews.has(event.sender.id) ||
+      presentOwnerByWc.has(event.sender.id) ||
+      typeof enabled !== 'boolean'
+    )
+      throw new Error('Invalid preview policy request.')
+    assertDirectoryStagePicker(event.sender)
+    if (enabled) remotePreviewViews.add(event.sender.id)
+    else remotePreviewViews.delete(event.sender.id)
+    for (const id of previewViews) {
+      if (id === event.sender.id || presentOwnerByWc.get(id) === event.sender.id)
+        webContents.fromId(id)?.send(HTML_CHANNELS.previewPolicyChanged, enabled)
+    }
+  })
 
   // Same shape as the slides show: the renderer asks for the screen in one call so the
   // macOS snap skips the Space animation; HTML fullscreen is left to the renderer elsewhere.
@@ -965,7 +1024,7 @@ function registerHtmlIpc(): void {
     if (typeof path !== 'string' || !allowedByWc.get(e.sender.id)?.has(path)) {
       throw new Error('html: path not granted to this view')
     }
-    return await readFile(path, 'utf8')
+    return await textFiles.read(e.sender.id, path)
   })
 
   ipcMain.handle(
@@ -1018,7 +1077,7 @@ function registerHtmlIpc(): void {
         const savedImageSources = prepared?.imageSources ?? imageSources
         try {
           assertDirectoryStageWrite(e.sender, target)
-          await writeTextAtomic(target, textToWrite)
+          await textFiles.save(e.sender.id, target, textToWrite, mode === 'saveAs')
         } catch (error) {
           if (prepared) await rollbackPreparedSaveAsAssets(prepared).catch(() => {})
           throw error
@@ -1446,6 +1505,7 @@ function registerHtmlIpc(): void {
 }
 
 function grantAndTrack(wc: WebContents, openPath?: string | null): void {
+  protectPreviewNetwork(wc)
   const wcId = wc.id
   if (openPath && existsSync(openPath)) {
     openPathByWc.set(wcId, openPath)
@@ -1455,11 +1515,14 @@ function grantAndTrack(wc: WebContents, openPath?: string | null): void {
   installExternalLinkOpener(wc)
   wc.once('destroyed', () => {
     closePresentViewsOf(wcId)
+    textFiles.forget(wcId)
     openPathByWc.delete(wcId)
     allowedByWc.delete(wcId)
     savePathByWc.delete(wcId)
     dirtyByWc.delete(wcId)
     previewTextByWc.delete(wcId)
+    previewViews.delete(wcId)
+    remotePreviewViews.delete(wcId)
     closeSaveWaiters.get(wcId)?.(false)
     closeSaveWaiters.delete(wcId)
     saveWaiters.get(wcId)?.(false)
@@ -1469,6 +1532,8 @@ function grantAndTrack(wc: WebContents, openPath?: string | null): void {
 
 function installExternalLinkOpener(wc: WebContents): void {
   wc.setWindowOpenHandler(({ url }) => {
+    if (previewViews.has(wc.id) && !remotePreviewViews.has(presentOwnerByWc.get(wc.id) ?? wc.id))
+      return { action: 'deny' }
     const target = safeExternalUrl(url, { allowedProtocols: ['http:', 'https:', 'mailto:'] })
     if (target) void shell.openExternal(target)
     return { action: 'deny' }
@@ -1477,10 +1542,14 @@ function installExternalLinkOpener(wc: WebContents): void {
 
 /** A present view renders only the owner's preview (renderer route `?present=<owner wc id>`) */
 function bindPresentView(wc: WebContents, ownerWcId: number, title: string): void {
+  protectPreviewNetwork(wc)
   const wcId = wc.id
   presentOwnerByWc.set(wcId, ownerWcId)
   installExternalLinkOpener(wc)
-  wc.once('destroyed', () => presentOwnerByWc.delete(wcId))
+  wc.once('destroyed', () => {
+    presentOwnerByWc.delete(wcId)
+    previewViews.delete(wcId)
+  })
   const query = { present: String(ownerWcId), title }
   void wc.loadURL(rendererUrl(runtime.rendererUrl, 'html', query))
 }

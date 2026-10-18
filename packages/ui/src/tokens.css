@@ -7,6 +7,9 @@
 
 :root {
   /* chrome */
+  --app-background: #ffffff;
+  --sidebar-background: #fcfcfd;
+  --text-placeholder: #676d76;
   --surface: #ffffff;
   --surface-subtle: #f6f7f9;
   --chrome-bg: #ffffff;
@@ -83,6 +86,9 @@
 }
 
 [data-theme='dark'] {
+  --app-background: #20242b;
+  --sidebar-background: #2d333d;
+  --text-placeholder: #a2a7af;
   --surface: #1e1e1e;
   --surface-subtle: #2a2a2a;
   --chrome-bg: #252525;
@@ -142,6 +148,9 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']):not([data-theme='dark']) {
+    --app-background: #20242b;
+    --sidebar-background: #2d333d;
+    --text-placeholder: #a2a7af;
     --surface: #1e1e1e;
     --surface-subtle: #2a2a2a;
     --chrome-bg: #252525;

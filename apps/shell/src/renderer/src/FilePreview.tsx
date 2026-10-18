@@ -88,8 +88,12 @@ export function FilePreview({ path, tabId }: { path: string; tabId: string }) {
           ) : null}
         </div>
         {preview && !preview.error && (
-          <div className="file-preview-ai" hidden={!aiOpen}>
-            <PreviewAssistant key={`${path}:${preview.sourceHash}`} preview={preview} />
+          <div className="file-preview-ai ai-dock" hidden={!aiOpen}>
+            <PreviewAssistant
+              key={`${path}:${preview.sourceHash}`}
+              preview={preview}
+              onCollapse={() => setAiOpen(false)}
+            />
           </div>
         )}
       </div>

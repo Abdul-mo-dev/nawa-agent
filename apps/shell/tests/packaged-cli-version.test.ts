@@ -8,7 +8,7 @@ const require = createRequire(import.meta.url)
 const shellRoot = resolve(import.meta.dirname, '..')
 const shellPackage = JSON.parse(readFileSync(resolve(shellRoot, 'package.json'), 'utf-8')) as {
   version: string
-  dependencies: { sharp: string }
+  dependencies: { '@napi-rs/canvas': string }
 }
 const CLI_BUNDLE_REL = '../../packages/cli/dist/genoffice.cjs'
 
@@ -27,7 +27,8 @@ function loadConfig(opts: {
   extraMetadataVersion?: string
   rebuildApplies?: boolean
   missing?: string
-  rootSharpVersion?: string
+  rootCanvasVersion?: string
+  forbiddenEmbedding?: 'input' | 'import'
 }): {
   config: { beforePack: (context: { electronPlatformName: string }) => Promise<void> }
   rebuilds: Rebuild[]
@@ -57,9 +58,25 @@ function loadConfig(opts: {
             !opts.missing || String(file) !== resolve(shellRoot, opts.missing),
           statSync: () => ({ isFile: () => true }),
           readFileSync: (path: string, encoding: string) => {
-            if (String(path) === resolve(shellRoot, '../../node_modules/sharp/package.json')) {
+            if (
+              String(path).endsWith('embedding/metafile.json') ||
+              String(path).endsWith('embedding\\metafile.json')
+            ) {
               return JSON.stringify({
-                version: opts.rootSharpVersion ?? shellPackage.dependencies.sharp,
+                inputs:
+                  opts.forbiddenEmbedding === 'input' ? { 'node_modules/sharp/index.js': {} } : {},
+                outputs: {
+                  'runtime.mjs': {
+                    imports: opts.forbiddenEmbedding === 'import' ? [{ path: 'sharp' }] : [],
+                  },
+                },
+              })
+            }
+            if (
+              String(path) === resolve(shellRoot, '../../node_modules/@napi-rs/canvas/package.json')
+            ) {
+              return JSON.stringify({
+                version: opts.rootCanvasVersion ?? shellPackage.dependencies['@napi-rs/canvas'],
               })
             }
             if (String(path).endsWith('genoffice.cjs')) {
@@ -150,20 +167,39 @@ describe('packaged editor completeness', () => {
 })
 
 describe('packaged native image runtime', () => {
-  it('rejects a stale root sharp even when the shell dependency is patched', async () => {
-    const { config } = loadConfig({ baked: shellPackage.version, rootSharpVersion: '0.34.5' })
+  it.each(['input', 'import'] as const)(
+    'rejects a forbidden embedding %s before packaging',
+    async (forbiddenEmbedding) => {
+      const { config } = loadConfig({ baked: shellPackage.version, forbiddenEmbedding })
+      await expect(config.beforePack({ electronPlatformName: 'linux' })).rejects.toThrow(
+        /Forbidden.*image dependency/,
+      )
+    },
+  )
+
+  it('requires an inspected embedding bundle before packaging', async () => {
+    const { config } = loadConfig({
+      baked: shellPackage.version,
+      missing: 'out/embedding/metafile.json',
+    })
     await expect(config.beforePack({ electronPlatformName: 'linux' })).rejects.toThrow(
-      `packaged root sharp 0.34.5 does not match the shell pin ${shellPackage.dependencies.sharp}`,
+      /Build the native text embedding runtime/,
+    )
+  })
+  it('rejects a stale root canvas even when the shell dependency is patched', async () => {
+    const { config } = loadConfig({ baked: shellPackage.version, rootCanvasVersion: '0.34.5' })
+    await expect(config.beforePack({ electronPlatformName: 'linux' })).rejects.toThrow(
+      `packaged root canvas 0.34.5 does not match the shell pin ${shellPackage.dependencies['@napi-rs/canvas']}`,
     )
   })
 
-  it('rejects a missing root sharp manifest before packaging', async () => {
+  it('rejects a missing root canvas manifest before packaging', async () => {
     const { config } = loadConfig({
       baked: shellPackage.version,
-      missing: '../../node_modules/sharp/package.json',
+      missing: '../../node_modules/@napi-rs/canvas/package.json',
     })
     await expect(config.beforePack({ electronPlatformName: 'linux' })).rejects.toThrow(
-      /packaged root sharp missing/,
+      /extraResources source missing: .*canvas\/package.json/,
     )
   })
 })

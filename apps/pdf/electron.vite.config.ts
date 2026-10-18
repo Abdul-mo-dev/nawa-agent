@@ -35,6 +35,7 @@ export default defineConfig({
     ],
   },
   renderer: {
+    build: { minify: 'esbuild' },
     plugins: [
       react(),
       viteStaticCopy({

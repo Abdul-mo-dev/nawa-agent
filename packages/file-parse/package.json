@@ -7,7 +7,8 @@
   "description": "shared attachment parsing: PDF, Office and plain-text formats to text; images flagged for multimodal input",
   "exports": {
     ".": "./src/index.ts",
-    "./formats": "./src/formats.ts"
+    "./formats": "./src/formats.ts",
+    "./source-text": "./src/source-text.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

@@ -46,7 +46,9 @@ The interface and in-app help are available in English, Japanese, and Arabic.
   are generated onto the canvas and stay fully editable.
 - **Local by design.** Files open, edit, save and convert on your machine.
   PDF → Word / Excel / PowerPoint, Markdown → Word and HTML → Word all run
-  on-device. Only the AI calls leave the machine, to the provider you choose.
+  on-device. AI requests go to the provider you choose. Local HTML previews block
+  remote content until you enable it for that file; optional network features
+  can also contact their configured services.
 - **Find files by what they say.** The home screen searches the names,
   folders and full text of your `.docx`, `.xlsx`, `.pptx`, PDF, Markdown and
   HTML files from a local SQLite index, CJK included. Optionally, the top hits
@@ -568,6 +570,10 @@ key for Claude, OpenAI, Gemini, DeepSeek, Kimi, GLM, Qwen, Doubao, MiniMax,
 Grok, Mistral, OpenRouter, Requesty, Opper, Cheaper Inference, Atlas Cloud and OpenCode Zen/Go, plus any OpenAI-compatible
 endpoint — including local model servers. Search, image generation and
 image/video analysis take their own keys under Settings → AI Media & Search.
+
+Settings → **AI & Models** also manages local llama.cpp engines, verified GGUF
+downloads, saved launch profiles, and independent Start / Stop controls for chat
+and embedding servers. See [Local models](docs/local-models.md) for setup.
 
 </details>
 

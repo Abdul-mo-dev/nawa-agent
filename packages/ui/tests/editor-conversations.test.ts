@@ -133,7 +133,7 @@ it('regenerates from the question context, retains the original answer, and bloc
 
 it('deletes a dependent continuation and restores it with Undo', async () => {
   await act(async () => {
-    await actions(2).onDelete!()
+    await actions(3).onDelete!()
   })
   expect(visible.map((message) => message.text)).toEqual(['first question', 'first answer'])
   const undo = [...host.querySelectorAll('button')].find(
@@ -218,7 +218,7 @@ it('retains actual file-change receipts after deleting a continuation without re
     ),
   )
   await act(async () => {
-    await actions(0).onDelete!()
+    await actions(1).onDelete!()
   })
   expect(visible).toEqual([])
   const context = loop.restore.mock.calls.at(-1)![0] as Message[]
@@ -302,9 +302,12 @@ it('edits in the question bubble with actions below it and confirms dependent de
   act(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
   expect(first.querySelector('textarea')).toBeNull()
   expect(bubble.textContent).toBe('first question')
-  const remove = first.querySelector<HTMLButtonElement>('.chat-message-tools .chat-destructive')!
+  expect(first.querySelector('.chat-destructive')).toBeNull()
+  expect(first.querySelector('button[aria-label="Branch into new chat"]')).toBeNull()
+  const answer = host.querySelector('[data-message-index="1"]')!
+  const remove = answer.querySelector<HTMLButtonElement>('.chat-message-tools .chat-destructive')!
   act(() => remove.click())
-  expect(first.textContent).toContain('Remove 2 exchanges')
+  expect(answer.textContent).toContain('Remove 2 exchanges')
   expect(visible).toHaveLength(4)
 })
 
@@ -340,4 +343,33 @@ it('waits for the current reply to finish before showing its actions and keeps p
   expect(host.querySelector('[data-message-index="3"] .chat-message-tools')).toBeNull()
   act(() => root.render(createElement(Probe, { busy: false })))
   expect(host.querySelector('[data-message-index="3"] .chat-message-tools')).not.toBeNull()
+})
+
+it('switches file conversations from the visible selector and restores each transcript and draft', async () => {
+  await act(async () => {
+    await actions(1).onBranch!()
+  })
+  const saved = JSON.parse(localStorage.getItem('nawa.editor-conversations:v1:p:c')!)
+  const selector = host.querySelector<HTMLSelectElement>('.nawa-chat-conversation')!
+  expect(selector.options).toHaveLength(2)
+  expect(visible).toHaveLength(2)
+  act(() => {
+    selector.value = saved.chats[0].id
+    selector.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  expect(visible.map((message) => message.text)).toEqual(initial.map((message) => message.text))
+  expect(currentDraft).toBe('draft')
+  act(() => {
+    selector.value = saved.chats[1].id
+    selector.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  expect(visible).toHaveLength(2)
+  expect(currentDraft).toBe('')
+})
+
+it('keeps branch and delete available for a question without an answer', () => {
+  act(() => root.render(createElement(Probe, { key: 'unanswered', seed: initial.slice(0, 1) })))
+  const question = host.querySelector('.chat-question-row')!
+  expect(question.querySelector('button[aria-label="Branch into new chat"]')).not.toBeNull()
+  expect(question.querySelector('button[aria-label="Delete from here"]')).not.toBeNull()
 })

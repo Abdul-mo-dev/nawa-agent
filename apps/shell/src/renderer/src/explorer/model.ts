@@ -23,8 +23,14 @@ export interface Preferences {
   descending: boolean
 }
 export const DEFAULT_PREFERENCES: Preferences = {
-  navigationWidth: 240, inspectorWidth: 360, navigationVisible: true,
-  pane: 'ai', view: 'details', compact: false, sort: 'name', descending: false,
+  navigationWidth: 240,
+  inspectorWidth: 360,
+  navigationVisible: true,
+  pane: 'ai',
+  view: 'details',
+  compact: false,
+  sort: 'name',
+  descending: false,
 }
 export const PREFERENCES_KEY = 'nawa.explorer.preferences.v1'
 export const LAST_LOCATION_KEY = 'nawa.explorer.location.v1'
@@ -38,29 +44,59 @@ export function parsePreferences(raw: string | null): Preferences {
     if (!p || typeof p !== 'object') return { ...DEFAULT_PREFERENCES }
     const d = DEFAULT_PREFERENCES
     return {
-      navigationWidth: typeof p.navigationWidth === 'number' && Number.isFinite(p.navigationWidth) ? clamp(p.navigationWidth, 180, 380) : d.navigationWidth,
-      inspectorWidth: typeof p.inspectorWidth === 'number' && Number.isFinite(p.inspectorWidth) ? clamp(p.inspectorWidth, 300, 560) : d.inspectorWidth,
-      navigationVisible: typeof p.navigationVisible === 'boolean' ? p.navigationVisible : d.navigationVisible,
-      pane: p.pane === 'none' ? 'none' : p.pane === 'ragAnalytics' || p.pane === 'provider' || p.pane === 'ai' ? p.pane : p.pane === 'rag' || p.pane === 'analytics' ? 'ragAnalytics' : 'ai',
+      navigationWidth:
+        typeof p.navigationWidth === 'number' && Number.isFinite(p.navigationWidth)
+          ? clamp(p.navigationWidth, 180, 380)
+          : d.navigationWidth,
+      inspectorWidth:
+        typeof p.inspectorWidth === 'number' && Number.isFinite(p.inspectorWidth)
+          ? Math.max(p.inspectorWidth, 300)
+          : d.inspectorWidth,
+      navigationVisible:
+        typeof p.navigationVisible === 'boolean' ? p.navigationVisible : d.navigationVisible,
+      pane:
+        p.pane === 'none'
+          ? 'none'
+          : p.pane === 'ragAnalytics' || p.pane === 'provider' || p.pane === 'ai'
+            ? p.pane
+            : p.pane === 'rag' || p.pane === 'analytics'
+              ? 'ragAnalytics'
+              : 'ai',
       view: p.view === 'tiles' ? 'tiles' : 'details',
       compact: typeof p.compact === 'boolean' ? p.compact : d.compact,
-      sort: p.sort === 'name' || p.sort === 'modified' || p.sort === 'type' || p.sort === 'size' ? p.sort : d.sort,
+      sort:
+        p.sort === 'name' || p.sort === 'modified' || p.sort === 'type' || p.sort === 'size'
+          ? p.sort
+          : d.sort,
       descending: typeof p.descending === 'boolean' ? p.descending : d.descending,
     }
-  } catch { return { ...DEFAULT_PREFERENCES } }
+  } catch {
+    return { ...DEFAULT_PREFERENCES }
+  }
 }
-export function isWindowsPath(path: string): boolean { return /^[a-z]:[\\/]/i.test(path) || /^\\\\/.test(path) || /^\/\/[^/]/.test(path) }
+export function isWindowsPath(path: string): boolean {
+  return /^[a-z]:[\\/]/i.test(path) || /^\\\\/.test(path) || /^\/\/[^/]/.test(path)
+}
 export function pathKey(path: string): string {
   const windows = isWindowsPath(path)
   let value = path.replace(/\\/g, '/').replace(/\/+$/, '')
   if (!value && path.startsWith('/')) value = '/'
   return windows ? value.toLowerCase() : value
 }
-export function samePath(a: string, b: string): boolean { return pathKey(a) === pathKey(b) }
+export function samePath(a: string, b: string): boolean {
+  return pathKey(a) === pathKey(b)
+}
 export function isWithin(path: string, root: string): boolean {
-  const p = pathKey(path), r = pathKey(root)
+  const p = pathKey(path),
+    r = pathKey(root)
   // Reject dot segments in editable addresses; never pretend UI checks authorize access.
-  if (path.replace(/\\/g, '/').split('/').some(s => s === '.' || s === '..')) return false
+  if (
+    path
+      .replace(/\\/g, '/')
+      .split('/')
+      .some((s) => s === '.' || s === '..')
+  )
+    return false
   return p === r || p.startsWith(r === '/' ? '/' : r + '/')
 }
 export function parentPath(path: string): string {
@@ -71,9 +107,18 @@ export function parentPath(path: string): string {
   if (cut === 2 && /^[a-z]:/i.test(clean)) return clean.slice(0, 3)
   return clean.slice(0, cut)
 }
-export function basename(path: string): string { return path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || path }
+export function basename(path: string): string {
+  return (
+    path
+      .replace(/[\\/]+$/, '')
+      .split(/[\\/]/)
+      .pop() || path
+  )
+}
 export function rootFor(path: string, roots: readonly { path: string }[]): string | undefined {
-  return roots.filter(r => isWithin(path, r.path)).sort((a, b) => a.path.length - b.path.length)[0]?.path
+  return roots
+    .filter((r) => isWithin(path, r.path))
+    .sort((a, b) => a.path.length - b.path.length)[0]?.path
 }
 export function breadcrumbs(path: string, root: string): { name: string; path: string }[] {
   if (!isWithin(path, root)) return [{ name: basename(path), path }]
@@ -88,34 +133,63 @@ export function breadcrumbs(path: string, root: string): { name: string; path: s
   }
   return result
 }
-export function sortItems(items: readonly Item[], key: SortKey, descending: boolean, locale?: string): Item[] {
+export function sortItems(
+  items: readonly Item[],
+  key: SortKey,
+  descending: boolean,
+  locale?: string,
+): Item[] {
   const collator = new Intl.Collator(locale, { numeric: true, sensitivity: 'base' })
   return [...items].sort((a, b) => {
     if (a.kind !== b.kind) return a.kind === 'folder' ? -1 : 1
-    let value = key === 'modified' ? a.mtimeMs - b.mtimeMs : key === 'size' ? a.sizeBytes - b.sizeBytes
-      : key === 'type' ? collator.compare(a.ext, b.ext) : collator.compare(a.name, b.name)
+    let value =
+      key === 'modified'
+        ? a.mtimeMs - b.mtimeMs
+        : key === 'size'
+          ? a.sizeBytes - b.sizeBytes
+          : key === 'type'
+            ? collator.compare(a.ext, b.ext)
+            : collator.compare(a.name, b.name)
     if (!value) value = collator.compare(a.name, b.name) || a.path.localeCompare(b.path)
     return descending ? -value : value
   })
 }
-export function selectRange(order: readonly string[], anchor: string | null, target: string, previous: ReadonlySet<string>, additive: boolean): Set<string> {
-  const a = anchor ? order.indexOf(anchor) : -1, b = order.indexOf(target)
+export function selectRange(
+  order: readonly string[],
+  anchor: string | null,
+  target: string,
+  previous: ReadonlySet<string>,
+  additive: boolean,
+): Set<string> {
+  const a = anchor ? order.indexOf(anchor) : -1,
+    b = order.indexOf(target)
   const selected = new Set(additive ? previous : [])
   if (b < 0) return selected
   if (a < 0) selected.add(target)
   else for (const p of order.slice(Math.min(a, b), Math.max(a, b) + 1)) selected.add(p)
   return selected
 }
-export interface Navigation { entries: Location[]; index: number }
-export function locationKey(location: Location): string { return location.kind === 'folder' ? `folder:${pathKey(location.path)}` : location.kind }
+export interface Navigation {
+  entries: Location[]
+  index: number
+}
+export function locationKey(location: Location): string {
+  return location.kind === 'folder' ? `folder:${pathKey(location.path)}` : location.kind
+}
 export function visit(history: Navigation, location: Location): Navigation {
   if (locationKey(history.entries[history.index]) === locationKey(location)) return history
   const entries = [...history.entries.slice(0, history.index + 1), location].slice(-80)
   return { entries, index: entries.length - 1 }
 }
 export function validName(name: string): boolean {
-  return !!name.trim() && !/[<>:"/\\|?*\u0000-\u001f]/.test(name) && !/[. ]$/.test(name)
-    && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name) && name !== '.' && name !== '..'
+  return (
+    !!name.trim() &&
+    !/[<>:"/\\|?*\u0000-\u001f]/.test(name) &&
+    !/[. ]$/.test(name) &&
+    !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name) &&
+    name !== '.' &&
+    name !== '..'
+  )
 }
 export function sizeLabel(bytes: number, locale?: string): string {
   if (!Number.isFinite(bytes) || bytes < 0) return '—'

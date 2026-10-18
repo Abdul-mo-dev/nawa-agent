@@ -5,6 +5,7 @@ import {
 } from '@genoffice/file-formats'
 import { execSync, spawn } from 'node:child_process'
 import { registerWorkspaceIpc } from './workspace-ipc'
+import { registerLocalModelsIpc } from './local-models/ipc'
 import { PREVIEW_RE, registerFilePreviewIpc } from './file-preview'
 import { configureDirectoryNative } from './directory-actions/native-runtime'
 import { assertDirectoryStagePicker } from '../../../../packages/electron-utils/src/directory-stage'
@@ -1616,6 +1617,9 @@ function statEntries(paths: string[]): RecentEntry[] {
 }
 
 function registerHomeIpc(): void {
+  registerLocalModelsIpc(
+    (sender) => !shellWindow?.isDestroyed() && shellWindow?.webContents.id === sender.id,
+  )
   const workspaces = (workspaceAccess = registerWorkspaceIpc({
     initialRoot: defaultSaveDir,
     getWindow: () => shellWindow,

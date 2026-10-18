@@ -388,7 +388,7 @@ export function Ribbon({
               <span className="rb-big-icon">
                 <NawaMark size={26} />
               </span>
-              <span>Genspark AI</span>
+              <span>Nawa AI</span>
             </button>
             {aiPresets.map(({ kind, btn, prompt }) => (
               <button

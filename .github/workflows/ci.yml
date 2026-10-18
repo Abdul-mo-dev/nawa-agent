@@ -65,6 +65,12 @@ jobs:
       - name: Check dependency licenses
         run: npm run licenses
 
+      - name: Check dependency security
+        run: npm run check:security
+
+      - name: Test dependency audit policy
+        run: node --test tools/dependency-security-policy.test.mjs
+
       - name: Check Rust dependency licenses (xlsx-sidecar)
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { ChatConversationSelector } from '@genoffice/ui'
 import type { ConversationSummary } from '../../../shared/conversation-api'
 import '../directory-actions/approvals.css'
 import { useSidebarText } from '../explorer/sidebar-i18n'
@@ -56,23 +57,19 @@ export function HistoryDropdown({
   return (
     <div>
       <label className="nawa-history-dropdown">
-        <select
-          aria-label={s('Directory conversation history')}
+        <ChatConversationSelector
+          label={s('Directory conversation history')}
           title={selected ? rowLabel(selected) : title}
           value={currentId}
           disabled={disabled || (loading && !rows.length)}
-          onChange={(event) => {
-            const id = event.target.value
+          onSelect={(id) => {
             if (id !== currentId) void onOpen(id).catch((cause) => setError(String(cause)))
           }}
-        >
-          {!rows.some((row) => row.id === currentId) && <option value={currentId}>{title}</option>}
-          {rows.map((row) => (
-            <option key={row.id} value={row.id}>
-              {rowLabel(row)}
-            </option>
-          ))}
-        </select>
+          options={[
+            ...(!rows.some((row) => row.id === currentId) ? [{ id: currentId, title }] : []),
+            ...rows.map((row) => ({ id: row.id, title: row.title })),
+          ]}
+        />
       </label>
       {error && (
         <div className="ws-chat-notice" role="alert">

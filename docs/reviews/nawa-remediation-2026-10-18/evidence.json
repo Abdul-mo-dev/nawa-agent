@@ -1,0 +1,259 @@
+{
+  "recordedAt": "2026-10-18T08:41:02.7150089Z",
+  "platform": "Windows x64",
+  "findings": ["R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8", "R9", "R10", "R11", "R12", "R13"],
+  "checks": {
+    "productionBuild": "passed; all editors, CLI, spreadsheet sidecar and shell",
+    "rootTypecheck": "passed",
+    "rootLint": {
+      "existingWarnings": 21,
+      "errors": 0
+    },
+    "latestShellTypecheck": "passed",
+    "latestChatLint": "passed",
+    "formatting": "passed",
+    "diffWhitespace": "passed",
+    "semanticThemeColors": "passed",
+    "workspaceBoundaries": "passed",
+    "threeLanguageManual": "passed",
+    "rendererBudgets": "passed",
+    "productionLicenses": "passed; permissive-only rule unchanged",
+    "dependencySecurity": {
+      "mitigationReviewDeadline": "2026-11-17",
+      "passed": true,
+      "remainingReviewedAdvisories": 3
+    }
+  },
+  "unitRuns": [
+    {
+      "passed": 296,
+      "subsequentRegression": "closed-view save passed",
+      "skipped": 1,
+      "workspace": "electron-utils"
+    },
+    {
+      "workspace": "ui",
+      "passed": 183
+    },
+    {
+      "workspace": "agent-core",
+      "passed": 189
+    },
+    {
+      "passed": 1246,
+      "skipped": 17,
+      "workspace": "pptx-engine"
+    },
+    {
+      "passed": 1418,
+      "skipped": 14,
+      "workspace": "slides"
+    },
+    {
+      "passed": 326,
+      "skipped": 1,
+      "workspace": "html"
+    },
+    {
+      "note": "includes corrected source-read setup in close-save regression",
+      "skipped": 2,
+      "distinctPassed": 755,
+      "workspace": "markdown"
+    },
+    {
+      "passed": 1279,
+      "skipped": 4,
+      "subsequentRegressions": [
+        "animated GIF",
+        "three packaging guards",
+        "two control timeouts",
+        "interrupted history"
+      ],
+      "workspace": "shell"
+    },
+    {
+      "passed": 12,
+      "scope": "preview-history and language focused run"
+    },
+    {
+      "passed": 9,
+      "scope": "CLI control"
+    }
+  ],
+  "nativeReliability": {
+    "sourcePassed": 8,
+    "refreshedFileContextPassed": true,
+    "previewChatVisionOcrAndLanguageScenariosPassed": 2,
+    "installedPassed": 8
+  },
+  "productionImageRuntime": {
+    "embeddingParity": {
+      "vectorTolerance": 1e-5,
+      "languages": ["English", "Arabic", "Japanese"],
+      "passed": true,
+      "tokenIdsIdentical": true,
+      "dimensions": 384
+    },
+    "tiffDecoder": "utif2 4.1.0",
+    "sharpOrLibvipsShipped": false,
+    "imageBackend": "@napi-rs/canvas 1.0.3",
+    "developmentOnlyNote": "Upstream Transformers.js still has a transitive Sharp development/build-test dependency; the verified private text runtime excludes it."
+  },
+  "rendererJavaScript": {
+    "note": "Raw built JavaScript; not an installer size or startup measurement.",
+    "apps": {
+      "shell": {
+        "entryBytes": 1018989,
+        "totalBytes": 1461854
+      },
+      "docs": {
+        "entryBytes": 3317603,
+        "totalBytes": 4435180
+      },
+      "sheets": {
+        "entryBytes": 9329528,
+        "totalBytes": 14674393
+      },
+      "slides": {
+        "entryBytes": 2051100,
+        "totalBytes": 2051100
+      },
+      "pdf": {
+        "entryBytes": 1302744,
+        "totalBytes": 1302744
+      },
+      "markdown": {
+        "entryBytes": 2504297,
+        "totalBytes": 6270126
+      },
+      "html": {
+        "entryBytes": 1282609,
+        "totalBytes": 1282609
+      }
+    },
+    "beforeBytes": 56844911.0,
+    "afterBytes": 31478006.0,
+    "reductionPercent": 44.62
+  },
+  "installer": {
+    "testedAt": "2026-10-18T08:35:16.926737Z",
+    "installed": true,
+    "associations": 71,
+    "upgraded": true,
+    "uninstalled": true,
+    "defaultsRestored": true,
+    "pathRestored": true,
+    "passed": true,
+    "extensionDefaultsChangedDuringInstall": 0,
+    "reliabilityPassed": true,
+    "uninstallRegistryRemoved": true,
+    "extensionDefaultsDanglingAfterUninstall": 0,
+    "installerPathCleanupPassed": true,
+    "protectedRegistryValuesPreserved": true,
+    "installDirectoryRemoved": true
+  },
+  "installedRuntime": {
+    "cli": [
+      {
+        "command": "--version",
+        "passed": true
+      },
+      {
+        "command": "docs read",
+        "passed": true
+      },
+      {
+        "command": "sheet read",
+        "passed": true
+      }
+    ],
+    "cases": [
+      {
+        "sample": "macro-office-chat/sample.docm",
+        "readyMs": 2004,
+        "originalUnchanged": true,
+        "passed": true
+      },
+      {
+        "sample": "macro-office-chat/sample.pptm",
+        "readyMs": 1734,
+        "originalUnchanged": true,
+        "passed": true
+      },
+      {
+        "sample": "xlsm-chat/sample.xlsm",
+        "readyMs": 2325,
+        "originalUnchanged": true,
+        "passed": true
+      },
+      {
+        "sample": "xltm-chat/sample.xltm",
+        "readyMs": 1990,
+        "originalUnchanged": true,
+        "passed": true
+      },
+      {
+        "sample": "legacy-office/document-sample.doc",
+        "readyMs": 18892,
+        "originalUnchanged": true,
+        "passed": true
+      },
+      {
+        "sample": "legacy-office/presentation-sample.ppt",
+        "readyMs": 13539,
+        "originalUnchanged": true,
+        "passed": true
+      },
+      {
+        "sample": "opendocument/document-sample.odt",
+        "readyMs": 11683,
+        "originalUnchanged": true,
+        "passed": true
+      },
+      {
+        "sample": "opendocument/presentation-sample.odp",
+        "readyMs": 12284,
+        "originalUnchanged": true,
+        "passed": true
+      },
+      {
+        "sample": "spreadsheet-chat/formulas.ods",
+        "readyMs": 1419,
+        "originalUnchanged": true,
+        "passed": true
+      },
+      {
+        "sample": "spreadsheet-chat/sheets.xlsb",
+        "readyMs": 1581,
+        "originalUnchanged": true,
+        "passed": true
+      },
+      {
+        "sample": "spreadsheet-chat/table.tsv",
+        "readyMs": 1365,
+        "originalUnchanged": true,
+        "passed": true
+      }
+    ],
+    "passed": true,
+    "payload": [
+      "No Sharp/libvips package in app.asar or external resources",
+      "Shell main SHA-256 matches current build",
+      "Shell renderer HTML, JavaScript and CSS match current build",
+      "docs preload and renderer match current build",
+      "sheets preload and renderer match current build",
+      "slides preload and renderer match current build",
+      "pdf preload and renderer match current build",
+      "markdown preload and renderer match current build",
+      "html preload and renderer match current build",
+      "native/xlsx-sidecar.exe SHA-256 matches source",
+      "cli/genoffice.cjs SHA-256 matches source",
+      "wasm/pdfium.wasm SHA-256 matches source"
+    ]
+  },
+  "limitations": [
+    "Unsigned isolated installer; no production publishing",
+    "macOS/Linux releases not validated",
+    "Screen-reader usability and exhaustive Office visual parity not validated"
+  ]
+}

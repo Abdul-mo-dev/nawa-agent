@@ -26,6 +26,7 @@ import type { NativeStage } from './manager'
 import { SOURCE_TEXT_EXTENSIONS, extensionPattern } from '@genoffice/file-formats'
 import { openTextStage } from './text-stage'
 import { samePath } from './file-safety'
+import { registerSessionNetworkPolicy } from '@genoffice/electron-utils/session-network-policy'
 
 interface Options {
   tabs(): TabManager | null
@@ -40,17 +41,12 @@ function guardStageRendererNetwork(contents: WebContents): void {
   const session = contents.session
   if (!session || guardedSessions.has(session)) return
   guardedSessions.add(session)
-  session.webRequest.onBeforeRequest(
-    { urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] },
-    (details, callback) => {
-      const sender =
-        details.webContents ??
-        (details.webContentsId ? webContents.fromId(details.webContentsId) : undefined)
-      callback({
-        cancel: !!sender && !directoryStageNetworkAllowed(sender, details.url, sender.getURL()),
-      })
-    },
-  )
+  registerSessionNetworkPolicy(session, 'directory-stage', (details) => {
+    const sender =
+      details.webContents ??
+      (details.webContentsId ? webContents.fromId(details.webContentsId) : undefined)
+    return !sender || directoryStageNetworkAllowed(sender, details.url, sender.getURL())
+  })
 }
 const requests = new Map<
   string,

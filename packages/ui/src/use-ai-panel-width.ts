@@ -1,18 +1,18 @@
-import { useEffect, useRef, useState } from 'react'
-import type { PointerEvent as ReactPointerEvent, RefObject } from 'react'
-import { aiPanelWidthAtPointer } from './ai-panel-prefs-store'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import type { PointerEvent as ReactPointerEvent, RefObject, HTMLAttributes } from 'react'
+import { useAiPanelPrefs } from './ai-panel-prefs-store'
 
 const DEFAULT_WIDTH = 360
 const MIN_WIDTH = 280
-const MAX_WIDTH = 720
+const MIN_CONTENT_WIDTH = 240
 
 function clampPreferredWidth(width: number): number {
-  return Math.min(Math.max(width, MIN_WIDTH), MAX_WIDTH)
+  return Math.max(width, MIN_WIDTH)
 }
 
 /** Keep the preferred width even while a temporarily narrow viewport displays less. */
 export function clampAiPanelWidth(width: number, viewportWidth: number): number {
-  const max = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.round(viewportWidth * 0.6)))
+  const max = Math.max(MIN_WIDTH, Math.floor(viewportWidth - MIN_CONTENT_WIDTH))
   return Math.min(Math.max(width, MIN_WIDTH), max)
 }
 
@@ -23,13 +23,24 @@ function loadPreferredWidth(storageKey?: string): number {
 }
 
 export interface AiPanelWidth {
+  panelId: string
   asideRef: RefObject<HTMLElement | null>
   resizing: boolean
   startResize: (event: ReactPointerEvent<HTMLDivElement>) => void
+  resizerProps: Pick<
+    HTMLAttributes<HTMLDivElement>,
+    'tabIndex' | 'onKeyDown' | 'aria-valuenow' | 'aria-valuemin' | 'aria-valuemax'
+  >
 }
 
 /** Shared dock width, pointer drag, and optional per-app persistence. */
-export function useAiPanelWidth(storageKey?: string, open?: boolean): AiPanelWidth {
+export function useAiPanelWidth(
+  storageKey?: string,
+  open?: boolean,
+  layout: 'dock' | 'sheet-grid' = 'dock',
+): AiPanelWidth {
+  const { side } = useAiPanelPrefs()
+  const panelId = useId()
   const [preferredWidth] = useState(() => loadPreferredWidth(storageKey))
   const preferredWidthRef = useRef(preferredWidth)
   const [panelWidth, setPanelWidth] = useState(() =>
@@ -38,30 +49,54 @@ export function useAiPanelWidth(storageKey?: string, open?: boolean): AiPanelWid
   const [resizing, setResizing] = useState(false)
   const asideRef = useRef<HTMLElement>(null)
   const resizeCleanupRef = useRef<(() => void) | null>(null)
+  const hostSelector = layout === 'sheet-grid' ? '.sheet-body' : '.ai-dock'
+  const widthVariable = layout === 'sheet-grid' ? '--copilot-width' : '--ai-panel-width'
+  const availableWidth = useCallback(() => {
+    const host = asideRef.current?.closest(hostSelector)
+    return (
+      (layout === 'sheet-grid' ? host?.clientWidth : host?.parentElement?.clientWidth) ||
+      window.innerWidth
+    )
+  }, [hostSelector, layout])
 
   useEffect(() => {
-    const dock = asideRef.current?.closest('.ai-dock') as HTMLElement | null
-    dock?.style.setProperty('--ai-panel-width', `${panelWidth}px`)
-  }, [panelWidth, open])
+    const dock = asideRef.current?.closest(hostSelector) as HTMLElement | null
+    dock?.style.setProperty(widthVariable, `${panelWidth}px`)
+  }, [panelWidth, open, hostSelector, widthVariable])
 
   useEffect(() => {
     const onResize = (): void =>
-      setPanelWidth(clampAiPanelWidth(preferredWidthRef.current, window.innerWidth))
+      setPanelWidth(clampAiPanelWidth(preferredWidthRef.current, availableWidth()))
+    onResize()
     window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-  }, [])
+    const host = asideRef.current?.closest(hostSelector)
+    const parent = layout === 'sheet-grid' ? host : host?.parentElement
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(onResize)
+    if (parent) observer?.observe(parent)
+    return () => {
+      window.removeEventListener('resize', onResize)
+      observer?.disconnect()
+    }
+  }, [open, availableWidth, hostSelector, layout])
 
   useEffect(() => () => resizeCleanupRef.current?.(), [])
 
   const startResize = (event: ReactPointerEvent<HTMLDivElement>): void => {
     event.preventDefault()
     const resizer = event.currentTarget
+    const dock =
+      layout === 'sheet-grid'
+        ? asideRef.current
+        : (asideRef.current?.closest(hostSelector) ?? asideRef.current)
+    const startWidth = dock?.getBoundingClientRect().width || panelWidth
+    const startX = event.clientX
     setResizing(true)
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
 
     const onMove = (pointer: PointerEvent): void => {
-      const width = clampAiPanelWidth(aiPanelWidthAtPointer(pointer.clientX), window.innerWidth)
+      const delta = (pointer.clientX - startX) * (side === 'right' ? -1 : 1)
+      const width = clampAiPanelWidth(startWidth + delta, availableWidth())
       preferredWidthRef.current = width
       setPanelWidth(width)
     }
@@ -90,5 +125,25 @@ export function useAiPanelWidth(storageKey?: string, open?: boolean): AiPanelWid
     resizer.setPointerCapture(event.pointerId)
   }
 
-  return { asideRef, resizing, startResize }
+  const resizerProps: AiPanelWidth['resizerProps'] = {
+    tabIndex: 0,
+    'aria-valuenow': Math.round(panelWidth),
+    'aria-valuemin': MIN_WIDTH,
+    'aria-valuemax': clampAiPanelWidth(availableWidth(), availableWidth()),
+    onKeyDown(event) {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+      event.preventDefault()
+      const width =
+        event.key === 'Home'
+          ? MIN_WIDTH
+          : event.key === 'End'
+            ? availableWidth()
+            : panelWidth + (event.key === 'ArrowRight' ? 10 : -10) * (side === 'right' ? -1 : 1)
+      const clamped = clampAiPanelWidth(width, availableWidth())
+      preferredWidthRef.current = clamped
+      setPanelWidth(clamped)
+      if (storageKey) localStorage.setItem(storageKey, String(Math.round(clamped)))
+    },
+  }
+  return { panelId, asideRef, resizing, startResize, resizerProps }
 }

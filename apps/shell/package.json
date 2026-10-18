@@ -9,15 +9,17 @@
   "main": "out/main/index.js",
   "desktopName": "nawa.desktop",
   "scripts": {
+    "predev": "node ../../tools/build-embedding-runtime.mjs",
     "dev": "electron-vite dev --watch",
-    "build": "electron-vite build",
+    "build": "node ../../tools/build-embedding-runtime.mjs && electron-vite build",
     "notices": "node ../../tools/gen-third-party-notices.mjs",
+    "pretest": "node ../../tools/build-embedding-runtime.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "start": "electron-vite build && electron .",
-    "dist:mac": "npm run notices && electron-vite build && electron-builder --mac",
-    "dist:win": "npm run notices && electron-vite build && electron-builder --win",
-    "dist:linux": "npm run notices && electron-vite build && electron-builder --linux"
+    "start": "npm run build && electron .",
+    "dist:mac": "npm run notices && npm run build && electron-builder --mac",
+    "dist:win": "npm run notices && npm run build && electron-builder --win",
+    "dist:linux": "npm run notices && npm run build && electron-builder --linux"
   },
   "devDependencies": {
     "@genoffice/file-formats": "*",
@@ -53,7 +55,10 @@
   },
   "author": "GenOffice",
   "dependencies": {
-    "@huggingface/transformers": "3.8.1",
-    "sharp": "0.35.5"
+    "@napi-rs/canvas": "1.0.3",
+    "image-size": "2.0.3",
+    "utif2": "4.1.0",
+    "onnxruntime-node": "1.21.0",
+    "onnxruntime-common": "1.21.0"
   }
 }

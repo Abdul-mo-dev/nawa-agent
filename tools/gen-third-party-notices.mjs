@@ -44,7 +44,13 @@ const CODE_EXT = /\.(ts|tsx|js|jsx|mjs|cjs)$/
 const SKIP_DIR = /^(node_modules|out|dist|release|tests|__tests__|target)$/
 
 /** Runtime that is always present but never imported by specifier */
-const IMPLICIT = ['electron']
+// The text embedding bundle is built separately from this source scan. Its
+// Apache-licensed upstream code ships, while its image backend is excluded.
+const IMPLICIT = ['electron', '@huggingface/transformers']
+execFileSync(process.execPath, [join(ROOT, 'tools/build-embedding-runtime.mjs')], {
+  cwd: ROOT,
+  stdio: 'inherit',
+})
 
 /**
  * Packages copied into the installer verbatim by electron-builder rather than
@@ -171,6 +177,9 @@ function closure(seed) {
     const pkg = manifest(dir)
     seen.set(name, { dir, pkg })
     for (const dep of Object.keys(pkg.dependencies ?? {})) {
+      // The build above verifies that neither Sharp nor libvips enters the
+      // text-only output. Nawa uses a separate permissive image runtime.
+      if (name === '@huggingface/transformers' && dep === 'sharp') continue
       if (!seen.has(dep)) queue.push({ name: dep, optional: false })
     }
     for (const dep of Object.keys(pkg.optionalDependencies ?? {})) {

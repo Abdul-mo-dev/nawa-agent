@@ -6,7 +6,9 @@ import { Ribbon } from '../src/renderer/components/Ribbon'
 // The assistant is unrelated to quick-access file actions.
 vi.mock('../src/renderer/ai/AiPanel', () => ({ NawaMark: () => null }))
 
-beforeEach(() => vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true))
+beforeEach(() => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+})
 const cleanups: Array<() => void> = []
 afterEach(() => {
   cleanups.splice(0).forEach((cleanup) => cleanup())
@@ -51,7 +53,7 @@ function renderRibbon(disabled = false) {
 
 function saveAsButton(container: HTMLElement): HTMLButtonElement {
   const button = container.querySelector<HTMLButtonElement>(
-    '.ribbon-tabs button[aria-label="\u53e6\u5b58\u4e3a\u2026"]',
+    '.ribbon-tabs button[aria-label="Save As…"]',
   )
   expect(button, 'Save As must be available in the top-left quick-access row').not.toBeNull()
   return button!
@@ -61,7 +63,7 @@ describe('Save As quick-access button', () => {
   it('can save a copy of an unchanged document without triggering normal save', () => {
     const { container, onSave, onSaveAs } = renderRibbon()
     const button = saveAsButton(container)
-    expect(button.textContent).toBe('\u53e6\u5b58\u4e3a\u2026')
+    expect(button.textContent).toBe('Save As…')
     expect(button.disabled).toBe(false)
     act(() => button.click())
     expect(onSaveAs).toHaveBeenCalledOnce()

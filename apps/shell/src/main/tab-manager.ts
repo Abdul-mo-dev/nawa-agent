@@ -52,6 +52,7 @@ import {
   slidesIsDirty,
 } from '../../../slides/src/main/slides-main'
 import { rendererUrl, safeExternalUrl } from '@genoffice/electron-utils'
+import { disposeDocumentContents } from './editor-view-lifecycle'
 import type { DocumentTabKind, OpenDocumentTab, TabKind, TabSummary } from '../shared/tabs-api'
 
 /** a tab lifted out of the strip with its live view: what "Open in New Window",
@@ -754,13 +755,10 @@ export class TabManager {
       removed.view.setVisible(false)
       this.shellWindow.contentView.removeChildView(removed.view)
       if (removed.kind === 'docs') {
-        // webContents.close()/.destroy() on a closed docs tab wedges Electron's whole
-        // UI thread in a native modal run loop (reproduced consistently; survives
-        // close() vs destroy(), teardown ordering, deferring, and disabling
-        // accessibility support — looks like an upstream WebContentsView/Chromium
-        // issue, not something fixable from here). Detaching without destroying
-        // avoids the freeze; the orphaned webContents is reclaimed when the app quits.
         teardownDocsRenderer(removed.view.webContents)
+        void disposeDocumentContents(removed.view.webContents).catch((cause) => {
+          console.warn('[tabs] could not unload a closed document view:', cause)
+        })
       } else {
         removed.view.webContents.close()
       }

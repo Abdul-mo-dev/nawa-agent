@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { expect, it } from 'vitest'
-import sharp from 'sharp'
+import { loadImage, createCanvas } from '@napi-rs/canvas'
 import { ocrImage } from '../src/main/rag/ocr'
 
 const fixture = resolve(__dirname, '../../../packages/pdf2docx/ocr-helper/fixtures/smoke-en.png')
@@ -21,7 +21,10 @@ it.skipIf(process.platform !== 'win32' || !existsSync(helper))(
   async () => {
     const source = readFileSync(fixture)
     for (const format of ['webp', 'gif'] as const) {
-      const image = await sharp(source).toFormat(format).toBuffer()
+      const decoded = await loadImage(source)
+      const canvas = createCanvas(decoded.width, decoded.height)
+      canvas.getContext('2d').drawImage(decoded, 0, 0)
+      const image = await canvas.encode(format)
       const text = await ocrImage(image, new AbortController().signal)
       expect(text).toContain('OCR Smoke Fixture')
     }

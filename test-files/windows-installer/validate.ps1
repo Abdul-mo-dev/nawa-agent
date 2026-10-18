@@ -1,4 +1,4 @@
-param([Parameter(Mandatory = $true)][string]$RunDirectory, [switch]$CleanupOnly)
+param([Parameter(Mandatory = $true)][string]$RunDirectory, [switch]$CleanupOnly, [switch]$Reliability)
 $ErrorActionPreference = 'Stop'
 $workspace = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $runRoot = [IO.Path]::GetFullPath($RunDirectory)
@@ -117,6 +117,14 @@ try {
   Assert-Installed
   $report.upgraded = $true
   $env:NAWA_TEST_EXECUTABLE = Join-Path $installRoot $manifest.executable
+  if ($Reliability) {
+    Push-Location $workspace
+    try {
+      & node (Join-Path $workspace 'node_modules/@playwright/test/cli.js') test --config e2e/playwright.config.ts reliability.spec.ts *> (Join-Path $runRoot 'reliability.log')
+      if ($LASTEXITCODE -ne 0) { throw 'Installed reliability checks failed; see reliability.log.' }
+      $report.reliabilityPassed = $true
+    } finally { Pop-Location }
+  }
   foreach ($driver in @('chat', 'ui')) {
     & node (Join-Path $workspace "test-files/opendocument/$driver-smoke.mjs") *> (Join-Path $runRoot "$driver.log")
     if ($LASTEXITCODE -ne 0) { throw "Packaged OpenDocument $driver checks failed." }

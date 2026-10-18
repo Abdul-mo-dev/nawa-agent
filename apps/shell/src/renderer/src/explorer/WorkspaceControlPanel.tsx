@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type Ref } from 'react'
-import { AiPanelSideButton } from '@genoffice/ui'
+import { AiPanelSideButton, ChatPanelHeader } from '@genoffice/ui'
 import { useI18n } from '../locale'
 import {
   PanelActivityContext,
@@ -8,7 +8,7 @@ import {
   type PanelActivity,
 } from './panel-state'
 import { useSidebarText } from './sidebar-i18n'
-import { Icon } from './Icons'
+import { Icon, NawaIcon } from './Icons'
 import { ChatHeaderTarget } from './chat-header'
 import { IndexSelectedButton, type SelectedFileActions } from './IndexSelectedButton'
 import './workspace-control-panel.css'
@@ -130,11 +130,19 @@ export function WorkspaceControlPanel(props: Props) {
         aria-modal={drawer && visible ? true : undefined}
         aria-label={s('Chat')}
       >
-        <div className="nawa-workspace-tabs-header">
-          <div className="nawa-workspace-title">
-            <strong>{s('Chat')}</strong>
-          </div>
-          <div ref={setNewChatTarget} className="nawa-workspace-chat-actions" />
+        <ChatPanelHeader
+          lang={lang}
+          brand={<NawaIcon size={22} />}
+          newChatControl={<div ref={setNewChatTarget} className="nawa-workspace-chat-actions" />}
+          onCollapse={props.onClose}
+          collapseLabel={props.closeLabel}
+        >
+          <AiPanelSideButton
+            lang={lang}
+            onMove={(side) => window.aiOffice.setAiPanelPrefs({ side })}
+          />
+        </ChatPanelHeader>
+        <div className="nawa-chat-context-toolbar" dir="ltr">
           <div className="nawa-workspace-index">
             <PanelVisibility.Provider value={visible}>
               <IndexSelectedButton
@@ -147,11 +155,6 @@ export function WorkspaceControlPanel(props: Props) {
             </PanelVisibility.Provider>
           </div>
           <div ref={setOptionsTarget} className="nawa-workspace-chat-options" />
-          <AiPanelSideButton
-            lang={lang}
-            className="ex-tool"
-            onMove={(side) => window.aiOffice.setAiPanelPrefs({ side })}
-          />
           <button
             type="button"
             className="ex-tool nawa-workspace-settings"
@@ -169,25 +172,6 @@ export function WorkspaceControlPanel(props: Props) {
             onClick={() => setExpanded((value) => !value)}
           >
             {expanded ? '↙' : '↗'}
-          </button>
-          <button
-            className="ex-tool nawa-workspace-close"
-            type="button"
-            aria-label={props.closeLabel}
-            title={props.closeLabel}
-            onClick={props.onClose}
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 16 16"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              aria-hidden="true"
-            >
-              <path d="m4 4 8 8M12 4l-8 8" />
-            </svg>
           </button>
         </div>
         <div className="nawa-workspace-body">

@@ -147,10 +147,11 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
   const drawer = windowWidth < 1100
   const navigationVisible = prefs.navigationVisible && windowWidth >= 540
   const effectiveNavWidth = Math.min(prefs.navigationWidth, Math.max(180, windowWidth - 400))
-  const effectiveInspectorWidth = Math.min(
-    prefs.inspectorWidth,
-    Math.max(300, windowWidth - (navigationVisible ? effectiveNavWidth : 0) - 385),
+  const maxInspectorWidth = Math.max(
+    300,
+    windowWidth - (navigationVisible ? effectiveNavWidth : 0) - 250,
   )
+  const effectiveInspectorWidth = Math.min(prefs.inspectorWidth, maxInspectorWidth)
   const title = folder ? basename(folder) : t(location.kind as 'home' | 'recent' | 'starred')
   const suspended = !!menu || !!dialog || settingsOpen || !!fileTools || !!fileDetails
   const statusFiles = (fileDetails ?? menu?.items ?? [])
@@ -1446,10 +1447,7 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
             className="ex-assistant-splitter"
             value={effectiveInspectorWidth}
             min={300}
-            max={Math.min(
-              560,
-              Math.max(300, windowWidth - (navigationVisible ? prefs.navigationWidth : 0) - 380),
-            )}
+            max={maxInspectorWidth}
             reverse={aiPanelSide === 'right'}
             onChange={(inspectorWidth) => changePrefs({ inspectorWidth })}
           />

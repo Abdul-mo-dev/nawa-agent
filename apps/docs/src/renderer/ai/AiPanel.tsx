@@ -1,3 +1,5 @@
+import { AiPanelResizer } from '@genoffice/ui'
+import { ChatPanelHeader } from '@genoffice/ui'
 import { useEditorConversations } from '@genoffice/ui'
 import {
   registerDirectoryEditor,
@@ -67,9 +69,6 @@ import { useI18n, t as tModule, aiLangDirective, type StringKey } from '../i18n/
 import { createFileNav, Markdown } from '@genoffice/ui'
 import { AiComposer, AiScopeQuote, AiTypingIndicator, type AiScopeQuoteData } from '@genoffice/ui'
 import { NawaMark } from '../components/icons'
-import sendEnterOn from '../assets/send-enter-on.png'
-import sendEnterOff from '../assets/send-enter-off.png'
-import sendStop from '../assets/send-stop.png'
 import attachIcon from '../assets/attach-icon.png'
 import filePdfIcon from '../assets/file-pdf.png'
 import fileWordIcon from '../assets/file-word.png'
@@ -80,7 +79,6 @@ import fileVideoIcon from '../assets/file-video.png'
 import fileVoiceIcon from '../assets/file-voice.png'
 import fileDocumentIcon from '../assets/file-document.png'
 import fileGeneralIcon from '../assets/file-general.png'
-import { IconNewChat, IconSidebarCollapse } from '../components/icons'
 
 interface ToolActivity {
   name: string
@@ -457,7 +455,8 @@ export function AiPanel({
     attachScrollFadeRef.current = window.setTimeout(() => el.classList.remove('is-scrolling'), 800)
   }
   const [dragOver, setDragOver] = useState(false)
-  const { asideRef, resizing, startResize } = useAiPanelWidth(PANEL_WIDTH_KEY, open)
+  const panelWidth = useAiPanelWidth(PANEL_WIDTH_KEY, open)
+  const { asideRef, resizing } = panelWidth
 
   // a pending keep/discard must not outlive the panel: settle it as discard
   useEffect(
@@ -1329,10 +1328,11 @@ export function AiPanel({
 
   return (
     <aside
+      id={panelWidth.panelId}
       ref={asideRef}
       style={{ width: '100%' }}
       dir={isRtl ? 'rtl' : undefined}
-      className={`ai-panel${dragOver ? ' ai-panel-dragover' : ''}${resizing ? ' ai-panel-resizing' : ''}`}
+      className={`ai-panel nawa-chat-panel${dragOver ? ' ai-panel-dragover' : ''}${resizing ? ' ai-panel-resizing' : ''}`}
       onDragOver={(e) => {
         if (e.dataTransfer.types.includes('Files')) {
           e.preventDefault()
@@ -1345,46 +1345,20 @@ export function AiPanel({
       }}
       onDrop={onDrop}
     >
-      <div
-        className="ai-panel-resizer"
-        onPointerDown={startResize}
-        role="separator"
-        aria-orientation="vertical"
-        aria-label={t('aiPanelTitle')}
-      />
-      <div className="ai-panel-header">
-        <span className="ai-panel-title">
-          <NawaMark size={22} />
-          {t('aiPanelTitle')}
-        </span>
-        <div className="ai-panel-header-actions">
-          <AiPanelSideButton
-            lang={lang}
-            onMove={(side) => window.desktop.setAiPanelPrefs({ side })}
-          />
-          {(chat.length > 0 || historicChat.length > 0) && (
-            <button
-              className="ai-header-btn"
-              onClick={newChat}
-              data-tip={t('aiNewChatTitle')}
-              aria-label={t('aiNewChatTitle')}
-              disabled={busy}
-            >
-              <IconNewChat size={16} />
-            </button>
-          )}
-          {onCollapse && (
-            <button
-              className="ai-header-btn ai-panel-collapse"
-              onClick={onCollapse}
-              data-tip={t('aiCollapseTitle')}
-              aria-label={t('aiCollapseTitle')}
-            >
-              <IconSidebarCollapse size={15} />
-            </button>
-          )}
-        </div>
-      </div>
+      <AiPanelResizer panel={panelWidth} lang={lang} />
+      <ChatPanelHeader
+        lang={lang}
+        brand={<NawaMark size={22} />}
+        onNewChat={newChat}
+        disabled={busy}
+        onCollapse={onCollapse}
+        collapseLabel={t('aiCollapseTitle')}
+      >
+        <AiPanelSideButton
+          lang={lang}
+          onMove={(side) => window.desktop.setAiPanelPrefs({ side })}
+        />
+      </ChatPanelHeader>
 
       {chatManagement.toolbar}
       <div ref={logRef} className="ai-chat" onScroll={onLogScroll}>
@@ -1683,9 +1657,7 @@ export function AiPanel({
           sendLabel={t('aiSend')}
           stopLabel={t('aiStop')}
           iconOnly
-          sendIconEnabled={<img src={sendEnterOn} alt="" aria-hidden />}
-          sendIconDisabled={<img src={sendEnterOff} alt="" aria-hidden />}
-          stopIcon={<img src={sendStop} alt="" aria-hidden />}
+
           textareaRef={inputRef}
           onChange={setInput}
           onSend={run}

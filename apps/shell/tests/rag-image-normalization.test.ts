@@ -3,7 +3,10 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import sharp from 'sharp'
+import { createCanvas } from '@napi-rs/canvas'
+import { PNG } from 'pngjs'
+import { pathToFileURL } from 'node:url'
+import { resolve } from 'node:path'
 import { ocrImage } from '../src/main/rag/ocr'
 
 const recognition = vi.hoisted(() => vi.fn())
@@ -31,42 +34,36 @@ afterEach(() => {
 it.each(['png', 'jpeg', 'webp', 'gif'] as const)(
   'normalizes %s image data to PNG before OCR',
   async (format) => {
-    const source = await sharp({
-      create: { width: 8, height: 6, channels: 3, background: '#eeeeee' },
-    })
-      .toFormat(format)
-      .toBuffer()
+    const canvas = createCanvas(8, 6)
+    canvas.getContext('2d').fillRect(0, 0, 8, 6)
+    const source = await canvas.encode(format)
     expect(await ocrImage(source, new AbortController().signal)).toBe('Recognized image')
     expect(recognition).toHaveBeenCalledOnce()
     const normalized = recognition.mock.calls[0]![0] as Uint8Array
-    expect(await sharp(normalized).metadata()).toMatchObject({ format: 'png', width: 8, height: 6 })
+    expect(PNG.sync.read(Buffer.from(normalized))).toMatchObject({ width: 8, height: 6 })
   },
 )
 
-it('resolves the packaged sharp entry from its package exports', async () => {
-  const directory = mkdtempSync(join(tmpdir(), 'nawa-packaged-sharp-'))
+it('resolves the packaged canvas entry from its package exports', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'nawa-packaged-canvas-'))
   temporaryDirectories.push(directory)
-  const packageDirectory = join(directory, 'embedding', 'node_modules', 'sharp')
+  const packageDirectory = join(directory, 'image', 'node_modules', '@napi-rs', 'canvas')
   mkdirSync(join(packageDirectory, 'dist'), { recursive: true })
   writeFileSync(
     join(packageDirectory, 'package.json'),
     JSON.stringify({
-      name: 'sharp',
+      name: '@napi-rs/canvas',
       exports: { '.': './dist/index.cjs' },
     }),
   )
-  const marker = join(directory, 'packaged-sharp-loaded')
-  const actualSharp = createRequire(import.meta.url).resolve('sharp')
+  const marker = join(directory, 'packaged-canvas-loaded')
+  const actualCanvas = createRequire(import.meta.url).resolve('@napi-rs/canvas')
   writeFileSync(
     join(packageDirectory, 'dist', 'index.cjs'),
-    `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'loaded');\nmodule.exports = require(${JSON.stringify(actualSharp)});\n`,
+    `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'loaded');\nmodule.exports = require(${JSON.stringify(actualCanvas)});\n`,
   )
   Object.defineProperty(process, 'resourcesPath', { configurable: true, value: directory })
-  const source = await sharp({
-    create: { width: 8, height: 6, channels: 3, background: '#ffffff' },
-  })
-    .png()
-    .toBuffer()
+  const source = await createCanvas(8, 6).encode('png')
   expect(await ocrImage(source, new AbortController().signal)).toBe('Recognized image')
   expect(readFileSync(marker, 'utf8')).toBe('loaded')
 })
@@ -86,16 +83,10 @@ it('retains the input pixel limit while normalizing images', async () => {
   expect(recognition).not.toHaveBeenCalled()
 })
 
-it('keeps Transformers image decoding and resizing compatible with the shared sharp runtime', async () => {
-  const { RawImage } = await import('@huggingface/transformers')
-  const source = await sharp({
-    create: { width: 8, height: 6, channels: 3, background: '#eeeeee' },
-  })
-    .png()
-    .toBuffer()
-  const decoded = await RawImage.fromBlob(new Blob([new Uint8Array(source)], { type: 'image/png' }))
-  expect([decoded.width, decoded.height, decoded.channels]).toEqual([8, 6, 3])
-  const resized = await decoded.resize(4, 3)
-  expect([resized.width, resized.height, resized.channels]).toEqual([4, 3, 3])
-  expect(resized.data).toHaveLength(36)
+it('loads the built text embedding runtime and rejects image tasks', async () => {
+  const runtime = await import(
+    pathToFileURL(resolve(__dirname, '../out/embedding/runtime.mjs')).href
+  )
+  expect(runtime.env).toBeDefined()
+  expect(() => runtime.pipeline('image-to-text', 'unused')).toThrow('text only')
 })

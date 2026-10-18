@@ -288,7 +288,7 @@ export function Ribbon(p: Props) {
               <span className="rb-big-icon">
                 <NawaMark size={26} />
               </span>
-              <span>Genspark AI</span>
+              <span>Nawa AI</span>
             </button>
             <button
               type="button"

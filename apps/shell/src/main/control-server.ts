@@ -6,6 +6,7 @@ import {
   CONTROL_FILE,
   CONTROL_MAX_REQUEST_BYTES,
   CONTROL_PROTOCOL,
+  CONTROL_RESPONSE_TIMEOUT_MS,
   type ControlEndpoint,
   type ControlEnvelope,
   type ControlReply,
@@ -124,6 +125,7 @@ function serve(socket: Socket, token: string, handler: ControlHandler): void {
     if (nl < 0) return
     const envelope = parseEnvelope(buffer.slice(0, nl))
     if (!envelope || !tokenMatches(envelope.token, token)) return finish(null)
+    socket.setTimeout(CONTROL_RESPONSE_TIMEOUT_MS)
     handler(envelope.request).then(finish, (err: unknown) =>
       finish({
         ok: false,

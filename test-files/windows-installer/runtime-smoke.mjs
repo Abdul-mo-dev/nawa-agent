@@ -47,7 +47,7 @@ async function control(request) {
   return new Promise((resolveReply, reject) => {
     const socket = createConnection(endpoint.endpoint)
     socket.setEncoding('utf8')
-    socket.setTimeout(120_000, () => socket.destroy(new Error('Control request timed out')))
+    socket.setTimeout(130_000, () => socket.destroy(new Error('Control request timed out')))
     socket.on('error', reject)
     let data = ''
     socket.on('data', (chunk) => {
@@ -74,12 +74,47 @@ try {
     join(manifest.installDirectory, 'resources/app.asar'),
     join('out', 'main', 'index.js'),
   )
+  assert(
+    !asar
+      .listPackage(join(manifest.installDirectory, 'resources/app.asar'))
+      .some((file) => /(?:^|[/\\])node_modules[/\\](?:sharp|@img)(?:[/\\]|$)/u.test(file)),
+    'Forbidden Sharp/libvips runtime in app.asar',
+  )
+  const { readdir } = await import('node:fs/promises')
+  async function verifyPermissiveImagePayload(directory) {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      assert(!['sharp', '@img'].includes(entry.name), `Forbidden image package: ${entry.name}`)
+      await verifyPermissiveImagePayload(join(directory, entry.name))
+    }
+  }
+  await verifyPermissiveImagePayload(join(manifest.installDirectory, 'resources'))
+  report.payload.push('No Sharp/libvips package in app.asar or external resources')
   assert.equal(
     hash(main),
     hash(await readFile(join(workspace, 'apps/shell/out/main/index.js'))),
     'Packaged Shell main is stale',
   )
   report.payload.push('Shell main SHA-256 matches current build')
+  const { readdir: rendererFiles } = await import('node:fs/promises')
+  for (const part of [
+    'index.html',
+    ...(await rendererFiles(join(workspace, 'apps/shell/out/renderer/assets')))
+      .filter((file) => /\.(?:js|css)$/u.test(file))
+      .map((file) => `assets/${file}`),
+  ]) {
+    assert.equal(
+      hash(
+        asar.extractFile(
+          join(manifest.installDirectory, 'resources/app.asar'),
+          join('out', 'renderer', part),
+        ),
+      ),
+      hash(await readFile(join(workspace, 'apps/shell/out/renderer', part))),
+      `Stale shell renderer: ${part}`,
+    )
+  }
+  report.payload.push('Shell renderer HTML, JavaScript and CSS match current build')
   for (const module of ['docs', 'sheets', 'slides', 'pdf', 'markdown', 'html']) {
     for (const part of ['preload/index.js', 'renderer/index.html']) {
       const source = await readFile(join(workspace, 'apps', module, 'out', part))
@@ -102,6 +137,13 @@ try {
     report.payload.push(`${target} SHA-256 matches source`)
   }
   app = await electron.launch({ executablePath: executable, args: [], env, timeout: 60_000 })
+  let stderr = ''
+  app.process().stderr?.on('data', (chunk) => {
+    stderr = (stderr + chunk.toString()).slice(-16_000)
+  })
+  app.on('window', (page) =>
+    page.on('pageerror', (error) => console.error('Renderer error:', error.message)),
+  )
   const runtime = await app.evaluate(({ app }) => ({
     packaged: app.isPackaged,
     version: app.getVersion(),
@@ -135,13 +177,29 @@ try {
         : kind === 'slide'
           ? { kind, slide: 0 }
           : { kind, range: 'A1:C3' }
+    const started = performance.now()
     const opened = await control({ cmd: 'open', path, target })
+    if (!opened.ok) {
+      console.error('Failed sample:', sample, 'Electron stderr:', stderr)
+      for (const page of app.windows())
+        console.error(
+          'Editor state:',
+          page.url(),
+          (
+            await page
+              .locator('body')
+              .innerText({ timeout: 2000 })
+              .catch(() => 'unavailable')
+          ).slice(0, 4000),
+        )
+    }
     assert(opened.ok, JSON.stringify(opened.error))
     const selected = await control({ cmd: 'selection', path })
     assert(selected.ok, JSON.stringify(selected.error))
     assert.equal(hash(await readFile(path)), before)
     report.cases.push({
       sample,
+      readyMs: Math.round(performance.now() - started),
       opened: opened.result,
       selected: selected.result,
       originalUnchanged: true,

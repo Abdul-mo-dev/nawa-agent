@@ -7,8 +7,10 @@ export default defineConfig({
   // imported docs/sheets main modules are TS source with no build artifacts,
   // so externalizing them would break Node ESM resolution at runtime.
   main: {
+    build: {
+      rollupOptions: { external: ['node:sqlite', '@napi-rs/canvas'] },
+    },
     // node:sqlite is a Node 22+ builtin the bundler's builtin list may predate
-    build: { rollupOptions: { external: ['node:sqlite'] } },
   },
   preload: {
     build: {
@@ -26,6 +28,7 @@ export default defineConfig({
   renderer: {
     plugins: [react()],
     build: {
+      minify: 'esbuild',
       rollupOptions: {
         input: {
           index: resolve(__dirname, 'src/renderer/index.html'),

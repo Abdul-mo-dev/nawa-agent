@@ -1,0 +1,9 @@
+{
+  "shell": { "entryBytes": 1200000, "totalBytes": 1650000 },
+  "docs": { "entryBytes": 4000000, "totalBytes": 5600000 },
+  "sheets": { "entryBytes": 12000000, "totalBytes": 17500000 },
+  "slides": { "entryBytes": 2800000, "totalBytes": 2800000 },
+  "pdf": { "entryBytes": 1900000, "totalBytes": 1900000 },
+  "markdown": { "entryBytes": 3400000, "totalBytes": 9000000 },
+  "html": { "entryBytes": 1800000, "totalBytes": 1800000 }
+}

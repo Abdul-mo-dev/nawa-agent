@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, statSync } from 'node:fs'
+import { mkdtempSync, readFileSync, statSync, writeFileSync, rmSync } from 'node:fs'
 import { connect } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -76,6 +76,41 @@ describe('control server', () => {
 })
 
 describe('control handler', () => {
+  it.each(['doc', 'docx'])(
+    'uses the conversion budget only for import-only .%s files',
+    async (extension) => {
+      const directory = mkdtempSync(join(tmpdir(), 'nawa-control-import-'))
+      const path = join(directory, `sample.${extension}`)
+      writeFileSync(path, '')
+      vi.useFakeTimers()
+      try {
+        const started = Date.now()
+        const wc = {
+          isDestroyed: () => false,
+          isLoading: () => false,
+          executeJavaScript: async () =>
+            Date.now() - started < 25_000
+              ? { status: 'not_ready' }
+              : { status: 'ok', result: { block: 0 } },
+        }
+        const reply = controlHandler({
+          reveal: vi.fn(),
+          activateTab: vi.fn(),
+          openDocument: () => true,
+          findTab: () => ({ id: 'imported', kind: 'docs', webContents: wc as never }),
+        })({ cmd: 'open', path, target: { kind: 'block', block: 0 } })
+        await vi.advanceTimersByTimeAsync(25_000)
+        expect(await reply).toMatchObject(
+          extension === 'doc'
+            ? { ok: true, result: { block: 0 } }
+            : { ok: false, error: { reason: 'app_unavailable' } },
+        )
+      } finally {
+        vi.useRealTimers()
+        rmSync(directory, { recursive: true, force: true })
+      }
+    },
+  )
   const fakeWebContents = (replies: unknown[]) => {
     const executeJavaScript = vi.fn(async () => replies.shift())
     return {

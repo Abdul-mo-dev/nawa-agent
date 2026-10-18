@@ -31,6 +31,7 @@ interface FakeWebContents {
   once: ReturnType<typeof vi.fn>
   close: ReturnType<typeof vi.fn>
   reload: ReturnType<typeof vi.fn>
+  loadURL: ReturnType<typeof vi.fn>
   focus: ReturnType<typeof vi.fn>
   isDestroyed: ReturnType<typeof vi.fn>
   listeners: Map<string, () => void>
@@ -56,6 +57,7 @@ function makeFakeView(): FakeView {
       once: vi.fn(),
       close: vi.fn(),
       reload: vi.fn(),
+      loadURL: vi.fn(() => Promise.resolve()),
       focus: vi.fn(),
       isDestroyed: vi.fn(() => false),
     },
@@ -652,13 +654,18 @@ describe('closing tabs', () => {
     expect(view.webContents.close).toHaveBeenCalledTimes(1)
   })
 
-  it('detaches docs views without destroying the webContents (freeze workaround)', async () => {
+  it('unloads closed docs before destroying their WebContents without the native freeze', async () => {
     const id = manager.openDocsTab()
     const view = lastCreatedView(createDocsView)
     await manager.closeTab(id)
     expect(shellWindow.contentView.removeChildView).toHaveBeenCalledWith(view)
-    expect(view.webContents.close).not.toHaveBeenCalled()
-    // the orphaned renderer must be told to go inert (recovery-copy resurrection guard)
+    await vi.waitFor(() =>
+      expect(view.webContents.close).toHaveBeenCalledWith({ waitForBeforeUnload: false }),
+    )
+    expect(view.webContents.loadURL).toHaveBeenCalledWith('about:blank')
+    expect(view.webContents.loadURL.mock.invocationCallOrder[0]).toBeLessThan(
+      view.webContents.close.mock.invocationCallOrder[0],
+    )
     expect(teardownDocsRenderer).toHaveBeenCalledWith(view.webContents)
   })
 
@@ -1077,7 +1084,9 @@ describe('detach / attach (Open in New Window, tear-off, dock)', () => {
     const newId = manager.attachTab(record)
     await manager.closeTab(newId)
     expect(teardownDocsRenderer).toHaveBeenCalledWith(record.view.webContents)
-    expect(record.view.webContents.close).not.toHaveBeenCalled()
+    await vi.waitFor(() =>
+      expect(record.view.webContents.close).toHaveBeenCalledWith({ waitForBeforeUnload: false }),
+    )
     expect(manager.list()).toHaveLength(1)
   })
 })

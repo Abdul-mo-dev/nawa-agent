@@ -1,6 +1,11 @@
 import type { en } from './en'
 
 export const ja = {
+  previewRemoteBlocked: 'このファイルのリモートコンテンツはブロックされています。',
+  previewRemoteEnabled: 'このファイルのリモートコンテンツは有効です。',
+  previewAllowRemote: 'リモートコンテンツを許可',
+  previewBlockRemote: 'リモートコンテンツをブロック',
+  previewPolicyFailed: 'リモートコンテンツの設定を変更できませんでした。',
   redactMenuLabel: '選択範囲をAIから隠す',
   redactDialogDesc:
     '文章はドキュメントとファイルに残り、AI には下のマーカーしか見えません。名前をつけると、何を表すかAIが理解できます。',

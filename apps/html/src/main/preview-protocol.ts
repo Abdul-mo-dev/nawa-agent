@@ -1,6 +1,7 @@
 import { DOCX_MEDIA_SCHEME_PRIVILEGE, RENDERER_SCHEME_PRIVILEGE } from '@genoffice/electron-utils'
 import { protocol } from 'electron'
 import { ASSET_SCHEME, PREVIEW_SCHEME, buildPreviewDocument } from './preview-document'
+import { previewContentSecurityPolicy } from './preview-policy'
 
 export { assetBaseHref, previewUrlFor } from './preview-document'
 
@@ -29,7 +30,9 @@ export function registerPrivilegedSchemes(): void {
 }
 
 export function registerPreviewProtocol(
-  resolve: (webContentsId: number) => { text: string; baseHref: string | null } | null,
+  resolve: (
+    webContentsId: number,
+  ) => { text: string; baseHref: string | null; remoteContent?: boolean } | null,
 ): void {
   protocol.handle(PREVIEW_SCHEME, (request) => {
     let host: string
@@ -42,7 +45,13 @@ export function registerPreviewProtocol(
     const entry = match ? resolve(Number(match[1])) : null
     if (!entry) return new Response(null, { status: 404 })
     return new Response(buildPreviewDocument(entry.text, entry.baseHref), {
-      headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'Content-Security-Policy': previewContentSecurityPolicy(entry.remoteContent),
+        'Permissions-Policy':
+          'camera=(), microphone=(), geolocation=(), display-capture=(), usb=(), serial=(), hid=()',
+      },
     })
   })
 }

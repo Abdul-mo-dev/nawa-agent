@@ -1,6 +1,9 @@
 export { ChatModelPicker, type ChatModelPickerProps } from './ChatModelPicker'
 export { AiPanelSideButton } from './AiPanelSideButton'
+export { AiPanelResizer } from './AiPanelResizer'
+export { agentStatusText } from './strings-agent-status'
 export { AiComposer } from './AiComposer'
+export { ChatPanelHeader, ChatNewButton, ChatConversationSelector } from './ChatPanelHeader'
 export { ChatMessageActions, CHAT_LABELS } from './ChatMessageActions'
 export { useEditorConversations } from './use-editor-conversations'
 export {
@@ -74,7 +77,7 @@ export {
   type RibbonDensity,
 } from './ribbon-collapse'
 export { AiTypingIndicator } from './AiTypingIndicator'
-export { IconSend, IconStop, type IconProps } from './icons'
+export { IconSend, IconStop, IconEnter, type IconProps } from './icons'
 export { Markdown, type MarkdownNav } from './Markdown'
 export { FILE_NAV_SCHEME, createFileNav, fileNavHref, parseFileNavHref } from './file-nav'
 export { isSymbolFontFamily } from './symbol-fonts'

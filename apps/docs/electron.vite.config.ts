@@ -33,6 +33,22 @@ const localAlias = {
 //
 // instead of the actual generated-images.ts source file.
 const mainAlias = {
+  '@genoffice/electron-utils/file-transaction': resolve(
+    __dirname,
+    '../../packages/electron-utils/src/file-transaction.ts',
+  ),
+  '@genoffice/electron-utils/text-file-session': resolve(
+    __dirname,
+    '../../packages/electron-utils/src/text-file-session.ts',
+  ),
+  '@genoffice/electron-utils/session-network-policy': resolve(
+    __dirname,
+    '../../packages/electron-utils/src/session-network-policy.ts',
+  ),
+  '@genoffice/file-parse/source-text': resolve(
+    __dirname,
+    '../../packages/file-parse/src/source-text.ts',
+  ),
   // ── electron-utils subpath exports ──────────────────────────────────────
   '@genoffice/electron-utils/legacy-office': resolve(
     __dirname,
@@ -138,6 +154,7 @@ export default defineConfig({
   },
 
   renderer: {
+    build: { minify: 'esbuild' },
     plugins: [react()],
     resolve: { alias: localAlias },
     server: {

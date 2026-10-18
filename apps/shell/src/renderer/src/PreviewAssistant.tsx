@@ -1,12 +1,21 @@
+import { AiPanelResizer } from '@genoffice/ui'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { AgentLoop, type AgentMessage } from '@genoffice/agent-core'
+import { AgentLoop, agentRunCompletion, type AgentRunOutcome } from '@genoffice/agent-core'
 import {
   applyChatModel,
   agentPolicyOf,
   modelSupportsVision,
   type AiSettings,
 } from '@genoffice/ai-provider/browser'
-import { AiComposer, AiTypingIndicator, ChatModelPicker, Markdown } from '@genoffice/ui'
+import {
+  AiComposer,
+  AiTypingIndicator,
+  ChatModelPicker,
+  Markdown,
+  ChatPanelHeader,
+  useAiPanelWidth,
+} from '@genoffice/ui'
+import { HistoryDropdown } from './history/HistoryDropdown'
 import '@genoffice/ui/markdown.css'
 import '@genoffice/ui/chat-model-picker.css'
 import type { ConversationRecord, HistoryMessage } from '../../shared/conversation-api'
@@ -14,6 +23,7 @@ import type { FilePreview } from '../../shared/file-preview'
 import { aiLangDirective, useI18n } from './locale'
 import { previewText } from './file-preview-labels'
 import { createPreviewSkill } from './ai/preview-skill'
+import { completedPreviewHistory, interruptPreviewHistory } from './ai/preview-history'
 import { createShellTransport } from './ai/transport'
 import {
   ConversationBuffer,
@@ -24,7 +34,13 @@ import {
 import { NawaIcon } from './explorer/Icons'
 import './directory-chat.css'
 
-export function PreviewAssistant({ preview }: { preview: FilePreview }) {
+export function PreviewAssistant({
+  preview,
+  onCollapse,
+}: {
+  preview: FilePreview
+  onCollapse?: (() => void) | undefined
+}) {
   const { lang } = useI18n(),
     t = previewText(lang)
   const [record, setRecord] = useState<ConversationRecord | null>(null)
@@ -55,6 +71,11 @@ export function PreviewAssistant({ preview }: { preview: FilePreview }) {
       key={record.id}
       preview={preview}
       record={record}
+      onCollapse={onCollapse}
+      onOpen={async (id) => {
+        await flushDetachedBuffers()
+        setRecord(await window.nawaHistory.get(id))
+      }}
       onNew={async () => {
         const next = await window.nawaHistory.create({
           folder: preview.path,
@@ -79,14 +100,20 @@ function PreviewConversation({
   preview,
   record,
   onNew,
+  onOpen,
+  onCollapse,
 }: {
   preview: FilePreview
   record: ConversationRecord
   onNew(): Promise<void>
+  onOpen(id: string): Promise<void>
+  onCollapse?: (() => void) | undefined
 }) {
   const { lang } = useI18n(),
     t = previewText(lang)
   const langRef = useRef(lang)
+  const panelWidth = useAiPanelWidth('preview-ai-panel-width')
+  const { asideRef, resizing } = panelWidth
   langRef.current = lang
   const previewRef = useRef(preview)
   previewRef.current = preview
@@ -103,15 +130,31 @@ function PreviewConversation({
     generation = useRef(0)
   const scrollRef = useRef<HTMLDivElement>(null)
   const follow = useRef(true)
-  const patchReply = (text: string, done = false, error = false) => {
-    buffer.edit((current) => ({
-      ...current,
-      messages: current.messages.map((message, i) =>
-        i === current.messages.length - 1 && message.role === 'assistant'
-          ? { ...message, text, streaming: !done, error }
-          : message,
-      ),
-    }))
+  const patchReply = (
+    text: string,
+    done = false,
+    error = false,
+    outcome: AgentRunOutcome = 'completed',
+  ) => {
+    buffer.edit((current) => {
+      const requestId = current.messages.at(-1)?.request?.id
+      return {
+        ...current,
+        messages: current.messages.map((message, i) =>
+          i === current.messages.length - 1 && message.role === 'assistant'
+            ? {
+                ...message,
+                text,
+                streaming: !done,
+                error,
+                ...(done && message.request ? { request: { ...message.request, outcome } } : {}),
+              }
+            : done && requestId && message.request?.id === requestId
+              ? { ...message, request: { ...message.request, outcome } }
+              : message,
+        ),
+      }
+    })
   }
   const save = () => {
     void buffer.flush().catch((cause) => {
@@ -120,6 +163,15 @@ function PreviewConversation({
   }
   useEffect(() => {
     alive.current = true
+    if (
+      buffer
+        .getSnapshot()
+        .messages.some((message) => message.streaming || message.request?.outcome === 'running')
+    )
+      buffer.edit((current) => ({
+        ...current,
+        messages: interruptPreviewHistory(current.messages),
+      }))
     const timer = setInterval(() => {
       void buffer.saveOnce().catch((cause) => {
         if (alive.current) setHistoryError(String(cause))
@@ -129,14 +181,14 @@ function PreviewConversation({
       // This ref is a request counter, not a captured DOM node.
       // eslint-disable-next-line react-hooks/exhaustive-deps
       generation.current++
-      loopRef.current?.cancel()
+      const loop = loopRef.current
+      loopRef.current = null
       alive.current = false
+      loop?.cancel()
       clearInterval(timer)
       buffer.edit((current) => ({
         ...current,
-        messages: current.messages.map((message) =>
-          message.streaming ? { ...message, streaming: false } : message,
-        ),
+        messages: interruptPreviewHistory(current.messages),
       }))
       retainUntilSaved(buffer)
     }
@@ -159,14 +211,17 @@ function PreviewConversation({
       if (!alive.current || sequence !== generation.current) return
       settingsRef.current = settings
       visionRef.current = modelSupportsVision(settings)
-      const modelKey = `${buffer.getSnapshot().modelId}:${visionRef.current}`
+      const modelKey = `${buffer.getSnapshot().modelId}:${visionRef.current}:${preview.sourceHash ?? ''}`
       if (modelRef.current !== modelKey) {
         loopRef.current = null
         modelRef.current = modelKey
       }
       if (!loopRef.current) {
-        const loop = new AgentLoop({
-          transport: createShellTransport(() => settingsRef.current!),
+        const loop: AgentLoop = new AgentLoop({
+          transport: createShellTransport(
+            () => settingsRef.current!,
+            () => langRef.current,
+          ),
           skill: createPreviewSkill(
             () => previewRef.current,
             (path, hash) => window.nawaFilePreview.recognizeText(path, hash),
@@ -177,27 +232,34 @@ function PreviewConversation({
           systemSuffix: () => aiLangDirective(langRef.current),
           events: {
             onText: (text) => {
-              if (alive.current) patchReply(text)
+              if (alive.current && loopRef.current === loop) patchReply(text)
             },
             onToolStart: () => {
-              if (alive.current) setNotice(previewText(langRef.current).working)
+              if (alive.current && loopRef.current === loop)
+                setNotice(previewText(langRef.current).working)
             },
             onToolExecuted: ({ execution }) => {
-              if (alive.current) setNotice(execution.isError ? execution.output : '')
+              if (alive.current && loopRef.current === loop)
+                setNotice(execution.isError ? execution.output : '')
             },
             onDone: (result) => {
-              if (!alive.current) return
+              if (!alive.current || loopRef.current !== loop) return
+              const completion = agentRunCompletion(result)
               patchReply(
                 result.text || (result.cancelled ? '' : previewText(langRef.current).noReply),
                 true,
+                completion.outcome !== 'completed',
+                completion.outcome,
               )
               setBusy(false)
-              setNotice('')
+              setNotice(completion.notice ? previewText(langRef.current)[completion.notice] : '')
+              if (completion.outcome !== 'completed') loopRef.current = null
               save()
             },
             onError: (error) => {
-              if (alive.current) {
-                patchReply(error, true, true)
+              if (alive.current && loopRef.current === loop) {
+                patchReply(error, true, true, 'failed')
+                loopRef.current = null
                 setBusy(false)
                 setNotice('')
                 save()
@@ -205,15 +267,11 @@ function PreviewConversation({
             },
           },
         })
-        loop.restore(
-          buffer
-            .getSnapshot()
-            .messages.filter((message) => !message.error && !message.streaming)
-            .map((message) => ({ role: message.role, text: message.text }) as AgentMessage),
-        )
+        loop.restore(completedPreviewHistory(buffer.getSnapshot().messages, preview.sourceHash))
         loopRef.current = loop
       }
       const now = Date.now()
+      const requestId = crypto.randomUUID()
       buffer.edit((current) => ({
         ...current,
         draft: '',
@@ -226,6 +284,7 @@ function PreviewConversation({
             text: question,
             createdAt: now,
             snapshotHash: preview.sourceHash,
+            request: { id: requestId, phase: 'user', outcome: 'running' },
           },
           {
             id: crypto.randomUUID(),
@@ -234,6 +293,7 @@ function PreviewConversation({
             createdAt: now,
             streaming: true,
             snapshotHash: preview.sourceHash,
+            request: { id: requestId, phase: 'final', outcome: 'running' },
           },
         ],
       }))
@@ -257,31 +317,51 @@ function PreviewConversation({
   }
   const stop = () => {
     generation.current++
-    loopRef.current?.cancel()
+    const loop = loopRef.current
+    loopRef.current = null
+    buffer.edit((current) => ({ ...current, messages: interruptPreviewHistory(current.messages) }))
+    loop?.cancel()
     setBusy(false)
-    setNotice('')
+    setNotice(previewText(langRef.current).stopped)
     save()
   }
   return (
     <aside
-      className="preview-assistant ws-chat workspace-chat-main"
+      id={panelWidth.panelId}
+      ref={asideRef}
+      className={`preview-assistant ws-chat workspace-chat-main nawa-chat-panel${resizing ? ' ai-panel-resizing' : ''}`}
       aria-label={t.assistant}
       dir={lang === 'ar' ? 'rtl' : 'ltr'}
     >
-      <header className="preview-assistant-header">
-        <NawaIcon size={22} />
-        <strong>{t.assistant}</strong>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => {
-            save()
-            void onNew().catch((cause) => setNotice(String(cause)))
-          }}
-        >
-          {t.newChat}
-        </button>
-      </header>
+      <AiPanelResizer panel={panelWidth} lang={lang} />
+      <ChatPanelHeader
+        lang={lang}
+        brand={<NawaIcon size={22} />}
+        disabled={busy}
+        onNewChat={() => {
+          void buffer
+            .flush()
+            .then(onNew)
+            .catch((cause) => setNotice(String(cause)))
+        }}
+        onCollapse={onCollapse}
+        collapseLabel={t.hide}
+      />
+      <div className="chat-session-toolbar">
+        <div className="nawa-chat-conversation-row">
+          <HistoryDropdown
+            folder={preview.path}
+            currentId={record.id}
+            title={data.title}
+            version={data.revision}
+            disabled={busy}
+            onOpen={async (id) => {
+              await buffer.flush()
+              await onOpen(id)
+            }}
+          />
+        </div>
+      </div>
       <div className="preview-assistant-file" title={preview.path}>
         {t.connected}: <bdi>{preview.name}</bdi>
       </div>
@@ -314,6 +394,33 @@ function PreviewConversation({
                 ) : null
               ) : (
                 message.text
+              )}
+              {message.role === 'assistant' &&
+                !message.streaming &&
+                message.request &&
+                message.request.outcome !== 'completed' && (
+                  <div className="preview-assistant-notice" role="status">
+                    {message.request.outcome === 'cancelled' ? t.stopped : t.incomplete}
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => {
+                        const question = data.messages.find(
+                          (item) =>
+                            item.role === 'user' && item.request?.id === message.request?.id,
+                        )
+                        if (!question) return
+                        buffer.edit((current) => ({ ...current, draft: question.text }))
+                        loopRef.current = null
+                        void send()
+                      }}
+                    >
+                      {t.retry}
+                    </button>
+                  </div>
+                )}
+              {message.snapshotHash && message.snapshotHash !== preview.sourceHash && (
+                <small>{t.previousSnapshot}</small>
               )}
             </div>
           ))}

@@ -132,9 +132,14 @@ async function openAiPane(): Promise<void> {
     await Promise.resolve()
   })
   const nav = Array.from(host.querySelectorAll<HTMLButtonElement>('.set-nav-item')).find((button) =>
-    button.textContent?.includes('AI Model'),
+    button.textContent?.includes('AI & Models'),
   )
   await click(nav!)
+  await click(
+    [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent === 'Configure chat',
+    )!,
+  )
 }
 
 async function click(button: HTMLButtonElement): Promise<void> {

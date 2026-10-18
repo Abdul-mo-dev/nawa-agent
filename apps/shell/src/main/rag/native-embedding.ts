@@ -1,36 +1,42 @@
 import { mkdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { RagSettings } from '../../shared/rag-api'
 import { NATIVE_MODEL, NATIVE_MODEL_REVISION } from './config'
 import { EmbeddingClient, type EmbeddingProvider, type EmbeddingVector } from './embedding'
 
-let loaded: Promise<import('@huggingface/transformers').FeatureExtractionPipeline> | null = null
+interface FeatureExtractor {
+  tokenizer: { encode(text: string): number[] }
+  (
+    text: string,
+    options: { pooling: 'mean'; normalize: true },
+  ): Promise<{ data: ArrayLike<number> }>
+}
+interface TextRuntime {
+  env: { cacheDir: string }
+  pipeline(
+    task: 'feature-extraction',
+    model: string,
+    options: { dtype: 'q8'; revision: string },
+  ): Promise<FeatureExtractor>
+}
+let loaded: Promise<FeatureExtractor> | null = null
 let queue: Promise<unknown> = Promise.resolve()
 
-async function model(
-  stateDirectory: string,
-): Promise<import('@huggingface/transformers').FeatureExtractionPipeline> {
+async function model(stateDirectory: string): Promise<FeatureExtractor> {
   if (!loaded) {
     loaded = (async () => {
-      const packaged = process.resourcesPath
-        ? join(
-            process.resourcesPath,
-            'embedding',
-            'node_modules',
-            '@huggingface',
-            'transformers',
-            'dist',
-            'transformers.node.mjs',
-          )
-        : ''
-      const runtime =
-        packaged && existsSync(packaged)
-          ? ((await import(
-              pathToFileURL(packaged).href
-            )) as typeof import('@huggingface/transformers'))
-          : await import('@huggingface/transformers')
+      const path = [
+        process.resourcesPath ? join(process.resourcesPath, 'embedding', 'runtime.mjs') : '',
+        join(__dirname, '../embedding/runtime.mjs'),
+        resolve(__dirname, '../../../out/embedding/runtime.mjs'),
+      ].find((candidate) => candidate && existsSync(candidate))
+      if (!path)
+        throw new Error(
+          'Native text runtime is missing. Rebuild the shell before using local knowledge.',
+        )
+      const runtime = (await import(pathToFileURL(path).href)) as TextRuntime
       const { env, pipeline } = runtime
       env.cacheDir = join(stateDirectory, 'models')
       await mkdir(env.cacheDir, { recursive: true })

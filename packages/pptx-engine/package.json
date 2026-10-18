@@ -19,6 +19,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@genoffice/electron-utils": "*",
     "@genoffice/file-formats": "*",
     "@genoffice/zip-gate": "*",
     "fast-xml-parser": "^5.3.4",

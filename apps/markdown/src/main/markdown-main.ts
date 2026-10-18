@@ -1,5 +1,7 @@
 import { EDITOR_EXTENSIONS } from '@genoffice/file-formats'
 import { isSourceMode, textModeForPath } from '../shared/text-mode'
+import { decodeSource } from '@genoffice/file-parse/source-text'
+import { TextFileSessions } from '@genoffice/electron-utils/text-file-session'
 import {
   assertDirectoryStagePicker,
   assertDirectoryStageWrite,
@@ -185,6 +187,7 @@ const openPathByWc = new Map<number, string>()
 const allowedByWc = new Map<number, Set<string>>()
 /** Current save target per view; absent = untitled document */
 const savePathByWc = new Map<number, string>()
+const textFiles = new TextFileSessions(decodeSource)
 /** Unsaved-changes flags mirrored from the renderer; drives the save prompt before closing a tab/window */
 const dirtyByWc = new Set<number>()
 const closeSaveWaiters = new Map<number, (ok: boolean) => void>()
@@ -248,6 +251,7 @@ export function markdownAdoptSavedPath(contents: WebContents, filePath: string):
 
 /** The file was renamed on disk — re-grant the new path and tell the renderer */
 export function markdownFileRenamed(contents: WebContents, oldPath: string, newPath: string): void {
+  textFiles.rename(contents.id, oldPath, newPath)
   const wcId = contents.id
   if (savePathByWc.get(wcId) === oldPath) savePathByWc.set(wcId, newPath)
   if (openPathByWc.get(wcId) === oldPath) openPathByWc.set(wcId, newPath)
@@ -434,10 +438,6 @@ export function markdownSaveToPath(contents: WebContents, filePath: string): Pro
   })
 }
 
-async function writeTextAtomic(path: string, text: string): Promise<void> {
-  await atomicWriteFile(path, Buffer.from(text, 'utf8'))
-}
-
 async function resolveSaveTarget(
   e: Electron.IpcMainInvokeEvent,
   mode: SaveMode,
@@ -567,7 +567,7 @@ function registerMarkdownIpc(): void {
     if (typeof path !== 'string' || !allowedByWc.get(e.sender.id)?.has(path)) {
       throw new Error('markdown: path not granted to this view')
     }
-    return await readFile(path, 'utf8')
+    return await textFiles.read(e.sender.id, path)
   })
 
   ipcMain.handle(
@@ -621,7 +621,7 @@ function registerMarkdownIpc(): void {
         const savedImageSources = prepared?.imageSources ?? imageSources
         try {
           assertDirectoryStageWrite(e.sender, target)
-          await writeTextAtomic(target, textToWrite)
+          await textFiles.save(e.sender.id, target, textToWrite, mode === 'saveAs')
         } catch (error) {
           if (prepared) await rollbackPreparedSaveAsAssets(prepared).catch(() => {})
           throw error
@@ -1009,6 +1009,7 @@ function grantAndTrack(wc: WebContents, openPath?: string | null): void {
     return { action: 'deny' }
   })
   wc.once('destroyed', () => {
+    textFiles.forget(wcId)
     void imageExports
       .dispose(wcId)
       .catch((err) => console.warn('[markdown] image export cleanup:', err))

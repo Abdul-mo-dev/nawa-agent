@@ -19,6 +19,13 @@ const api: HtmlApi = {
   readFile: (path) => ipcRenderer.invoke(HTML_CHANNELS.readFile, path),
   updatePreview: (text) => ipcRenderer.send(HTML_CHANNELS.previewUpdate, text),
   getPreviewInfo: () => ipcRenderer.invoke(HTML_CHANNELS.previewInfo),
+  setPreviewRemoteContent: (enabled) =>
+    ipcRenderer.invoke(HTML_CHANNELS.previewRemoteContent, enabled),
+  onPreviewPolicyChanged: (handler) => {
+    const listener = (_event: Electron.IpcRendererEvent, enabled: boolean) => handler(enabled)
+    ipcRenderer.on(HTML_CHANNELS.previewPolicyChanged, listener)
+    return () => ipcRenderer.removeListener(HTML_CHANNELS.previewPolicyChanged, listener)
+  },
   setPresentFullScreen: (on) => ipcRenderer.invoke(HTML_CHANNELS.presentFullScreen, on),
   presentInNewTab: (title) => ipcRenderer.invoke(HTML_CHANNELS.presentNewTab, title),
   save: (request) => ipcRenderer.invoke(HTML_CHANNELS.save, request),

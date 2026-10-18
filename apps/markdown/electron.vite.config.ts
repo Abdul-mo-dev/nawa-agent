@@ -23,7 +23,12 @@ export default defineConfig({
   main: {
     plugins: [
       externalizeDepsPlugin({
-        exclude: ['@genoffice/file-formats', '@genoffice/i18n', '@genoffice/electron-utils'],
+        exclude: [
+          '@genoffice/file-formats',
+          '@genoffice/file-parse',
+          '@genoffice/i18n',
+          '@genoffice/electron-utils',
+        ],
       }),
     ],
   },
@@ -36,6 +41,7 @@ export default defineConfig({
     ],
   },
   renderer: {
+    build: { minify: 'esbuild' },
     plugins: [react()],
     resolve: { dedupe: TIPTAP_DEDUPE },
     server: {

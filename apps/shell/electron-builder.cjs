@@ -214,11 +214,10 @@ const embeddingRuntimeTargets =
         ? ['darwin/arm64', 'darwin/x64']
         : ['darwin/arm64']
       : [`linux/${process.arch}`]
-const sharpRuntimePackages = embeddingRuntimeTargets.flatMap((target) => {
-  const platform = target.replace('/', '-')
-  return target.startsWith('win32/')
-    ? [`@img/sharp-${platform}`]
-    : [`@img/sharp-${platform}`, `@img/sharp-libvips-${platform}`]
+const imageRuntimePackages = embeddingRuntimeTargets.map((target) => {
+  const [platform, architecture] = target.split('/')
+  const suffix = platform === 'win32' ? '-msvc' : platform === 'linux' ? '-gnu' : ''
+  return `@napi-rs/canvas-${platform}-${architecture}${suffix}`
 })
 const winSidecarTarget = winArm64 ? 'aarch64-pc-windows-msvc' : 'x86_64-pc-windows-msvc'
 // The standard sheets build uses the host MSVC target and writes target/release.
@@ -244,13 +243,13 @@ function assertExtraResourceSources() {
     '../../node_modules/ws',
     '../../node_modules/electron/dist/LICENSES.chromium.html',
     '../../node_modules/@embedpdf/pdfium/dist/pdfium.wasm',
-    '../../node_modules/@huggingface/transformers/dist/transformers.node.mjs',
+    'out/embedding/runtime.mjs',
+    '../../node_modules/@napi-rs/canvas/package.json',
     '../../node_modules/onnxruntime-node/dist',
     ...embeddingRuntimeTargets.map(
       (target) => `../../node_modules/onnxruntime-node/bin/napi-v3/${target}`,
     ),
-    ...sharpRuntimePackages.map((name) => `../../node_modules/${name}`),
-    '../../node_modules/@img',
+    ...imageRuntimePackages.map((name) => `../../node_modules/${name}`),
     '../pdf/node_modules/harfbuzzjs/hb-subset.wasm',
   ]) {
     if (!existsSync(join(__dirname, rel))) {
@@ -413,11 +412,11 @@ function assertNativeSidecar(platform) {
   }
 }
 
-function assertPackagedSharpVersion() {
+function assertPackagedImageRuntimeVersion() {
   // extraResources copies the root runtime. A nested, patched shell dependency
   // cannot protect a stale root installation left behind by npm hoisting.
-  const rel = '../../node_modules/sharp/package.json'
-  const expected = require('./package.json').dependencies.sharp
+  const rel = '../../node_modules/@napi-rs/canvas/package.json'
+  const expected = require('./package.json').dependencies['@napi-rs/canvas']
   let actual
   try {
     if (builtFileExists(rel))
@@ -427,9 +426,24 @@ function assertPackagedSharpVersion() {
   }
   if (actual !== expected) {
     throw new Error(
-      `packaged root sharp ${actual ?? 'missing'} does not match the shell pin ${expected} ` +
-        '(run npm ci and verify npm ls sharp before packaging)',
+      `packaged root canvas ${actual ?? 'missing'} does not match the shell pin ${expected} ` +
+        '(run npm ci and verify npm ls @napi-rs/canvas before packaging)',
     )
+  }
+}
+
+function assertTextRuntimeHasNoImageBackend() {
+  const rel = 'out/embedding/metafile.json'
+  if (!builtFileExists(rel))
+    throw new Error('Build the native text embedding runtime before packaging.')
+  const metadata = JSON.parse(readFileSync(join(__dirname, rel), 'utf8'))
+  for (const input of Object.keys(metadata.inputs)) {
+    if (/(?:^|[/\\])node_modules[/\\](?:sharp|@img)(?:[/\\]|$)/u.test(input))
+      throw new Error(`Forbidden image dependency in embedding runtime: ${input}`)
+  }
+  for (const output of Object.values(metadata.outputs)) {
+    if (output.imports.some((entry) => entry.path === 'sharp' || entry.path.startsWith('@img/')))
+      throw new Error('Forbidden external image dependency in embedding runtime.')
   }
 }
 
@@ -530,13 +544,17 @@ const config = {
     // Native embeddings run in a Nawa worker. Keep the Node runtime and its
     // N-API dependencies outside asar so dynamic imports and bindings resolve.
     {
-      from: '../../node_modules/@huggingface/transformers/dist/transformers.node.mjs',
-      to: 'embedding/node_modules/@huggingface/transformers/dist/transformers.node.mjs',
+      from: 'out/embedding/runtime.mjs',
+      to: 'embedding/runtime.mjs',
     },
     {
-      from: '../../node_modules/@huggingface/transformers/package.json',
-      to: 'embedding/node_modules/@huggingface/transformers/package.json',
+      from: '../../node_modules/@napi-rs/canvas',
+      to: 'image/node_modules/@napi-rs/canvas',
     },
+    ...imageRuntimePackages.map((name) => ({
+      from: `../../node_modules/${name}`,
+      to: `image/node_modules/${name}`,
+    })),
     {
       from: '../../node_modules/onnxruntime-node/package.json',
       to: 'embedding/node_modules/onnxruntime-node/package.json',
@@ -549,7 +567,7 @@ const config = {
       from: `../../node_modules/onnxruntime-node/bin/napi-v3/${target}`,
       to: `embedding/node_modules/onnxruntime-node/bin/napi-v3/${target}`,
     })),
-    ...['onnxruntime-common', 'sharp', '@img', 'detect-libc', 'semver'].map((name) => ({
+    ...['onnxruntime-common'].map((name) => ({
       from: `../../node_modules/${name}`,
       to: `embedding/node_modules/${name}`,
     })),
@@ -900,7 +918,8 @@ const config = {
     ensureThirdPartyNotices()
     assertModuleTreesPresent()
     assertNativeSidecar(context.electronPlatformName)
-    assertPackagedSharpVersion()
+    assertPackagedImageRuntimeVersion()
+    assertTextRuntimeHasNoImageBackend()
     ensureCliBundleCarriesAppVersion()
     if (context.electronPlatformName === 'darwin' && includeMacX64) {
       assertUniversalSidecar()

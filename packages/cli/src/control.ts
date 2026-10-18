@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import {
   CONTROL_FILE,
   CONTROL_MAX_REQUEST_BYTES,
+  CONTROL_RESPONSE_TIMEOUT_MS,
   type ControlEndpoint,
   type ControlError,
   type ControlReply,
@@ -62,7 +63,7 @@ export async function waitForControlEndpoint(
 export function controlRequest(
   endpoint: ControlEndpoint,
   request: ControlRequest,
-  timeoutMs = 30_000,
+  timeoutMs = CONTROL_RESPONSE_TIMEOUT_MS,
 ): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const socket = connect(endpoint.endpoint)

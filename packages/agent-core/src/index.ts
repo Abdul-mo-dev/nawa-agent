@@ -50,3 +50,4 @@ export type { StreamTextOptions, StreamTextOutcome } from './stream-text'
 export type { IpcStreamChunk, IpcStreamStart, IpcTransportOptions } from './electron-transport'
 
 export * from './directory-workflow'
+export { agentRunCompletion, type AgentRunOutcome, type AgentRunNotice } from './run-outcome'

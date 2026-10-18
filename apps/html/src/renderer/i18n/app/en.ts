@@ -1,4 +1,9 @@
 export const en = {
+  previewRemoteBlocked: 'Remote content is blocked for this file.',
+  previewRemoteEnabled: 'Remote content is enabled for this file.',
+  previewAllowRemote: 'Allow remote content',
+  previewBlockRemote: 'Block remote content',
+  previewPolicyFailed: 'Could not change the remote-content setting.',
   redactMenuLabel: 'Hide the selection from AI',
   redactDialogDesc:
     'The words stay in the document and in the file; the model sees the placeholder below instead. Name it so the model knows what it stands for.',

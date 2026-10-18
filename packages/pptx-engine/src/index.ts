@@ -716,7 +716,11 @@ export async function savePptx(opened: OpenedPptx): Promise<Uint8Array> {
  * stream's 'error' event — not just the returned promise — has to be handled or the
  * throw escapes as an uncaught exception and takes the process down.
  */
-export async function savePptxToFile(opened: OpenedPptx, filePath: string): Promise<SaveReceipt> {
+export async function savePptxToFile(
+  opened: OpenedPptx,
+  filePath: string,
+  options: { expectedRevision?: string | null } = {},
+): Promise<SaveReceipt> {
   // The snapshot is taken synchronously on call (before any await), so an
   // edit made after the call — even before the stream starts — lands after
   // the snapshot and stays dirty through this save's commit.
@@ -725,13 +729,33 @@ export async function savePptxToFile(opened: OpenedPptx, filePath: string): Prom
   try {
     const { createWriteStream } = await import('node:fs')
     const { pipeline } = await import('node:stream/promises')
-    const source = zip.generateNodeStream({
-      type: 'nodebuffer',
-      compression: 'DEFLATE',
-      compressionOptions: { level: 6 },
-      streamFiles: true,
-    })
-    await pipeline(source, createWriteStream(filePath))
+    const { Transform } = await import('node:stream')
+    const { createHash } = await import('node:crypto')
+    const hash = createHash('sha256')
+    const { replaceFileTransaction } = await import('@genoffice/electron-utils/file-transaction')
+    await replaceFileTransaction(
+      filePath,
+      async (stage) => {
+        const source = zip.generateNodeStream({
+          type: 'nodebuffer',
+          compression: 'DEFLATE',
+          compressionOptions: { level: 6 },
+          streamFiles: true,
+        })
+        await pipeline(
+          source,
+          new Transform({
+            transform(chunk, _encoding, callback) {
+              hash.update(chunk)
+              callback(null, chunk)
+            },
+          }),
+          createWriteStream(stage, { flags: 'wx' }),
+        )
+      },
+      options,
+    )
+    Object.assign(receipt, { outputHash: hash.digest('hex') })
   } catch (err) {
     // A save that never landed vouches for nothing: discard exactly this
     // save's receipt so a later commit can never pair with its snapshot.
@@ -751,6 +775,8 @@ export async function savePptxToFile(opened: OpenedPptx, filePath: string): Prom
  * without bound.
  */
 export interface SaveReceipt {
+  /** Hash of the committed bytes, independent of subsequent external writes. */
+  readonly outputHash?: string
   readonly snapshot: Map<string, string>
   readonly formatPath: string | undefined
 }

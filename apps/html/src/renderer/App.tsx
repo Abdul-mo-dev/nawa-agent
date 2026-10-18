@@ -142,6 +142,9 @@ export default function App() {
   const [findFocus, setFindFocus] = useState<FindFocusRequest>({ field: 'find', nonce: 0 })
   const [cursor, setCursor] = useState<CursorInfo>({ line: 1, col: 1, pos: 0 })
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [remoteContent, setRemoteContent] = useState(false)
+  const [canEnableRemoteContent, setCanEnableRemoteContent] = useState(false)
+  const [previewPolicyError, setPreviewPolicyError] = useState('')
   const [previewNonce, setPreviewNonce] = useState(0)
   const [draftHtml, setDraftHtml] = useState<string | null>(null)
   const [historyState, setHistoryState] = useState({ undo: false, redo: false })
@@ -285,6 +288,8 @@ export default function App() {
         setText(doc.text)
         setSavedText(doc.text)
         setPreviewUrl(info.url)
+        setRemoteContent(info.remoteContent === true)
+        setCanEnableRemoteContent(info.canEnableRemoteContent === true)
         setStatus('ready')
       } catch (err) {
         console.error('[html] open failed:', err)
@@ -295,6 +300,15 @@ export default function App() {
       cancelled = true
     }
   }, [getMap])
+
+  useEffect(
+    () =>
+      window.htmlApi.onPreviewPolicyChanged?.((enabled) => {
+        setRemoteContent(enabled)
+        setPreviewNonce((value) => value + 1)
+      }),
+    [],
+  )
 
   // mirror dirtiness to the main process (close prompt) — untitled blank docs never count
   useEffect(() => {
@@ -1630,6 +1644,27 @@ export default function App() {
           )}
           <div className={`workspace view-${canvasMode === 'present' ? 'preview' : view}`}>
             <div className="pane pane-preview">
+              {canvasMode !== 'present' && (
+                <div className="preview-network-controls" role="status">
+                  <span>{t(remoteContent ? 'previewRemoteEnabled' : 'previewRemoteBlocked')}</span>
+                  {canEnableRemoteContent && (
+                    <button
+                      type="button"
+                      className="preview-network-toggle"
+                      aria-pressed={remoteContent}
+                      onClick={() => {
+                        setPreviewPolicyError('')
+                        void window.htmlApi
+                          .setPreviewRemoteContent(!remoteContent)
+                          .catch(() => setPreviewPolicyError(t('previewPolicyFailed')))
+                      }}
+                    >
+                      {t(remoteContent ? 'previewBlockRemote' : 'previewAllowRemote')}
+                    </button>
+                  )}
+                  {previewPolicyError && <span role="alert">{previewPolicyError}</span>}
+                </div>
+              )}
               <div
                 className="preview-stage"
                 ref={stageRef}

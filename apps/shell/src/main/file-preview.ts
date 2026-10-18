@@ -2,7 +2,7 @@ import { ipcMain, type WebContents } from 'electron'
 import { readFile, stat } from 'node:fs/promises'
 import { basename, extname } from 'node:path'
 import { createHash } from 'node:crypto'
-import sharp from 'sharp'
+import { previewImageBuffers } from './image-runtime'
 import {
   PREVIEW_FILE_EXTENSIONS,
   PREVIEW_IMAGE_EXTENSIONS,
@@ -25,18 +25,9 @@ export async function loadFilePreview(path: string): Promise<FilePreview> {
     if (bytes.length > 64 * 1024 * 1024) throw new Error('Preview exceeds 64 MiB.')
     result.sourceHash = createHash('sha256').update(bytes).digest('hex')
     if (PREVIEW_IMAGE_EXTENSIONS.includes(extension)) {
-      // Normalize TIFF and other still frames for Chromium, using the existing image runtime.
-      const png = await sharp(bytes, { limitInputPixels: 20_000_000, animated: false })
-        .rotate()
-        .png()
-        .toBuffer()
+      const { png, jpeg } = await previewImageBuffers(bytes)
       result.image = `data:image/png;base64,${png.toString('base64')}`
-      const vision = await sharp(png)
-        .resize({ width: 1536, height: 1536, fit: 'inside', withoutEnlargement: true })
-        .flatten({ background: '#ffffff' })
-        .jpeg({ quality: 85 })
-        .toBuffer()
-      result.visionImage = `data:image/jpeg;base64,${vision.toString('base64')}`
+      result.visionImage = `data:image/jpeg;base64,${jpeg.toString('base64')}`
     } else result.message = await readMessage(bytes, extension as 'eml' | 'msg')
   } catch (error) {
     result.error = error instanceof Error ? error.message : String(error)
