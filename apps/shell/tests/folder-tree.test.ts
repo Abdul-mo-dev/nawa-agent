@@ -67,7 +67,11 @@ describe('listFolder', () => {
 
     const listing = listFolder(root, new Set([join(root, 'notes.md')]))
     expect(listing.folders.map((f) => f.name)).toEqual(['archive 2', 'archive 10', 'Clients'])
-    expect(listing.files.map((f) => f.name).sort()).toEqual(['notes.md', 'report.docx'])
+    expect(listing.files.map((f) => f.name).sort()).toEqual([
+      'image.png',
+      'notes.md',
+      'report.docx',
+    ])
     expect(listing.files.find((f) => f.name === 'notes.md')?.starred).toBe(true)
     expect(listing.folders.every((f) => f.hasSubfolders === false)).toBe(true)
   })
@@ -104,17 +108,19 @@ describe('listFolder', () => {
    * on Home, so a file the open dialog happily offers cannot be clicked into
    * from the folder pane — the same drift, one list further along.
    */
-  it('lists the text app extensions alongside markdown', () => {
+  it('lists source and preview extensions alongside markdown', () => {
     touch('notes.md')
     touch('notes.txt')
     touch('data.json')
     touch('photo.png')
+    touch('source.mjs')
+    touch('mail.msg')
 
     expect(
       listFolder(root, new Set())
         .files.map((f) => f.name)
         .sort(),
-    ).toEqual(['data.json', 'notes.md', 'notes.txt'])
+    ).toEqual(['data.json', 'mail.msg', 'notes.md', 'notes.txt', 'photo.png', 'source.mjs'])
   })
 })
 

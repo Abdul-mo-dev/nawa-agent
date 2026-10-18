@@ -2095,6 +2095,7 @@ html.genoffice-popover-open .ribbon-tabs {
   display: flex;
   flex: 1;
   min-height: 0;
+  min-width: 0;
 }
 
 .app-content {
@@ -2103,6 +2104,7 @@ html.genoffice-popover-open .ribbon-tabs {
   flex-direction: column;
   flex: 1;
   min-width: 0;
+  min-height: 0;
 }
 
 /* ---- main layout: AI dock (left) + editor ---- */
@@ -3024,15 +3026,25 @@ div.tiptap-mathematics-render {
 .source-editor {
   flex: 1;
   min-height: 0;
+  min-width: 0;
   display: flex;
   overflow: hidden;
   background: var(--surface);
 }
 
-.source-editor > .cm-editor {
+.source-editor-host {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.source-editor-host > .cm-editor {
   flex: 1;
   min-width: 0;
   height: 100%;
+  max-width: 100%;
 }
 
 /* Image host configuration dialog (genoffice#388). Colors come from the shared

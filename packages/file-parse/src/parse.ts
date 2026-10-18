@@ -150,6 +150,19 @@ export async function parseFileToText(filePath: string): Promise<ParsedFile> {
       }
     }
     switch (ext) {
+      case 'eml':
+      case 'msg': {
+        const { messageDocument } = await import('./message')
+        const document = await messageDocument(bytes, basename(filePath), ext)
+        return {
+          ok: true,
+          kind: 'text',
+          text: [
+            ...document.blocks.map((block) => block.text),
+            ...document.warnings.map((warning) => `Warning: ${warning}`),
+          ].join('\n\n'),
+        }
+      }
       case 'odt':
       case 'odp': {
         const document = await openDocumentRag(bytes, basename(filePath), ext)

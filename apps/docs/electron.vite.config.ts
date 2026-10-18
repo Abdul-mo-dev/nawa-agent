@@ -86,6 +86,9 @@ const mainAlias = {
   ),
   '@genoffice/ai-provider/browser': resolve(__dirname, '../../packages/ai-provider/src/browser.ts'),
 
+  // File parser subpaths must precede the bare package alias for the same reason.
+  '@genoffice/file-parse/formats': resolve(__dirname, '../../packages/file-parse/src/formats.ts'),
+
   ...localAlias,
 
   // Bare package aliases MUST remain after their subpath aliases.

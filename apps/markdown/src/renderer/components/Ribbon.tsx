@@ -66,6 +66,8 @@ interface Props {
    * not exist. Save, find, autosave and the AI panel still apply.
    */
   sourceMode?: boolean
+  sourceEmpty?: boolean
+  sourceHasSelection?: () => boolean
   /** source mode: history lives in CodeMirror, not the TipTap editor */
   sourceHistory?: { canUndo: boolean; canRedo: boolean; undo(): void; redo(): void }
   /** withheld spans: right-click a selection to hide it from the model */
@@ -199,6 +201,8 @@ export function Ribbon({
   onToggleAi,
   onAiPreset,
   sourceMode = false,
+  sourceEmpty = false,
+  sourceHasSelection,
   sourceHistory,
   redactEnabled,
   onToggleRedact,
@@ -272,7 +276,8 @@ export function Ribbon({
 
   // polish/tidy act on the selection when one exists (read at click time; the
   // mousedown preventDefault below keeps the selection alive); summarize stays whole-doc
-  const hasSelection = () => !(editor?.state.selection.empty ?? true)
+  const hasSelection = () =>
+    sourceMode ? (sourceHasSelection?.() ?? false) : !(editor?.state.selection.empty ?? true)
   const aiPresets = [
     { kind: 'summarize', btn: 'aiSummarizeBtn', prompt: () => t('aiSummarizePrompt') },
     {
@@ -283,7 +288,14 @@ export function Ribbon({
     {
       kind: 'tidy',
       btn: 'aiTidyBtn',
-      prompt: () => t(hasSelection() ? 'aiTidySelectionPrompt' : 'aiTidyPrompt'),
+      prompt: () =>
+        t(
+          sourceMode
+            ? 'aiSourceTidyPrompt'
+            : hasSelection()
+              ? 'aiTidySelectionPrompt'
+              : 'aiTidyPrompt',
+        ),
     },
   ] as const
 
@@ -384,7 +396,7 @@ export function Ribbon({
                 type="button"
                 className="rb-big ai-entry"
                 data-tip={t(btn)}
-                disabled={off || state?.empty}
+                disabled={sourceMode ? disabled || sourceEmpty : off || state?.empty}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => onAiPreset(prompt())}
               >

@@ -3,6 +3,8 @@ import { createHash } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
 import { extname } from 'node:path'
 import type { Readable } from 'node:stream'
+import { SOURCE_TEXT_EXTENSIONS } from '@genoffice/file-formats'
+import { decodeSource } from './source-text'
 
 export interface FileReviewEntry {
   location: string
@@ -294,11 +296,11 @@ export async function reviewFileChanges(before: string | null, after: string): P
       result.warnings.push(
         'VBA parts are compared by hash. This review does not run or validate macros.',
       )
-  } else if (['md', 'markdown', 'html', 'htm'].includes(format)) {
+  } else if (['md', 'markdown', 'html', 'htm', ...SOURCE_TEXT_EXTENSIONS].includes(format)) {
     const load = async (path: string | null) => {
       if (!path) return [] as string[]
       if ((await stat(path)).size > MAX_FILE) throw new Error('Text file exceeds the review limit.')
-      return (await readFile(path, 'utf8')).split(/\r?\n/)
+      return decodeSource(await readFile(path)).text.split(/\r?\n/)
     }
     const a = await load(before),
       b = await load(after)

@@ -103,6 +103,9 @@ describe('Ribbon source mode', () => {
     // the quick-access row is untouched: save, save-as, undo, redo, find
     expect(container.querySelectorAll('.ribbon-tabs .qa-btn').length).toBe(5)
     expect(container.querySelector('.autosave-toggle')).not.toBeNull()
+    const presets = container.querySelectorAll<HTMLButtonElement>('.ai-entry')
+    expect(presets.length).toBe(4)
+    expect(Array.from(presets).every((button) => !button.disabled)).toBe(true)
   })
 
   it('disables the block-formatting controls in the markdown source view', () => {

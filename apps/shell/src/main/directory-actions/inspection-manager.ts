@@ -59,7 +59,7 @@ export class DirectoryInspectionManager {
     await this.authorize(owner, run, path)
     if (!FORMATS.has(extname(path).toLowerCase()))
       throw new Error(
-        'Native inspection supports DOCX, DOCM, XLSX, XLSM, PPTX, PDF, Markdown, HTML and supported Office imports. Use read_file for other supported text formats.',
+        'Native inspection supports Office, PDF, Markdown, HTML, source text and supported imports. Use read_file for saved messages or image OCR.',
       )
     const existing = [...this.sessions.values()].find(
       (s) => s.owner === owner && s.run === run && samePath(s.path, path),

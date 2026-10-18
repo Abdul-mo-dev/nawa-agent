@@ -7,6 +7,8 @@ import { conversionSupported } from '../../../../../packages/cli/src/conversion-
 import type { DirectoryConversion, DirectoryQuality } from '../../shared/directory-actions-api'
 import { regularFile, within } from './file-safety'
 import { assertConversionResources } from './assets'
+import { SOURCE_TEXT_EXTENSIONS } from '@genoffice/file-formats'
+import { decodeSource } from '@genoffice/file-parse'
 export function directoryCliEntry(): string {
   if (app.isPackaged) {
     const path = join(process.resourcesPath, 'cli', 'genoffice.cjs')
@@ -78,9 +80,24 @@ export async function reviewWorkflowFile(
   file: string,
   images: boolean,
   signal: AbortSignal,
-  cli = runner(),
+  cli?: CliRunner,
 ): Promise<DirectoryQuality> {
   const result: DirectoryQuality = { checked: false, summary: '', warnings: [], images: [] }
+  const extension = extname(file).slice(1).toLowerCase()
+  if (SOURCE_TEXT_EXTENSIONS.includes(extension)) {
+    if ((await lstat(file)).size > 8 * 1024 * 1024)
+      throw new Error('Source validation accepts files up to 8 MiB.')
+    const text = decodeSource(await readFile(file)).text
+    if (extension === 'json') JSON.parse(text)
+    signal.throwIfAborted()
+    return {
+      checked: true,
+      summary: extension === 'json' ? 'Valid JSON source.' : 'Source encoding checked.',
+      images: [],
+      warnings: extension === 'json' ? [] : ['Syntax and runtime behavior were not validated.'],
+    }
+  }
+  cli ??= runner()
   const command = qualityCommand(file)
   if (command) {
     const outcome = await cli.run(command, { signal, cwd: dirname(file), timeoutMs: 180000 })

@@ -110,7 +110,8 @@ import type {
   SaveDialogOptions,
   WebContents,
 } from 'electron'
-import { parseFileToText, RAG_OFFICE_EXTENSIONS } from '@genoffice/file-parse'
+import { parseFileToText, RAG_OFFICE_EXTENSIONS, docxToText } from '@genoffice/file-parse'
+import { RAG_TEXT_EXTENSIONS } from '@genoffice/file-parse/formats'
 import { convertHtmlToDocx } from '../../../../packages/html2docx/src'
 import { ElectronBrowserDriver } from '../../../../packages/html2docx/src/drivers/electron'
 import {
@@ -1329,6 +1330,10 @@ const TEXT_EXTS = new Set([
 ])
 /** office/pdf formats get text extracted via @genoffice/file-parse; images skip extraction and go multimodal (files:read-image) */
 const ATTACHMENT_EXTS = new Set([
+  ...RAG_TEXT_EXTENSIONS,
+  'eml',
+  'msg',
+  'rtf',
   ...TEXT_EXTS,
   ...RAG_OFFICE_EXTENSIONS,
   'doc',
@@ -1436,7 +1441,14 @@ async function extractAttachmentText(filePath: string): Promise<string> {
   const cached = attachmentTextCache.get(filePath)
   if (cached && cached.stamp === stamp) return cached.text
   if (stat.size > ATTACHMENT_MAX_BYTES) throw new Error(tm('errFileTooLarge'))
-  const parsed = await parseFileToText(filePath)
+  const parsed: Awaited<ReturnType<typeof parseFileToText>> =
+    extname(filePath).toLowerCase() === '.rtf'
+      ? {
+          ok: true,
+          kind: 'text',
+          text: await docxToText((await importLegacyOffice(resolve(filePath))).bytes),
+        }
+      : await parseFileToText(filePath)
   if (!parsed.ok || parsed.kind !== 'text' || parsed.text == null) {
     throw new Error(parsed.error ?? tm('errParseFailed'))
   }

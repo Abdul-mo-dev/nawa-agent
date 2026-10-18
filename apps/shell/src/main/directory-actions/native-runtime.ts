@@ -23,6 +23,8 @@ import type {
 import type { TabManager } from '../tab-manager'
 import type { DocumentTabKind } from '../../shared/tabs-api'
 import type { NativeStage } from './manager'
+import { SOURCE_TEXT_EXTENSIONS, extensionPattern } from '@genoffice/file-formats'
+import { openTextStage } from './text-stage'
 import { samePath } from './file-safety'
 
 interface Options {
@@ -104,6 +106,7 @@ function kindFor(path: string): DocumentTabKind {
   return result
 }
 export async function nativeBlank(ext: string): Promise<Uint8Array | string> {
+  if (SOURCE_TEXT_EXTENSIONS.includes(ext.replace(/^\./, ''))) return ''
   if (ext === '.docx') return buildBlankDocx()
   if (ext === '.xlsx') return blankXlsxBuffer()
   if (ext === '.pptx') return createBlankPptx()
@@ -160,6 +163,7 @@ function rpc(
   })
 }
 export async function openNativeStage(path: string): Promise<NativeStage> {
+  if (extensionPattern(SOURCE_TEXT_EXTENSIONS).test(path)) return openTextStage(path)
   const configuration = configured(),
     tabs = configuration.tabs()
   if (!tabs) throw new Error('The workspace window is unavailable.')

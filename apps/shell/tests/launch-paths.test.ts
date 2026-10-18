@@ -10,7 +10,7 @@ describe('collectLaunchPaths', () => {
         undefined,
         () => true,
       ),
-    ).toEqual(['first.docx', 'second.xlsx'])
+    ).toEqual(['first.docx', 'notes.rtf', 'second.xlsx'])
   })
 
   it('accepts a .tsv from argv or the second-instance payload', () => {
@@ -48,7 +48,7 @@ describe('collectLaunchPaths', () => {
 
   it('still drops a path nothing opens', () => {
     // a file that exists but is not a document the shell can route
-    expect(collectLaunchPaths(['GenOffice.app', '/photo.png'], undefined, () => true)).toEqual([])
+    expect(collectLaunchPaths(['GenOffice.app', '/unknown.bin'], undefined, () => true)).toEqual([])
     expect(collectLaunchPaths(['GenOffice.app', '/notes.txt'], undefined, () => false)).toEqual([])
   })
 
@@ -74,10 +74,10 @@ describe('collectLaunchPaths', () => {
   it('falls back to the first existing unsupported argv file', () => {
     expect(
       collectLaunchPaths(
-        ['GenOffice.exe', 'missing.doc', 'legacy.rtf'],
+        ['GenOffice.exe', 'missing.doc', 'legacy.pages'],
         undefined,
-        (path) => path === 'legacy.rtf',
+        (path) => path === 'legacy.pages',
       ),
-    ).toEqual(['legacy.rtf'])
+    ).toEqual(['legacy.pages'])
   })
 })

@@ -24,6 +24,7 @@ describe('format registry', () => {
       'doc',
       'dot',
       'odt',
+      'rtf',
     ])
     expect(formatFamily('xlsx').editorOpen).toEqual([
       'xlsx',
@@ -143,7 +144,7 @@ describe('capabilityReport', () => {
     const report = capabilityReport()
     expect(report.map((r) => r.family)).toEqual(['docx', 'xlsx', 'pptx', 'md', 'html', 'pdf'])
     const docx = report.find((r) => r.family === 'docx')!
-    expect(docx.editor.open).toEqual(['docx', 'docm', 'dotx', 'dotm', 'doc', 'dot', 'odt'])
+    expect(docx.editor.open).toEqual(['docx', 'docm', 'dotx', 'dotm', 'doc', 'dot', 'odt', 'rtf'])
     expect(docx.editor.export).toEqual(['pdf'])
     expect(docx.mcp).toEqual({ generate: 'docx', save: ['docx'], read: 'docx' })
     // editor-only family carries no mcp key

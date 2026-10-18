@@ -1,6 +1,6 @@
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { test, expect } from '@playwright/test'
 import { launchShell, closeAndSaveVideo, waitForPageWithUrl } from './helpers'
 
@@ -29,14 +29,13 @@ test.describe('source text files', () => {
     })
     const { app, page } = launched
     try {
-      const tree = page.locator('.folder-panel .tree')
-      const rootRow = tree.locator('.tree-row').first()
-      await expect(rootRow).toContainText(dir.split('/').pop()!)
-      await rootRow.locator('.tree-name').click()
+      const rootRow = page.getByRole('treeitem', { name: basename(dir), exact: true })
+      await expect(rootRow).toBeVisible()
+      await rootRow.click()
 
-      const row = page.locator('.recent-list .recent-name', { hasText: 'notes.txt' })
+      const row = page.getByRole('grid').getByRole('row').filter({ hasText: 'notes.txt' })
       await expect(row).toBeVisible()
-      await row.click()
+      await row.locator('.ex-file-label').dblclick()
 
       // the source surface, not the block editor: a .txt has no blocks to edit
       const editorPage = await waitForPageWithUrl(app, '://markdown/')

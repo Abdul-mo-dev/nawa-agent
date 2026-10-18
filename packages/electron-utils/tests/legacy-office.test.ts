@@ -115,6 +115,26 @@ describe('legacy Office import failures', () => {
 })
 
 describe.skipIf(!converter)('real LibreOffice legacy imports', () => {
+  it('imports genuine RTF text and formatting into DOCX without changing the original', async () => {
+    const root = await temporaryDirectory()
+    const source = join(root, 'sample.rtf')
+    const original = Buffer.from(
+      '{\\rtf1\\ansi\\deff0 {\\fonttbl {\\f0 Arial;}}\\f0 Nawa RTF Import\\par \\b Bold text\\b0  and \\u26085?\\u26412?\\u35486?\\par}',
+    )
+    await writeFile(source, original)
+    const imported = await importLegacyOffice(source, {
+      executablePath: converter!,
+      tempRoot: root,
+    })
+    const zip = await JSZip.loadAsync(imported.bytes)
+    const document = await zip.file('word/document.xml')!.async('string')
+    expect(document).toContain('Nawa RTF Import')
+    expect(document).toContain('Bold text')
+    expect(document).toContain('日本語')
+    expect(document).toMatch(/<w:b(?:\s|\/|>)/)
+    expect(imported.suggestSaveAs).toBe(join(root, 'sample.docx'))
+    expect(await readFile(source)).toEqual(original)
+  }, 120000)
   it.each(['odt', 'odp'])(
     'imports real .%s into modern bytes and preserves the source and an existing sibling',
     async (extension) => {

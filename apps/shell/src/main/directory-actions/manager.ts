@@ -386,7 +386,7 @@ export class DirectoryActionManager {
       !FORMATS.has(extname(raw.path).toLowerCase())
     )
       throw new Error(
-        'Staged editing supports DOCX, DOCM, XLSX, XLSM, PPTX, PDF, Markdown, HTML, and the supported Office import formats.',
+        'Staged editing supports Office documents, PDF, Markdown, HTML, source text and supported import formats.',
       )
     if (
       raw.operation === 'create' &&

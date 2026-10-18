@@ -16,6 +16,7 @@ import {
   defaultKeymap,
   history,
   historyKeymap,
+  isolateHistory,
   indentWithTab,
   redo,
   redoDepth,
@@ -41,6 +42,10 @@ const Loaded = Annotation.define<boolean>()
 export interface PlainTextEditorHandle {
   /** replace the buffer without marking the document dirty (the initial file load) */
   setDoc(text: string): void
+  /** An ordinary undoable edit, shared by AI changes and snapshot rollback. */
+  editDoc(text: string): void
+  selection(): { from: number; to: number } | null
+  clearSelection(): void
   focus(): void
   undo(): boolean
   redo(): boolean
@@ -53,6 +58,7 @@ interface Props {
   initialText: string
   mode: Extract<TextMode, 'plain' | 'json'>
   onChange: (text: string) => void
+  onSelectionChange?: () => void
   className?: string
   spellcheck: boolean
 }
@@ -70,8 +76,10 @@ const highlight = HighlightStyle.define([
 ])
 
 const theme = EditorView.theme({
-  '&': { height: '100%', backgroundColor: 'var(--surface)', color: 'var(--text)' },
+  '&': { height: '100%', minWidth: '0', backgroundColor: 'var(--surface)', color: 'var(--text)' },
   '.cm-scroller': {
+    overflow: 'auto',
+    minHeight: '0',
     fontFamily: "'SF Mono', Menlo, Consolas, monospace",
     fontSize: '13px',
     lineHeight: '1.6',
@@ -115,7 +123,7 @@ function extensionsFor(mode: Props['mode']) {
 }
 
 export const PlainTextEditor = forwardRef<PlainTextEditorHandle, Props>(function PlainTextEditor(
-  { initialText, mode, onChange, className, spellcheck },
+  { initialText, mode, onChange, onSelectionChange, className, spellcheck },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement>(null)
@@ -124,6 +132,8 @@ export const PlainTextEditor = forwardRef<PlainTextEditorHandle, Props>(function
   const findTargetRef = useRef<FindTarget | null>(null)
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
+  const onSelectionChangeRef = useRef(onSelectionChange)
+  onSelectionChangeRef.current = onSelectionChange
 
   useEffect(() => {
     const host = hostRef.current
@@ -142,9 +152,11 @@ export const PlainTextEditor = forwardRef<PlainTextEditorHandle, Props>(function
           EditorView.updateListener.of((update) => {
             // the load dispatch must not read back as a user edit
             if (update.transactions.some((tr) => tr.annotation(Loaded))) return
-            if (!update.docChanged) return
-            onChangeRef.current(view.state.doc.toString())
-            for (const listener of listeners) listener()
+            if (update.docChanged) {
+              onChangeRef.current(view.state.doc.toString())
+              for (const listener of listeners) listener()
+            }
+            if (update.selectionSet || update.docChanged) onSelectionChangeRef.current?.()
           }),
         ],
       }),
@@ -177,6 +189,36 @@ export const PlainTextEditor = forwardRef<PlainTextEditorHandle, Props>(function
   }, [spellcheck])
 
   useImperativeHandle(ref, () => ({
+    editDoc(text) {
+      const view = viewRef.current
+      if (!view) throw new Error('Source editor is not ready.')
+      const previous = view.state.doc.toString()
+      if (previous === text) return
+      let from = 0,
+        beforeEnd = previous.length,
+        afterEnd = text.length
+      while (from < beforeEnd && from < afterEnd && previous[from] === text[from]) from++
+      while (
+        beforeEnd > from &&
+        afterEnd > from &&
+        previous[beforeEnd - 1] === text[afterEnd - 1]
+      ) {
+        beforeEnd--
+        afterEnd--
+      }
+      view.dispatch({
+        changes: { from, to: beforeEnd, insert: text.slice(from, afterEnd) },
+        annotations: isolateHistory.of('full'),
+      })
+    },
+    selection() {
+      const selection = viewRef.current?.state.selection.main
+      return selection ? { from: selection.from, to: selection.to } : null
+    },
+    clearSelection() {
+      const view = viewRef.current
+      if (view) view.dispatch({ selection: { anchor: view.state.selection.main.head } })
+    },
     setDoc(text) {
       const view = viewRef.current
       if (!view || view.state.doc.toString() === text) return
@@ -193,5 +235,5 @@ export const PlainTextEditor = forwardRef<PlainTextEditorHandle, Props>(function
     findTarget: () => findTargetRef.current,
   }))
 
-  return <div ref={hostRef} className={className} />
+  return <div ref={hostRef} className={`source-editor-host${className ? ` ${className}` : ''}`} />
 })

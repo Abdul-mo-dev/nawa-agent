@@ -241,6 +241,42 @@ describe('initial state', () => {
 })
 
 describe('opening tabs', () => {
+  it('opens previews in closable shell tabs and deduplicates their paths', async () => {
+    const first = manager.openPreviewTab('/real/file')
+    expect(manager.openPreviewTab('/canonical/file')).toBe(first)
+    expect(manager.list()).toHaveLength(2)
+    expect(manager.list()[1]).toMatchObject({
+      kind: 'preview',
+      active: true,
+      closable: true,
+      filePath: '/real/file',
+    })
+    expect(shellWindow.contentView.addChildView).not.toHaveBeenCalled()
+    expect(manager.canDetachTab(first)).toBe(false)
+    expect(await manager.openDocuments()).toEqual([])
+    await manager.closeTab(first)
+    expect(manager.list()).toHaveLength(1)
+    expect(manager.list()[0].active).toBe(true)
+  })
+
+  it('hides a native document while a preview is active and restores it on return', () => {
+    const doc = manager.openDocsTab('/document.docx')
+    const view = lastCreatedView(createDocsView)
+    const preview = manager.openPreviewTab('/picture.png')
+    expect(view.setVisible).toHaveBeenLastCalledWith(false)
+    manager.activateTab(doc)
+    expect(view.setVisible).toHaveBeenLastCalledWith(true)
+    expect(manager.list().find((tab) => tab.id === preview)?.active).toBe(false)
+  })
+
+  it('publishes a preview rename without needing a native view', () => {
+    manager.openPreviewTab('/before.png')
+    onChanged.mockClear()
+    manager.renameTabFile('/before.png', '/after.png')
+    expect(onChanged).toHaveBeenCalledOnce()
+    expect(manager.list()[1]).toMatchObject({ title: 'after.png', filePath: '/after.png' })
+  })
+
   it('focuses the help tab already open instead of opening a second one', () => {
     // F1 is a toggle-shaped key in practice: press it, read something, press it
     // again. The help tab is closable (only Home is not), so a second copy is
@@ -828,7 +864,7 @@ describe('file path bookkeeping', () => {
     // opened by the enumeration but must not demand a RENAMABLE case
     const fileless = new Set(['help'])
     expect([...new Set(opened.filter((k) => !fileless.has(k)))].sort()).toEqual(
-      RENAMABLE.map((c) => c.kind).sort(),
+      [...RENAMABLE.map((c) => c.kind), 'preview'].sort(),
     )
   })
 

@@ -16,6 +16,9 @@ export function AppFrame({ initialOnboardingSeen }: AppFrameProps) {
   const [showOnboarding, setShowOnboarding] = useState(!initialOnboardingSeen)
   const homeActive = !active || active.kind === 'home'
   useEffect(() => {
+    if (active?.kind === 'preview') setLegacy(null)
+  }, [active?.kind])
+  useEffect(() => {
     let alive = true
     const apply = (tabs: TabSummary[]) => {
       if (alive) setActive(tabs.find((tab) => tab.active))

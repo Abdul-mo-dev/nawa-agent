@@ -20,6 +20,8 @@ const plain = new Set<string>(RAG_TEXT_EXTENSIONS)
 const code = new Set([
   'py',
   'js',
+  'mjs',
+  'cjs',
   'jsx',
   'ts',
   'tsx',
@@ -90,6 +92,10 @@ export async function parseFileToRag(path: string, ocr?: RagOcrOptions): Promise
         'HTML visual media is not fetched or OCRed; merged table spans may require native inspection.',
       )
     return { title, format: ext, blocks, warnings, partial }
+  }
+  if (ext === 'msg') {
+    const { messageDocument } = await import('./message')
+    return messageDocument(await readFile(path), title, ext)
   }
   if (ext === 'eml') {
     const { emlDocument } = await import('./rag-message')

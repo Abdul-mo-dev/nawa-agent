@@ -30,7 +30,11 @@ const { execFileSync } = require('node:child_process')
 const { existsSync, readFileSync, rmSync, statSync } = require('node:fs')
 const { join } = require('node:path')
 const editorExtensions = require(join(__dirname, '../../packages/file-formats/src/extensions.json'))
+const previewExtensions = require(
+  join(__dirname, '../../packages/file-formats/src/preview-extensions.json'),
+)
 const additionalOfficeAssociations = [
+  ['rtf', 'Rich Text Document', 'docx', 'application/rtf'],
   ['odt', 'OpenDocument Text', 'docx', 'application/vnd.oasis.opendocument.text'],
   ['odp', 'OpenDocument Presentation', 'pptx', 'application/vnd.oasis.opendocument.presentation'],
   ['doc', 'Word 97-2003 Document', 'docx', 'application/msword'],
@@ -108,7 +112,11 @@ const additionalOfficeAssociations = [
 ].map(([ext, name, icon, mimeType]) => ({ ext, name, icon, mimeType, role: 'Editor' }))
 function assertFileAssociations() {
   const seen = new Set()
-  for (const entry of [...additionalOfficeAssociations, ...additionalTextAssociations]) {
+  for (const entry of [
+    ...additionalOfficeAssociations,
+    ...additionalTextAssociations,
+    ...additionalPreviewAssociations,
+  ]) {
     if (seen.has(entry.ext)) throw new Error(`duplicate file association: ${entry.ext}`)
     seen.add(entry.ext)
     for (const iconExt of ['icns', 'ico']) {
@@ -137,6 +145,24 @@ const additionalTextAssociations = editorExtensions.markdown
         ndjson: 'application/x-ndjson',
       }[ext] ?? 'text/plain',
   }))
+const additionalPreviewAssociations = [
+  ...previewExtensions.image,
+  ...previewExtensions.message,
+].map((ext) => ({
+  ext,
+  name: `${ext.toUpperCase()} File`,
+  role: 'Viewer',
+  icon: 'txt',
+  mimeType:
+    {
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      tif: 'image/tiff',
+      tiff: 'image/tiff',
+      eml: 'message/rfc822',
+      msg: 'application/vnd.ms-outlook',
+    }[ext] ?? `image/${ext}`,
+}))
 
 function normalizeHttpsBaseUrl(name, value) {
   if (!value || !value.trim()) return null
@@ -629,6 +655,7 @@ const config = {
   // pairs are generated from the shell renderer's file-type tiles by
   // tools/gen-file-association-icons.mjs.
   fileAssociations: [
+    ...additionalPreviewAssociations,
     ...additionalOfficeAssociations,
     ...additionalTextAssociations,
     {

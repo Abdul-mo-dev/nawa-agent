@@ -1,0 +1,227 @@
+.file-preview-pane {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  color: var(--text);
+  background: var(--surface);
+}
+.file-preview-toolbar {
+  display: flex;
+  direction: ltr;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.file-preview-toolbar strong {
+  flex: 1;
+  min-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-preview-pane button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  direction: var(--ui-text-direction);
+}
+.file-preview-pane button:hover {
+  background: var(--hover);
+}
+.file-preview-pane button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.file-preview-workspace {
+  display: flex;
+  direction: ltr;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.file-preview-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.file-preview-content > p {
+  padding: 20px;
+  overflow-wrap: anywhere;
+}
+.file-preview-message {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  padding: 24px;
+  direction: var(--ui-text-direction);
+  overflow-wrap: anywhere;
+}
+.file-preview-message dl > div {
+  margin-block: 8px;
+}
+.file-preview-message dt {
+  color: var(--text-muted);
+}
+.file-preview-message dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.file-preview-body {
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border-block: 1px solid var(--border);
+  padding-block: 20px;
+}
+.file-preview-warning {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.file-preview-image {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  direction: ltr;
+  background: var(--canvas);
+}
+.file-preview-image-tools {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.file-preview-image-tools output {
+  min-width: 48px;
+  text-align: center;
+}
+.file-preview-image-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  touch-action: none;
+  cursor: grab;
+}
+.file-preview-image-stage:active {
+  cursor: grabbing;
+}
+.file-preview-image-stage img {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform-origin: center;
+  max-width: none;
+  max-height: none;
+  user-select: none;
+}
+.file-preview-ai {
+  width: min(360px, 40%);
+  min-width: 220px;
+  max-width: 50%;
+  order: -1;
+  min-height: 0;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+}
+.file-preview-ai[hidden] {
+  display: none;
+}
+html[data-ai-panel-side='right'] .file-preview-ai {
+  order: 1;
+  border-right: 0;
+  border-left: 1px solid var(--border);
+}
+.preview-assistant {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  height: 100%;
+  background: var(--surface);
+}
+.preview-assistant.ws-chat {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  border: 0;
+}
+.preview-assistant-header {
+  direction: ltr;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.preview-assistant-header > * {
+  direction: var(--ui-text-direction);
+}
+.preview-assistant-header strong {
+  flex: 1;
+  min-width: 0;
+}
+.preview-assistant-header button {
+  font-size: 12px;
+}
+.preview-assistant-file {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+  border-bottom: 1px solid var(--border);
+}
+.preview-assistant .ws-chat-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+.preview-assistant .ws-chat-composer {
+  flex-shrink: 0;
+  padding: 10px;
+}
+.preview-assistant-notice {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.preview-assistant .nawa-chat-model-control {
+  min-width: 0;
+  max-width: 100%;
+  flex: 1;
+}
+.preview-assistant .nawa-chat-model-control select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}

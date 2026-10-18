@@ -68,7 +68,11 @@ it('reports different extraction, native and analytical coverage precisely', () 
     inspection: false,
     ocr: true,
   })
-  expect(fileCapabilities('/files/notes.txt')).toMatchObject({ search: true, inspection: false })
+  expect(fileCapabilities('/files/notes.txt')).toMatchObject({
+    search: true,
+    inspection: true,
+    editing: true,
+  })
   expect(fileCapabilities('/files/report.docx')).toMatchObject({
     search: true,
     editing: true,

@@ -424,15 +424,17 @@ export default function App() {
 
   /** The exact text a save would write right now; null before the document is ready. */
   const currentFileText = useCallback((): string | null => {
+    if (statusRef.current !== 'ready') return null
+    if (sourceMode) return writeSourceText(sourceTextRef.current, sourceFormatRef.current)
     const current = editorRef.current
-    if (!current || statusRef.current !== 'ready') return null
+    if (!current) return null
     return serializeMarkdown(
       envelopeRef.current,
       current.state.doc,
       () => bodyMarkdown(current),
       originalSourceRef.current,
     )
-  }, [])
+  }, [sourceMode])
 
   const openSource = useCallback(() => {
     const text = currentFileText()
@@ -813,15 +815,9 @@ export default function App() {
     // editor is still loading keeps the main process retrying its request
     // instead of failing on a document that is merely not ready yet.
     const offReadText = window.markdownApi.onReadTextRequest(() => {
-      const current = editorRef.current
-      if (!current || statusRef.current !== 'ready') return
       try {
-        const text = serializeMarkdown(
-          envelopeRef.current,
-          current.state.doc,
-          () => bodyMarkdown(current),
-          originalSourceRef.current,
-        )
+        const text = currentFileText()
+        if (text === null) return
         window.markdownApi.sendReadTextResult({ text })
       } catch (err) {
         window.markdownApi.sendReadTextResult({
@@ -913,7 +909,7 @@ export default function App() {
       offRenamed()
       window.removeEventListener('keydown', onKeyDown, true)
     }
-  }, [doSave, printDoc, zoomIn, zoomOut, openFind, toggleSource, loadFromPath, t])
+  }, [doSave, printDoc, zoomIn, zoomOut, openFind, toggleSource, loadFromPath, currentFileText, t])
 
   // Chromium reports trackpad pinch as ctrl+wheel. Also support Cmd/Ctrl+scroll
   // while the pointer is over the document canvas.
@@ -1009,7 +1005,19 @@ export default function App() {
   }, [])
 
   const aiDeps: MarkdownAiDeps = {
-    getEditor: () => editorRef.current,
+    getEditor: () => (sourceMode ? null : editorRef.current),
+    source: sourceMode
+      ? {
+          getText: () => sourceTextRef.current,
+          setText: (text) => {
+            if (!sourceRef.current) throw new Error('Source editor is not ready.')
+            sourceRef.current.editDoc(text)
+          },
+          getPath: () => filePathRef.current,
+          getSelection: () => sourceRef.current?.selection() ?? null,
+          clearSelection: () => sourceRef.current?.clearSelection(),
+        }
+      : undefined,
     // envelopeRef, not fmText state: a write-then-read within one AI run must
     // see the new value before React commits
     getFrontmatter: () => frontmatterInner(envelopeRef.current.frontmatter),
@@ -1021,10 +1029,15 @@ export default function App() {
     // file-text round-trip) so a rollback also reverts set_frontmatter and
     // an untouched block restores byte-for-byte
     getSnapshot: () => ({
+      ...(sourceMode ? { source: sourceTextRef.current } : {}),
       body: editorRef.current ? bodyMarkdown(editorRef.current) : '',
       frontmatter: envelopeRef.current.frontmatter,
     }),
     restoreSnapshot: (snapshot) => {
+      if (sourceMode) {
+        if (snapshot.source !== undefined) sourceRef.current?.editDoc(snapshot.source)
+        return
+      }
       const current = editorRef.current
       if (!current) return
       envelopeRef.current.frontmatter = snapshot.frontmatter
@@ -1100,6 +1113,11 @@ export default function App() {
         spellcheck={spellcheck}
         onToggleSpellcheck={() => setSpellcheck((v) => !v)}
         sourceMode={sourceMode}
+        sourceEmpty={sourceMode && !sourceTextRef.current.length}
+        sourceHasSelection={() => {
+          const selection = sourceRef.current?.selection()
+          return !!selection && selection.from !== selection.to
+        }}
         sourceHistory={sourceMode ? sourceHistory : undefined}
         aiOpen={aiOpen}
         onToggleAi={() => setAiOpen((v) => !v)}
@@ -1177,6 +1195,7 @@ export default function App() {
                   setSourceRev((n) => n + 1)
                   markDirty()
                 }}
+                onSelectionChange={() => setSourceRev((n) => n + 1)}
               />
             </div>
           ) : (

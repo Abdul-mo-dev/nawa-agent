@@ -66,7 +66,7 @@ export interface DetachedTab {
 interface TabRecord {
   id: string
   kind: TabKind
-  /** null for the Home tab — it's rendered by the shell window's own webContents */
+  /** Home and preview tabs are rendered by the shell window's own webContents. */
   view: WebContentsView | null
   title: string
   filePath?: string
@@ -329,6 +329,18 @@ export class TabManager {
     this.activateTab(HOME_ID)
   }
 
+  openPreviewTab(path: string): string {
+    const existing = this.findTabOfKindByPath('preview', path)
+    if (existing) {
+      this.activateTab(existing)
+      return existing
+    }
+    const id = `t${this.nextId++}`
+    this.tabs.push({ id, kind: 'preview', view: null, title: basename(path), filePath: path })
+    this.activateTab(id)
+    return id
+  }
+
   /** The in-app user manual (issue #1520): a closable tab showing the shell
       renderer's help mode — the same bundle, branched on ?mode=help, so no
       second renderer build is needed. */
@@ -589,13 +601,15 @@ export class TabManager {
     newPath: string,
   ): Array<{ kind: TabKind; webContents: WebContents }> {
     const affected: Array<{ kind: TabKind; webContents: WebContents }> = []
+    let changed = false
     for (const tab of this.tabs) {
       if (tab.filePath !== oldPath) continue
       tab.filePath = newPath
       tab.title = basename(newPath)
+      changed = true
       if (tab.view) affected.push({ kind: tab.kind, webContents: tab.view.webContents })
     }
-    if (affected.length > 0) this.onChanged()
+    if (changed) this.onChanged()
     return affected
   }
 
@@ -835,7 +849,7 @@ export class TabManager {
     return this.tabs.find(
       (t) =>
         t.kind === kind &&
-        t.view &&
+        (t.view || t.kind === 'preview') &&
         t.filePath &&
         !t.present &&
         canonicalPath(t.filePath) === wanted,

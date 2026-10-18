@@ -11,7 +11,7 @@ import '@genoffice/ui/chat-model-picker.css'
 import { AiPanelSideButton, useAiPanelWidth } from '@genoffice/ui'
 import { useEffect, useRef, useState } from 'react'
 import type { ReactElement, ReactNode } from 'react'
-import { AgentLoop, composeSkills, streamText } from '@genoffice/agent-core'
+import { AgentLoop, composeSkills, streamText, type AgentSkill } from '@genoffice/agent-core'
 import { imageGenerationAvailable, type AiSettings } from '@genoffice/ai-provider/browser'
 import {
   AiComposer,
@@ -32,6 +32,7 @@ import sendStop from '../assets/send-stop.png'
 import { clearAiHighlights } from '../editor/aiHighlight'
 import { setInactiveSelectionShown } from '../editor/inactiveSelection'
 import { createMarkdownSkill, MARKDOWN_RULES } from './markdown-skill'
+import { createSourceSkill, type SourceAiAccess } from './source-skill'
 import {
   buildDocWriterRequest,
   countMarkdownBlocks,
@@ -94,6 +95,8 @@ const SCOPE_TEXT_MAX = 200
 /** structured, not the serialized file text: a body starting with `---` must
  *  never be re-parsed as a frontmatter block on rollback */
 export interface DocSnapshot {
+  /** Literal source buffer when the open file is text/configuration/code. */
+  source?: string
   /** document body as markdown */
   body: string
   /** raw frontmatter block (fences included), kept byte-for-byte */
@@ -113,6 +116,7 @@ export interface AiPreset {
 }
 
 export interface MarkdownAiDeps {
+  source?: SourceAiAccess
   getEditor(): Editor | null
   /** inner YAML of the properties block, read synchronously (write-then-read within one run) */
   getFrontmatter(): string
@@ -362,7 +366,7 @@ export function AiPanel({
   useEffect(
     () =>
       registerDirectoryEditor(() => ({
-        kind: 'markdown',
+        kind: depsRef.current.source ? 'text' : 'markdown',
         path: directoryEditorPath.current,
         loop: loopRef.current,
         configure: (options) => {
@@ -372,22 +376,34 @@ export function AiPanel({
     [],
   )
   if (!loopRef.current) {
+    const sourceSkill = createSourceSkill(() => depsRef.current.source)
+    const markdownSkill = createMarkdownSkill(
+      () => depsRef.current.getEditor(),
+      {
+        read: () => depsRef.current.getFrontmatter(),
+        write: (inner) => depsRef.current.setFrontmatter(inner),
+      },
+      () => imageGenerationAvailable(settingsRef.current, gskLoggedInRef.current),
+      () => ({
+        write: (spec, onProgress, signal) => runDocWriterRef.current(spec, onProgress, signal),
+      }),
+    )
+    const currentSkill = () => (depsRef.current.source ? sourceSkill : markdownSkill)
+    const documentSkill: AgentSkill = {
+      id: 'open-document',
+      get systemPrompt() {
+        return currentSkill().systemPrompt
+      },
+      get tools() {
+        return currentSkill().tools
+      },
+      buildContext: () => currentSkill().buildContext?.() ?? '',
+      executeTool: (call, signal) => currentSkill().executeTool(call, signal),
+      verifyResponse: (text, executed) => currentSkill().verifyResponse?.(text, executed) ?? null,
+    }
     loopRef.current = new AgentLoop<DocSnapshot>({
       transport: transportRef.current,
-      skill: composeSkills('markdown+search', '', [
-        createMarkdownSkill(
-          () => depsRef.current.getEditor(),
-          {
-            read: () => depsRef.current.getFrontmatter(),
-            write: (inner) => depsRef.current.setFrontmatter(inner),
-          },
-          () => imageGenerationAvailable(settingsRef.current, gskLoggedInRef.current),
-          () => ({
-            write: (spec, onProgress, signal) => runDocWriterRef.current(spec, onProgress, signal),
-          }),
-        ),
-        createSearchSkill(),
-      ]),
+      skill: composeSkills('markdown+search', '', [documentSkill, createSearchSkill()]),
       captureSnapshot: () => depsRef.current.getSnapshot(),
       systemSuffix: () => aiLangDirective(langRef.current),
       events: {
@@ -640,19 +656,40 @@ export function AiPanel({
 
   // scope chip data, recomputed per render (the scope tick above keeps it fresh)
   const editor = depsRef.current.getEditor()
+  const source = deps.source
+  const sourceSelection = source?.getSelection()
   const liveSelection = editor?.state.selection
   const selectionText =
-    !editor || !liveSelection || liveSelection.empty
-      ? ''
-      : editor.state.doc.textBetween(liveSelection.from, liveSelection.to, '\n', ' ').trim()
+    source && sourceSelection
+      ? source.getText().slice(sourceSelection.from, sourceSelection.to).trim()
+      : !editor || !liveSelection || liveSelection.empty
+        ? ''
+        : editor.state.doc.textBetween(liveSelection.from, liveSelection.to, '\n', ' ').trim()
   const hasScopeSelection = selectionText.length > 0
 
   /** the × on the scope chip: collapse the selection so the run targets the whole document */
   const clearScopeSelection = (): void => {
+    if (source) {
+      source.clearSelection()
+      return
+    }
     if (editor) editor.commands.setTextSelection(editor.state.selection.to)
   }
 
   const selectionScopeQuote = (): AiScopeQuoteData | undefined => {
+    const source = depsRef.current.source
+    if (source) {
+      const selection = source.getSelection()
+      const text = selection
+        ? source.getText().slice(selection.from, selection.to).replace(/\s+/g, ' ').trim()
+        : ''
+      return text
+        ? {
+            label: t('aiScopeSelection', { words: countWords(text) }),
+            text: text.length > SCOPE_TEXT_MAX ? `${text.slice(0, SCOPE_TEXT_MAX)}…` : text,
+          }
+        : undefined
+    }
     const ed = depsRef.current.getEditor()
     if (!ed || ed.state.selection.empty) return undefined
     const { from, to } = ed.state.selection

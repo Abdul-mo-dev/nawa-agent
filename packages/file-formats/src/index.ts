@@ -7,6 +7,7 @@ export {
   removeMacroRelationships,
 } from './office-package'
 import extensions from './extensions.json'
+import previews from './preview-extensions.json'
 export { openDocumentMimeForPath, openDocumentManifestEncrypted } from './opendocument'
 
 export const OFFICE_PACKAGE_METADATA_LIMIT = 16 * 1024 * 1024
@@ -14,13 +15,22 @@ export const OFFICE_PACKAGE_METADATA_LIMIT = 16 * 1024 * 1024
 /** Every editor entry point uses this catalog, including packaging metadata. */
 export const EDITOR_EXTENSIONS = extensions
 export const EDITOR_FILE_EXTENSIONS = Object.values(extensions).flat()
-export const EDITOR_DIALOG_EXTENSIONS = EDITOR_FILE_EXTENSIONS
+export const PREVIEW_IMAGE_EXTENSIONS = previews.image
+export const PREVIEW_MESSAGE_EXTENSIONS = previews.message
+export const PREVIEW_FILE_EXTENSIONS = [...PREVIEW_IMAGE_EXTENSIONS, ...PREVIEW_MESSAGE_EXTENSIONS]
+export const OPENABLE_FILE_EXTENSIONS = [...EDITOR_FILE_EXTENSIONS, ...PREVIEW_FILE_EXTENSIONS]
+export const EDITOR_DIALOG_EXTENSIONS = OPENABLE_FILE_EXTENSIONS
+/** Source editing never passes through Markdown or executes scripts. CSV/TSV belong to Sheets. */
+export const SOURCE_TEXT_EXTENSIONS = extensions.markdown.filter(
+  (ext) => !['md', 'markdown'].includes(ext),
+)
 export const LEGACY_OFFICE_EXTENSIONS = ['doc', 'dot', 'ppt', 'pps', 'pot'] as const
 export type LegacyOfficeExtension = (typeof LEGACY_OFFICE_EXTENSIONS)[number]
 export const OPENDOCUMENT_IMPORT_EXTENSIONS = ['odt', 'odp'] as const
 export const OFFICE_IMPORT_EXTENSIONS = [
   ...LEGACY_OFFICE_EXTENSIONS,
   ...OPENDOCUMENT_IMPORT_EXTENSIONS,
+  'rtf',
 ] as const
 export type OfficeImportExtension = (typeof OFFICE_IMPORT_EXTENSIONS)[number]
 
@@ -36,6 +46,7 @@ export function legacyOfficeTarget(path: string): 'docx' | 'pptx' | undefined {
 export function officeImportTarget(path: string): 'docx' | 'pptx' | undefined {
   const extension = /\.([^.\\/]+)$/.exec(path)?.[1]?.toLowerCase()
   if (extension === 'odt') return 'docx'
+  if (extension === 'rtf') return 'docx'
   if (extension === 'odp') return 'pptx'
   return legacyOfficeTarget(path)
 }

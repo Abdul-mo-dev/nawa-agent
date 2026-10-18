@@ -1,4 +1,4 @@
-import { EDITOR_FILE_EXTENSIONS, extensionPattern } from '@genoffice/file-formats'
+import { OPENABLE_FILE_EXTENSIONS, extensionPattern } from '@genoffice/file-formats'
 /// Drag & drop a local document file anywhere in the app window to open it.
 ///
 /// Renderers share one main process (the shell hosts every editor view), so the
@@ -18,12 +18,12 @@ export const DROP_OPEN_CHANNEL = 'app:open-dropped-files'
 
 /** Extensions routed by apps/shell routeDocumentPath — keep in sync there and
  *  with OPEN_DIALOG_EXTENSIONS / OPEN_LOCAL_EXTENSIONS on the home screen. */
-export const OPENABLE_DOC_RE = extensionPattern(EDITOR_FILE_EXTENSIONS)
+export const OPENABLE_DOC_RE = extensionPattern(OPENABLE_FILE_EXTENSIONS)
 
 /** Recognized-but-unsupported formats: kept in the sent payload so the shell
  *  can show its "not supported" dialog instead of dropping them silently.
  *  Mirrors UNSUPPORTED_DOC_RE in apps/shell/src/main/index.ts. */
-export const KNOWN_UNSUPPORTED_DOC_RE = /\.(rtf|pages|key|numbers)$/i
+export const KNOWN_UNSUPPORTED_DOC_RE = /\.(pages|key|numbers)$/i
 
 /** upper bound on how many files one drop may ask to open */
 const MAX_DROPPED_FILES = 20

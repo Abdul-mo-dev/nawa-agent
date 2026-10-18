@@ -202,6 +202,8 @@ export const strings = {
     aiTidyBtn: 'AI Format',
     aiTidyPrompt:
       'Tidy up the document formatting — fix heading levels, unify list formatting, remove unnecessary bold and italics, and clean up extra blank lines. Adjust formatting only — do not change any text content',
+    aiSourceTidyPrompt:
+      'Format the selected source text, or the whole file if nothing is selected. Preserve the file syntax, all values, text and program behavior. Adjust indentation and whitespace only where it is safe for this file type. Do not add Markdown formatting.',
     aiNewChat: 'New chat',
     aiCollapsePanel: 'Collapse panel',
     aiEmptyTitle: 'Ask about this document',
@@ -442,6 +444,8 @@ export const strings = {
     aiTidyBtn: 'AI 書式整理',
     aiTidyPrompt:
       '文書全体の書式を整理してください。見出しレベルの修正、リスト形式の統一、不要な太字・斜体の削除、余分な空行の整理など。書式のみを調整し、本文の内容は一切変更しないでください',
+    aiSourceTidyPrompt:
+      '選択したソーステキストを整形してください。選択範囲がなければファイル全体を対象にしてください。構文、値、テキスト、プログラムの動作を維持し、このファイル形式で安全な場合に限りインデントと空白を調整してください。Markdown の書式は追加しないでください。',
     aiNewChat: '新しいチャット',
     aiCollapsePanel: 'パネルを折りたたむ',
     aiEmptyTitle: 'このドキュメントについて質問',
@@ -680,6 +684,8 @@ export const strings = {
     aiTidyBtn: 'تنسيق AI',
     aiTidyPrompt:
       'رتّب تنسيق المستند: صحّح مستويات العناوين، ووحّد تنسيق القوائم، وأزل الخط الغامق والمائل غير الضروريين، ونظّف الأسطر الفارغة الزائدة. عدّل التنسيق فقط دون تغيير أي محتوى نصي',
+    aiSourceTidyPrompt:
+      'نسّق النص المصدري المحدد، أو الملف بأكمله إذا لم يوجد تحديد. حافظ على بنية الملف وجميع القيم والنصوص وسلوك البرنامج. عدّل المسافات والمسافات البادئة فقط عندما يكون ذلك آمنًا لهذا النوع من الملفات. لا تضف تنسيق Markdown.',
     aiNewChat: 'محادثة جديدة',
     aiCollapsePanel: 'طي اللوحة',
     aiEmptyTitle: 'اسأل عن هذا المستند',

@@ -50,10 +50,10 @@ describe('handleDroppedFiles', () => {
 
   it('warns once with the combined extensions for known-unsupported drops', () => {
     const deps = fakeDeps()
-    handleDroppedFiles(['/tmp/old.key', '/tmp/deck.pages', '/tmp/note.rtf'], deps)
+    handleDroppedFiles(['/tmp/old.key', '/tmp/deck.pages', '/tmp/note.numbers'], deps)
     expect(deps.opened).toEqual([])
     expect(deps.revealed).not.toHaveBeenCalled()
-    expect(deps.warned).toEqual(['unsupported: key, pages, rtf'])
+    expect(deps.warned).toEqual(['unsupported: key, pages, numbers'])
   })
 
   it('opens the supported files and warns about the rest in a mixed drop', () => {
@@ -67,7 +67,7 @@ describe('handleDroppedFiles', () => {
   it('ignores junk payloads and unrecognized file types entirely', () => {
     const deps = fakeDeps()
     handleDroppedFiles(null, deps)
-    handleDroppedFiles(['/tmp/photo.png', 42, ''], deps)
+    handleDroppedFiles(['/tmp/unknown.bin', 42, ''], deps)
     expect(deps.opened).toEqual([])
     expect(deps.revealed).not.toHaveBeenCalled()
     expect(deps.warned).toEqual([])

@@ -1,4 +1,5 @@
 import './conversation-history'
+import './file-preview'
 import './rag'
 import './myagent-settings'
 import './analytics'

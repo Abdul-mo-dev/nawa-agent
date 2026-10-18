@@ -1,4 +1,6 @@
 export { parseFileToText, type ParsedFile, type ParsedFileKind } from './parse'
+export { decodeSource } from './source-text'
+export { readMessage, messageDocument } from './message'
 export { docToText } from './doc'
 export { docxToText } from './docx'
 export { pptToText } from './ppt'

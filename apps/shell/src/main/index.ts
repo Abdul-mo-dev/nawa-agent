@@ -5,6 +5,7 @@ import {
 } from '@genoffice/file-formats'
 import { execSync, spawn } from 'node:child_process'
 import { registerWorkspaceIpc } from './workspace-ipc'
+import { PREVIEW_RE, registerFilePreviewIpc } from './file-preview'
 import { configureDirectoryNative } from './directory-actions/native-runtime'
 import { assertDirectoryStagePicker } from '../../../../packages/electron-utils/src/directory-stage'
 import {
@@ -1293,6 +1294,11 @@ function routeDocumentPath(filePath: string): boolean {
   // a detached editor window already shows this file — focus it, never a second copy
   if (focusDetachedByPath(filePath)) return true
   if (!tabManager) return false
+  if (PREVIEW_RE.test(filePath) && shellWindow && !shellWindow.isDestroyed()) {
+    recordRecentFile(filePath)
+    tabManager.openPreviewTab(filePath)
+    return true
+  }
   if (DOCX_RE.test(filePath)) {
     recordRecentFile(filePath)
     const existing = tabManager.findDocsTabByPath(filePath)
@@ -1859,6 +1865,11 @@ function registerHomeIpc(): void {
     openDocumentPath(path)
     fileIndexer?.refresh()
   })
+
+  registerFilePreviewIpc(
+    (sender) => !shellWindow?.isDestroyed() && shellWindow?.webContents.id === sender.id,
+    (path) => !!tabManager?.list().some((tab) => tab.kind === 'preview' && tab.filePath === path),
+  )
 
   ipcMain.handle(HOME_CHANNELS.browse, async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender) ?? shellWindow
@@ -2460,6 +2471,7 @@ const TAB_MENU_ICON: Record<TabKind, keyof MenuIconSet> = {
   markdown: 'md',
   html: 'html',
   help: 'home',
+  preview: 'home',
 }
 
 // tab views see neither DOM events nor a focus change when the user clicks the

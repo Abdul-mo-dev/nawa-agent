@@ -2,7 +2,10 @@ import { registerHistoryIpc } from './history/history-ipc'
 import { registerDirectoryActionsIpc } from './directory-actions/ipc'
 import { app, BrowserWindow, dialog, ipcMain, type WebContents } from 'electron'
 import { watch, type FSWatcher } from 'node:fs'
-import { join } from 'node:path'
+import { join, extname } from 'node:path'
+import { readFile, stat } from 'node:fs/promises'
+import { PREVIEW_IMAGE_EXTENSIONS } from '@genoffice/file-formats'
+import { ocrImage } from './rag/ocr'
 import type { WorkspaceFileText } from '../shared/home-api'
 import { HOME_CHANNELS } from '../shared/home-api'
 import { WorkspaceFolderStore } from './workspace-folders'
@@ -98,7 +101,27 @@ export function registerWorkspaceIpc(options: WorkspaceIpcOptions): {
   registerDirectoryActionsIpc({
     roots: async () => (await getStore().list()).map((root) => root.path),
     isHomeSender: options.isHomeSender,
-    readText: options.readFile,
+    readText: async (path, maxChars, offset) => {
+      if (!PREVIEW_IMAGE_EXTENSIONS.includes(extname(path).slice(1).toLowerCase()))
+        return options.readFile(path, maxChars, offset)
+      if ((await stat(path)).size > 64 * 1024 * 1024)
+        return { ok: false, error: 'Image exceeds the 64 MiB OCR limit.' }
+      const text = await ocrImage(await readFile(path), AbortSignal.timeout(90000))
+      if (!text?.trim())
+        return {
+          ok: false,
+          error: 'Local OCR found no readable text, or the OCR helper is unavailable.',
+        }
+      const recognized =
+        'Recognized image text (OCR; exact wording has not been visually verified):\n' + text
+      const start = Math.min(offset, recognized.length)
+      return {
+        ok: true,
+        offset: start,
+        totalChars: recognized.length,
+        text: recognized.slice(start, start + maxChars),
+      }
+    },
     extract: async (path) => {
       const result = await options.readFile(path, 12000, 0)
       if (!result.ok) throw new Error(result.error || 'Text extraction failed.')

@@ -7,7 +7,7 @@ Uninstall removes Nawa's own registrations and Explorer New templates.
 
 | Editor        | Opens                                                                                | Saves                                                |
 | ------------- | ------------------------------------------------------------------------------------ | ---------------------------------------------------- |
-| Docs          | `.docx`, `.docm`, `.dotx`, `.dotm`, `.doc`, `.dot`, `.odt`                           | `.docx`, `.docm`, `.dotx`, `.dotm`                   |
+| Docs          | `.docx`, `.docm`, `.dotx`, `.dotm`, `.doc`, `.dot`, `.odt`, `.rtf`                   | `.docx`, `.docm`, `.dotx`, `.dotm`                   |
 | Sheets        | `.xlsx`, `.xltx`, `.xlsm`, `.xltm`, `.xls`, `.csv`, `.tsv`, `.ods`, `.xlsb`          | `.xlsx`, `.xltx`, `.xlsm`, `.xltm`, `.csv`           |
 | Slides        | `.pptx`, `.ppsx`, `.potx`, `.pptm`, `.ppsm`, `.potm`, `.ppt`, `.pps`, `.pot`, `.odp` | `.pptx`, `.ppsx`, `.potx`, `.pptm`, `.ppsm`, `.potm` |
 | PDF           | `.pdf`                                                                               | `.pdf`                                               |
@@ -76,11 +76,16 @@ this implementation.
 
 The text editor opens `.md` and `.markdown` in its Markdown block editor.
 `.txt`, `.json`, `.jsonl`, `.ndjson`, `.yaml`, `.yml`, `.toml`, `.ini`, `.xml`,
-`.log`, `.py`, `.js`, `.jsx`, `.ts`, `.tsx`, `.cs`, `.rs`, `.go`, `.java`, `.c`,
+`.log`, `.py`, `.js`, `.mjs`, `.cjs`, `.jsx`, `.ts`, `.tsx`, `.cs`, `.rs`, `.go`, `.java`, `.c`,
 `.cpp`, `.h`, `.hpp`, `.sql`, `.sh`, `.ps1` and `.css` use the source editor.
 JSON retains its existing highlighting; the other source formats use plain text
 editing. Source saves preserve BOM and line-ending style and do not interpret
 Markdown image references as assets.
+
+The open-file assistant reads the live source buffer, including unsaved changes
+and the current selection. Its source edits are undoable in the visible editor
+and follow the normal Save/AutoSave flow. The shell's open-document reader uses
+that same buffer. Source scrolling stays inside the editor viewport.
 
 The browser-safe catalog lives in
 [`packages/file-formats/src/extensions.json`](../packages/file-formats/src/extensions.json).
@@ -92,6 +97,52 @@ installer to receive the additional OS associations.
 MCP session generation and explicit-path saves still use `.docx`, `.xlsx` and
 `.pptx`. Editor support and directory-agent inspection/editing capabilities are
 separate catalogs; widening one does not advertise unsupported agent operations.
+
+## Source editing, images and saved emails
+
+Directory chat can inspect, create and edit the supported source-text extensions
+through `read_text`, `replace_text` and `write_text`. Edits use an isolated private
+copy and the existing preparation approval, before/after review, save approval and
+backup. Replacement requires a current SHA-256 revision and one exact match.
+Source edits preserve UTF-8/UTF-16 BOMs and existing line endings. Unsupported or
+malformed encodings and binary NULs are rejected rather than rewritten lossily.
+Source editing is bounded to 8 MiB; JSON edits must parse. Other languages receive
+an encoding check, not syntax validation or execution. CSV/TSV continue to use
+Sheets and save reviewed XLSX copies.
+
+RTF uses the same installed LibreOffice importer as legacy Word documents. It
+opens in Docs and directory inspection as a converted model; reviewed edits save
+a new DOCX sibling. Reading RTF also requires LibreOffice. RTF export is not
+supported, and the source remains unchanged.
+
+PNG, JPEG, WebP, GIF, BMP and TIFF open in file tabs in the central pane with zoom,
+fit and pan. The image runtime normalizes the first frame/page to PNG;
+preview accepts files up to 64 MiB and images up to 20 million pixels. Directory
+`read_file` can recognize image text through the installed local OCR helper,
+without indexing first. OCR is labeled as recognized text and cannot establish
+visual meaning or exact wording. The file assistant receives a bounded view of
+the displayed frame when the selected model supports vision; text-only models
+use local OCR. Images remain ineligible for content editing.
+
+EML and MSG open in central file tabs with headers, body text, attachment
+inventory and extraction warnings. HTML bodies are reduced to text; remote
+resources are never loaded. The directory assistant can read messages, summarize
+them or draft a separate reply. It cannot save changes to the original email or
+send mail. MSG search indexes Unicode/ANSI MAPI properties and readable HTML;
+compressed-RTF-only and encrypted bodies are reported as unavailable. MSG
+attachment contents and embedded messages are not extracted. EML retains its
+existing searchable text-attachment/OCR support. Message previews accept 64 MiB
+inputs, list at most 100 attachments, and bound body text to two million characters.
+
+Each preview has a file assistant and separate saved chat history, including for
+files opened outside registered workspace folders. Email tools read the displayed
+snapshot, not another selected file. Closing a tab revokes its preview read access;
+OCR rejects a file that changed since the displayed snapshot. Refresh reloads the
+preview. Tab switching and closing cancel any active file chat request.
+
+Preview extensions live in `packages/file-formats/src/preview-extensions.json`.
+Both catalogs drive open dialogs, OS launch handling, drag-and-drop, folder lists
+and installer associations. Preview-only formats do not advertise editing.
 
 Folder chat can inspect and edit individually selected `.doc`, `.dot`, `.ppt`,
 `.pps` and `.pot` files through the same LibreOffice importer. `update_file`

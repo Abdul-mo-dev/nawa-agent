@@ -1,13 +1,13 @@
-import { EDITOR_FILE_EXTENSIONS, extensionPattern } from '@genoffice/file-formats'
+import { OPENABLE_FILE_EXTENSIONS, extensionPattern } from '@genoffice/file-formats'
 import { existsSync } from 'node:fs'
 
 /** Every extension the suite opens; also the contract the packaged file
  *  associations must advertise (tests/file-associations.test.ts), so a file
  *  the app accepts is one the OS can send it. */
-export const LAUNCHABLE_EXTS = EDITOR_FILE_EXTENSIONS
+export const LAUNCHABLE_EXTS = OPENABLE_FILE_EXTENSIONS
 
 const SUPPORTED_LAUNCH_RE = extensionPattern(LAUNCHABLE_EXTS)
-const UNSUPPORTED_LAUNCH_RE = /\.(rtf|pages|key|numbers)$/i
+const UNSUPPORTED_LAUNCH_RE = /\.(pages|key|numbers)$/i
 
 interface LaunchPayload {
   launchPaths?: unknown

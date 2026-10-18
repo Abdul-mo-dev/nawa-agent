@@ -18,6 +18,7 @@ import { useI18n } from '../locale'
 import type { HomeTarget } from '../Home'
 import type { SettingsSection } from '../SettingsModal'
 import { WorkspaceChat } from '../WorkspaceChat'
+import { FilePreview } from '../FilePreview'
 import '../workspace.css'
 import { DirectoryTree } from './Tree'
 import { FileList } from './FileList'
@@ -1268,7 +1269,9 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
             })
           }}
         >
-          {editorActive ? (
+          {editorTab?.kind === 'preview' && editorTab.filePath ? (
+            <FilePreview key={editorTab.id} path={editorTab.filePath} tabId={editorTab.id} />
+          ) : editorActive ? (
             <div className="ex-editor-placeholder" aria-hidden="true">
               <Icon name="open" size={28} />
               <span>{editorTab?.title}</span>

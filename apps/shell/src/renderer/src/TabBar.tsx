@@ -4,6 +4,7 @@ import type { TabsApi, TabSummary } from '../../shared/tabs-api'
 import { TEAR_OFF_SLACK, insertionIndexForX, isBeyondBand } from '../../shared/tab-drag-geometry'
 import { notifyFilesChanged } from './file-events'
 import { useI18n } from './locale'
+import { DocumentIcon } from './explorer/Icons'
 
 declare global {
   interface Window {
@@ -139,6 +140,7 @@ const KIND_ICON: Record<TabSummary['kind'], ReactElement> = {
   markdown: <MarkdownIcon />,
   html: <HtmlIcon />,
   help: <HelpIcon />,
+  preview: <DocumentIcon size={16} />,
 }
 
 /**
@@ -547,7 +549,13 @@ export function TabBar() {
             >
               {/* highlight plate behind the content — hover capsule / active white body */}
               <span className="tab-plate" aria-hidden="true" />
-              <span className="tab-icon">{KIND_ICON[tab.kind]}</span>
+              <span className="tab-icon">
+                {tab.kind === 'preview' ? (
+                  <DocumentIcon ext={fileExtension(tab.filePath ?? '')} size={16} />
+                ) : (
+                  KIND_ICON[tab.kind]
+                )}
+              </span>
               {renaming?.id === tab.id ? (
                 <input
                   className="tab-rename-input"

@@ -3,6 +3,7 @@ import {
   OFFICE_IMPORT_EXTENSIONS,
   legacyOfficeTarget,
   officeImportTarget,
+  SOURCE_TEXT_EXTENSIONS,
 } from '@genoffice/file-formats'
 
 export const SPREADSHEET_COPY_EXTENSIONS = ['xls', 'ods', 'xlsb', 'csv', 'tsv'] as const
@@ -26,6 +27,7 @@ export function directoryImportPath(path: string): string {
 }
 
 export const NATIVE_FILE_EXTENSIONS = [
+  ...SOURCE_TEXT_EXTENSIONS.map((extension) => `.${extension}`),
   '.docx',
   '.xlsx',
   '.pptx',

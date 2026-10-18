@@ -1,4 +1,4 @@
-import { EDITOR_FILE_EXTENSIONS, EDITOR_FILTER_FAMILIES } from '@genoffice/file-formats'
+import { OPENABLE_FILE_EXTENSIONS, EDITOR_FILTER_FAMILIES } from '@genoffice/file-formats'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { DragEvent as ReactDragEvent, ReactElement } from 'react'
 import logoLockup from './assets/nawa-logo.svg'
@@ -81,7 +81,7 @@ const FILE_ICONS: Record<string, string> = {
 /* Formats the open-local card advertises. Too long for the card at any window
    width, so it ellipsizes and a hover ScreenTip carries the full list. Keep in
    sync with the main-process open-dialog filter (OPEN_DIALOG_EXTENSIONS). */
-const OPEN_LOCAL_EXTENSIONS = EDITOR_FILE_EXTENSIONS.map((ext) => `.${ext}`).join(' / ')
+const OPEN_LOCAL_EXTENSIONS = OPENABLE_FILE_EXTENSIONS.map((ext) => `.${ext}`).join(' / ')
 
 /** drag payload of home file/folder rows (JSON array of absolute paths) */
 const DRAG_PATHS_MIME = 'application/x-genoffice-paths'

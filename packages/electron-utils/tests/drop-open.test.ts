@@ -144,9 +144,9 @@ describe('partitionDropPayload', () => {
   })
 
   it('collects known-unsupported extensions uniquely, first-seen order', () => {
-    const result = partitionDropPayload(['old.key', 'x.pages', 'y.rtf', 'z.key'])
+    const result = partitionDropPayload(['old.key', 'x.pages', 'y.numbers', 'z.key'])
     expect(result.supported).toEqual([])
-    expect(result.unsupportedExts).toEqual(['key', 'pages', 'rtf'])
+    expect(result.unsupportedExts).toEqual(['key', 'pages', 'numbers'])
   })
 
   it('caps the number of openable files at 20', () => {
@@ -233,6 +233,7 @@ describe('installDropOpenBridge', () => {
         expect(electronMocks.send).toHaveBeenCalledWith(DROP_OPEN_CHANNEL, [
           '/tmp/report.docx',
           '/tmp/plan.md',
+          '/tmp/photo.png',
         ]),
       )
       expect(ev.preventDefault).toHaveBeenCalled()

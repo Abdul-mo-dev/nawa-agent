@@ -1,0 +1,4 @@
+{
+  "image": ["png", "jpg", "jpeg", "webp", "gif", "bmp", "tif", "tiff"],
+  "message": ["eml", "msg"]
+}
