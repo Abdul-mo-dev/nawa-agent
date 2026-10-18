@@ -1,5 +1,5 @@
 import type { IFunctionInfo } from '@univerjs/engine-formula'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { platformShortcuts } from '@genoffice/i18n'
 import {
   Dropdown,
@@ -239,6 +239,12 @@ interface ExcelShellProps {
   readonly aiBusy: boolean
   readonly chat: readonly AiChatMessage[]
   readonly historicChat?: readonly AiChatMessage[]
+  readonly chatToolbar?: ReactNode
+  readonly chatActions?: (
+    index: number,
+    renderMessage?: (editor: ReactNode) => ReactNode,
+  ) => ReactNode
+  readonly conversationReset?: number
   /// Chat attachments (chips + 📎 button + drag-and-drop), same structure as the
   /// docs/slides AI panels.
   readonly attachments: readonly AttachmentMeta[]
@@ -452,6 +458,9 @@ export function ExcelShell({
   aiBusy,
   chat,
   historicChat,
+  chatToolbar,
+  chatActions,
+  conversationReset,
   attachments,
   attachNotice,
   onPickAttachments,
@@ -941,6 +950,9 @@ export function ExcelShell({
       {/* AI panel docks on the left, full height under the ribbon (unified with docs) */}
       <div className="sheet-body">
         <AiChatPanel
+          chatToolbar={chatToolbar}
+          chatActions={chatActions}
+          conversationReset={conversationReset}
           isOpen={isCopilotOpen}
           hasContent={sheetHasContent}
           chat={chat}

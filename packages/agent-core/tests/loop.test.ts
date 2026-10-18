@@ -71,6 +71,54 @@ describe('runtimePreamble', () => {
 })
 
 describe('AgentLoop', () => {
+  it('regenerates an answer without advertising or executing tools, including unsolicited calls', async () => {
+    const execute = vi.fn(() => ({ output: 'changed', summary: 'changed', mutated: true }))
+    const transport = scriptedTransport([
+      (cb) => {
+        cb.onToolCall({ id: 'unexpected', name: 'do_thing', input: {} })
+        cb.onDone()
+      },
+      (cb) => {
+        cb.onDelta('Rewritten explanation')
+        cb.onDone()
+      },
+      (cb) => {
+        cb.onDelta('Normal reply')
+        cb.onDone()
+      },
+    ])
+    const loop = new AgentLoop({ transport, skill: makeSkill(execute) })
+    loop.prepareAnswerRegeneration('Earlier answer')
+    loop.run('original question')
+    await flush()
+    await flush()
+    expect(execute).not.toHaveBeenCalled()
+    expect(transport.requests.slice(0, 2).map((request) => request.toolCount)).toEqual([0, 0])
+    expect(transport.requests[0].system).toContain('Earlier answer')
+    loop.run('new question')
+    await flush()
+    expect(transport.requests.at(-1)!.toolCount).toBe(1)
+  })
+  it('clears a prepared regeneration when the conversation is reset', async () => {
+    const transport = scriptedTransport([(cb) => cb.onDone()])
+    const loop = new AgentLoop({ transport, skill: makeSkill() })
+    loop.prepareAnswerRegeneration('old answer')
+    loop.reset()
+    loop.run('fresh question')
+    await flush()
+    expect(transport.requests[0].toolCount).toBe(1)
+    expect(transport.requests[0].system).not.toContain('old answer')
+  })
+  it('discards a prepared answer regeneration when Stop is pressed before the run starts', async () => {
+    const transport = scriptedTransport([(cb) => cb.onDone()])
+    const loop = new AgentLoop({ transport, skill: makeSkill() })
+    loop.prepareAnswerRegeneration('previous answer')
+    loop.cancel()
+    loop.run('a different request')
+    await flush()
+    expect(transport.requests[0].toolCount).toBe(1)
+    expect(transport.requests[0].system).not.toContain('previous answer')
+  })
   it('tells the model the current date at the top of the system prompt', async () => {
     const transport = scriptedTransport([(cb) => cb.onDone()])
     const loop = new AgentLoop({ transport, skill: makeSkill(), systemSuffix: () => '\nSUFFIX' })

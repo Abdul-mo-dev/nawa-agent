@@ -21,7 +21,7 @@ export interface AiQueueStripLabels {
 
 export const AI_QUEUE_LABELS: Record<Lang, AiQueueStripLabels> = {
   en: {
-    queuedCount: (n) => `${n} queued`,
+    queuedCount: (n) => `${n} queued · not sent`,
     clearTitle: 'Clear queued messages',
     editTitle: 'Edit queued message',
     removeTitle: 'Remove queued message',
@@ -32,7 +32,7 @@ export const AI_QUEUE_LABELS: Record<Lang, AiQueueStripLabels> = {
     queuePlaceholder: 'Enter to queue · Esc to stop',
   },
   ja: {
-    queuedCount: (n) => `${n} 件が待機中`,
+    queuedCount: (n) => `${n} 件が待機中・未送信`,
     clearTitle: '待機中のメッセージを削除',
     editTitle: '待機中のメッセージを編集',
     removeTitle: '待機中のメッセージを取り除く',
@@ -43,7 +43,7 @@ export const AI_QUEUE_LABELS: Record<Lang, AiQueueStripLabels> = {
     queuePlaceholder: 'Enter で待機 · Esc で停止',
   },
   ar: {
-    queuedCount: (n) => `${n} في قائمة الانتظار`,
+    queuedCount: (n) => `${n} في قائمة الانتظار · لم ترسل بعد`,
     clearTitle: 'إفراغ الرسائل المنتظرة',
     editTitle: 'تعديل الرسالة المنتظرة',
     removeTitle: 'إزالة الرسالة المنتظرة',

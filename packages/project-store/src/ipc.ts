@@ -65,6 +65,16 @@ export interface RebindChatArgs {
 
 /** Project storage API the main process exposes to the renderer */
 export interface ProjectApi {
+  loadManagedConversation?(args: {
+    projectId: string
+    chatId: string
+  }): Promise<{ revision: number; state: unknown } | null>
+  saveManagedConversation?(args: {
+    projectId: string
+    chatId: string
+    revision: number
+    state: unknown
+  }): Promise<{ revision: number }>
   /**
    * Resolves projectId and chatId from a file path.
    * When filePath is null, returns the default project + tempChatId (if provided).

@@ -18,6 +18,7 @@ export interface HistoryMessage {
   id: string
   role: 'user' | 'assistant'
   text: string
+  instruction?: string
   createdAt: number
   error?: boolean
   streaming?: boolean
@@ -29,6 +30,17 @@ export interface HistoryMessage {
   activity?: DirectoryActivity
   request?: HistoryRequest
   citations?: DirectoryCitation[]
+  /** Selection captured at send time; never reconstructed from the live Explorer. */
+  scope?: HistoryScope
+}
+
+export interface ConversationVersion {
+  id: string
+  label: string
+  createdAt: number
+  sourceMessageId: string | null
+  parentVersionId?: string | null
+  kind: 'original' | 'edit' | 'retry' | 'regenerate' | 'delete'
 }
 
 export interface ConversationSummary {
@@ -40,6 +52,9 @@ export interface ConversationSummary {
   updatedAt: number
   messageCount: number
   modelId: string
+  archivedAt?: number | null
+  trashedAt?: number | null
+  sourceConversationId?: string | null
 }
 export interface ConversationRecord extends ConversationSummary {
   revision: number
@@ -47,6 +62,14 @@ export interface ConversationRecord extends ConversationSummary {
   messages: HistoryMessage[]
   baselineId: string | null
   lastChatAt: number | null
+  activeVersionId?: string
+  versions?: ConversationVersion[]
+  /** Committed file outcomes survive changing or removing the visible continuation. */
+  actions?: HistoryMessage[]
+}
+export interface ConversationExport {
+  conversation: ConversationRecord
+  versions: Array<ConversationVersion & { messages: HistoryMessage[]; draft: string }>
 }
 export interface SnapshotSummary {
   id: string
@@ -101,14 +124,41 @@ export interface LegacyConversation {
 }
 export interface ConversationHistoryApi {
   initialize(legacy?: LegacyConversation[]): Promise<{ databasePath: string; imported: number }>
-  list(input: { folder?: string | null; query?: string; offset?: number }): Promise<{
-    conversations: ConversationSummary[]; total: number
+  list(input: {
+    folder?: string | null
+    query?: string
+    offset?: number
+    view?: 'active' | 'archived' | 'trash'
+  }): Promise<{
+    conversations: ConversationSummary[]
+    total: number
   }>
-  create(input: { folder: string | null; folderName: string; modelId?: string }): Promise<ConversationRecord>
+  create(input: {
+    folder: string | null
+    folderName: string
+    modelId?: string
+  }): Promise<ConversationRecord>
   get(id: string): Promise<ConversationRecord>
+  export(id: string): Promise<ConversationExport>
   save(input: HistorySave): Promise<{ revision: number; updatedAt: number; title: string }>
   rename(id: string, title: string): Promise<void>
   delete(id: string): Promise<void>
+  restore(id: string): Promise<void>
+  purge(id: string): Promise<void>
+  archive(id: string, archived: boolean): Promise<void>
+  branch(input: { id: string; revision: number; messageId: string }): Promise<ConversationRecord>
+  revise(input: {
+    id: string
+    revision: number
+    messageId: string
+    kind: 'edit' | 'retry' | 'regenerate' | 'delete'
+    text?: string
+  }): Promise<ConversationRecord>
+  switchVersion(input: {
+    id: string
+    revision: number
+    versionId: string
+  }): Promise<ConversationRecord>
   capture(input: { id: string; scanId: string; scope: HistoryScope }): Promise<SnapshotSummary>
   compare(input: { id: string; scanId: string }): Promise<HistoryComparison>
   cancelScan(scanId: string): Promise<void>
@@ -116,5 +166,7 @@ export interface ConversationHistoryApi {
 }
 
 declare global {
-  interface Window { nawaHistory: ConversationHistoryApi }
+  interface Window {
+    nawaHistory: ConversationHistoryApi
+  }
 }

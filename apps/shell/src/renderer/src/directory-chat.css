@@ -16,6 +16,12 @@
   align-self: flex-end; max-width: 80%; padding: 8px 16px; border-radius: 14px;
   background: var(--ex-hover, var(--surface-subtle)); line-height: 1.5; white-space: pre-wrap;
 }
+.workspace-chat-main .ws-chat-scroll .chat-question-row > .ws-chat-user {
+  box-sizing: border-box; max-width: 100%;
+}
+.workspace-chat-main .ws-chat-scroll .chat-question-row-editing > .ws-chat-user {
+  width: 100%;
+}
 .workspace-chat-main .ws-chat-scroll .ws-chat-assistant {
   align-self: stretch; max-width: 100%; padding: 0; border: 0; border-radius: 0;
   background: none; white-space: normal;

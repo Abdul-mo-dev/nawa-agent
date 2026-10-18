@@ -5,6 +5,7 @@ import {
   directoryModelSettings,
 } from '@genoffice/agent-core'
 import { focusWorksheet } from './sheet-focus'
+import { useEditorConversations } from '@genoffice/ui'
 import {
   activateFormulaClosure,
   applyDefinedNames,
@@ -1069,6 +1070,10 @@ export function App({
   const [chat, setChat] = useState<readonly AiChatMessage[]>([])
   /** History loaded from project-store (read-only transcript, not fed to the model) */
   const [historicChat, setHistoricChat] = useState<readonly AiChatMessage[]>([])
+  const chatManagementRef = useRef<ReturnType<typeof useEditorConversations<AiChatMessage>> | null>(
+    null,
+  )
+  const [conversationReset, setConversationReset] = useState(0)
   // ── Chat attachments (same structure as docs/slides: text types go through the
   // read_attachment tool, images go multimodal) ──
   const [attachments, setAttachments] = useState<readonly AttachmentMeta[]>([])
@@ -1089,6 +1094,7 @@ export function App({
   /** Synchronous re-entrancy guard between runAgent trigger and loop.run
    * (loop.busy is still false while attachment images load asynchronously) */
   const runStartingRef = useRef(false)
+  const runEpochRef = useRef(0)
   /** The shell can repeat its queued-open nudge while the renderer starts.
    * Only one picker/open request may own the workbook session at a time. */
   const workbookOpeningRef = useRef(false)
@@ -1156,7 +1162,7 @@ export function App({
         ): e is {
           role: 'user' | 'assistant'
           text: string
-          tools?: Array<{ summary: string; isError?: boolean }>
+          tools?: Array<{ summary: string; mutated?: boolean | undefined; isError?: boolean }>
         } =>
           !!e &&
           typeof e === 'object' &&
@@ -1230,7 +1236,10 @@ export function App({
                   ...(sessionId !== undefined ? { sessionId } : { newChatId: ids.chatId }),
                 })
               : ids
-          if (!stale()) chatRefIdsRef.current = bound
+          if (!stale()) {
+            chatRefIdsRef.current = bound
+            chatManagementRef.current!.rebind()
+          }
           return
         }
         if (stale()) return
@@ -1240,7 +1249,13 @@ export function App({
           chatId: ids.chatId,
           limit: 200,
         })
-        if (stale() || msgs.length === 0) return
+        if (
+          stale() ||
+          (await chatManagementRef.current!.restorePersistent()) ||
+          stale() ||
+          msgs.length === 0
+        )
+          return
         setHistoricChat(
           msgs.map((m) => ({
             role: m.role,
@@ -1283,6 +1298,7 @@ export function App({
     tools?: Array<{
       name?: string
       summary: string
+      mutated?: boolean | undefined
       isError?: boolean
       input?: string
       output?: string
@@ -1340,7 +1356,14 @@ export function App({
   /** Tool activity for the whole run (args/output included, accumulated across
    * turns) — for full transcript persistence */
   const runToolsRef = useRef<
-    Array<{ name: string; summary: string; isError?: boolean; input?: string; output?: string }>
+    Array<{
+      name: string
+      summary: string
+      mutated?: boolean | undefined
+      isError?: boolean
+      input?: string
+      output?: string
+    }>
   >([])
   /** AI plans apply asynchronously after propose_operations returns. Run
    * completion waits for these before doing the run's single auto-save. */
@@ -1422,6 +1445,7 @@ export function App({
           runToolsRef.current.push({
             name: call.name,
             summary: execution.summary,
+            mutated: !!execution.mutated,
             isError: !!execution.isError,
             ...(input !== undefined ? { input } : {}),
             ...(output !== undefined ? { output } : {}),
@@ -1436,6 +1460,7 @@ export function App({
                 ...tools,
                 {
                   summary: execution.summary,
+                  mutated: !!execution.mutated,
                   isError: !!execution.isError,
                   name: call.name,
                   ...(execution.output ? { output: execution.output.slice(0, 2000) } : {}),
@@ -1580,14 +1605,19 @@ export function App({
     return images
   }
 
-  function runAgent(instruction: string, sentAttachments: readonly AttachmentMeta[]): void {
+  function runAgent(
+    instruction: string,
+    sentAttachments: readonly AttachmentMeta[],
+    scopeOverride?: FrozenSelection | null,
+  ): void {
     const loop = agentLoopRef.current
     if (!instruction.trim() || !loop || loop.busy || runStartingRef.current) return
     runStartingRef.current = true
+    const runEpoch = ++runEpochRef.current
     // Freeze the selection scope for the whole run: users go on clicking around
     // while the AI works, so a live read would retarget "this column" mid-run.
     // Released in onDone/onError, which own the rest of the run teardown.
-    setAiRunScope(aiScopeDismissed ? null : aiScope)
+    setAiRunScope(scopeOverride !== undefined ? scopeOverride : aiScopeDismissed ? null : aiScope)
     aiApplyPromisesRef.current = []
     runLastTextRef.current = ''
     runMutatedRef.current = false
@@ -1596,10 +1626,12 @@ export function App({
     appendChat({ role: 'assistant', text: '', tools: [], streaming: true })
     void collectImageAttachments(sentAttachments)
       .then((images) => {
+        if (runEpoch !== runEpochRef.current) return
         runStartingRef.current = false
         loop.run(instruction, images)
       })
       .catch(() => {
+        if (runEpoch !== runEpochRef.current) return
         runStartingRef.current = false
         loop.run(instruction)
       })
@@ -1637,6 +1669,19 @@ export function App({
   }
 
   function handleStopAgent(): void {
+    runEpochRef.current++
+    if (runStartingRef.current) {
+      runStartingRef.current = false
+      setAiBusy(false)
+      setAiRunScope(undefined)
+      setChat((previous) =>
+        previous.map((message) =>
+          message.streaming
+            ? { ...message, streaming: false, text: message.text || t('appAiStopped') }
+            : message,
+        ),
+      )
+    }
     agentLoopRef.current?.cancel()
   }
 
@@ -1650,6 +1695,7 @@ export function App({
   }
 
   function handleNewChat(): void {
+    if (!chatManagement.newChat()) return
     agentLoopRef.current?.reset()
     setAiRunScope(undefined)
     setAiBusy(false)
@@ -3341,6 +3387,7 @@ export function App({
     overrideInstruction?: string,
     overrideAttachments?: readonly AttachmentMeta[],
     retryIndex?: number,
+    scopeOverride?: { quote?: AiScopeQuoteData | undefined; selection: FrozenSelection | null },
   ): void {
     const instruction = (overrideInstruction ?? prompt).trim()
     if (!instruction || aiBusy) return
@@ -3360,8 +3407,16 @@ export function App({
     // write is skipped while the chat refs are still resolving, so re-issue it
     // then instead of dropping the question from the stored transcript.
     // a retry quotes what the failed message quoted; a fresh send the live scope runAgent freezes for the run
-    const scope =
-      retryIndex !== undefined
+    const frozenScope = scopeOverride
+      ? scopeOverride.selection
+      : retryIndex !== undefined
+        ? (chat[retryIndex]?.selectionScope ?? null)
+        : aiScopeDismissed
+          ? null
+          : aiScope
+    const scope = scopeOverride
+      ? scopeOverride.quote
+      : retryIndex !== undefined
         ? chat[retryIndex]?.scope
         : aiScope && !aiScopeDismissed
           ? { label: scopeLabel(aiScope.a1, aiScope.columns ?? null, t) }
@@ -3373,24 +3428,25 @@ export function App({
       text: instruction,
       tools: [],
       persisted,
+      selectionScope: frozenScope,
       ...(sentAtts.length > 0 ? { attachments: sentAtts } : {}),
       ...(scope ? { scope } : {}),
     })
     if (!overrideInstruction) setPrompt('')
     // the deterministic path consumes the composer too — the bubble already echoes the set
-    if (!overrideAttachments && sentAtts.length > 0) {
+    if (sentAtts.length > 0) {
       const seen = new Set(sentAttachmentsRef.current.map((a) => a.path))
       sentAttachmentsRef.current = [
         ...sentAttachmentsRef.current,
         ...sentAtts.filter((a) => !seen.has(a.path)),
       ]
-      setAttachments([])
+      if (!overrideAttachments) setAttachments([])
     }
     // real LLM configured → let the agent read context and propose operations;
     // otherwise fall back to the local, deterministic regex planner
     // (kept for offline use and for the fixed micro-DSL it still supports).
     if (agentConfigured) {
-      runAgent(instruction, sentAtts)
+      runAgent(instruction, sentAtts, frozenScope)
       return
     }
     const outcome = runDeterministicPlan(instruction)
@@ -4908,6 +4964,45 @@ export function App({
   })
 
   const aiScopeChip = resolveScopeChip(aiRunScope, aiScope, aiScopeDismissed)
+  const chatManagement = useEditorConversations<AiChatMessage>({
+    messages: [...historicChat, ...chat],
+    draft: prompt,
+    busy: aiBusy,
+    lang: getLang(),
+    getKey: () => {
+      const ids = chatRefIdsRef.current
+      return ids ? `${ids.projectId}:${ids.chatId}` : null
+    },
+    replace: (messages) => {
+      sentAttachmentsRef.current = [
+        ...new Map(
+          messages
+            .flatMap((message) => message.attachments ?? [])
+            .map((attachment) => [attachment.path, attachment]),
+        ).values(),
+      ]
+      setHistoricChat([])
+      setChat(messages)
+    },
+    setDraft: setPrompt,
+    loop: () => agentLoopRef.current,
+    beforeSwitch: () => {
+      setConversationReset((value) => value + 1)
+      setAttachments([])
+      sentAttachmentsRef.current = []
+      setPreview(null)
+      lazyPreviewRef.current = null
+    },
+    send: (message, text) => {
+      if (agentLoopRef.current?.answerRegenerationPending && !isAgentConfigured())
+        throw new Error('Choose a chat model to regenerate an answer.')
+      handleSend(text, message.attachments ?? [], undefined, {
+        quote: message.scope,
+        selection: message.selectionScope ?? null,
+      })
+    },
+  })
+  chatManagementRef.current = chatManagement
 
   return (
     <>
@@ -5056,6 +5151,9 @@ export function App({
         aiBusy={aiBusy}
         chat={chat}
         historicChat={historicChat}
+        chatToolbar={chatManagement.toolbar}
+        chatActions={chatManagement.actions}
+        conversationReset={conversationReset}
         attachments={attachments}
         attachNotice={attachNotice}
         onPickAttachments={() => void handlePickAttachments()}

@@ -342,6 +342,9 @@ export class NativeHost {
         projectId: args[0]?.projectId ?? 'default',
         chatId: args[0]?.newChatId ?? args[0]?.tempChatId ?? `unsaved-${Date.now()}`,
       }
+    if (channel === 'project:loadManagedConversation') return null
+    if (channel === 'project:saveManagedConversation')
+      return { revision: Number((args[0] as { revision?: number })?.revision ?? 0) + 1 }
     if (channel === 'project:loadChat') return []
     if (channel === 'project:appendChat') return null
 

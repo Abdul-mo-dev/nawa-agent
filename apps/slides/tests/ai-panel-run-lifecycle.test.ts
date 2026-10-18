@@ -152,6 +152,32 @@ afterEach(() => {
 })
 
 describe('AiPanel agent run lifecycle (slides)', () => {
+  it('does not start a prepared request after Stop while setup is still pending', async () => {
+    let resume!: () => void
+    const pending = new Promise<void>((resolve) => {
+      resume = resolve
+    })
+    const { container } = mount(
+      createElement(
+        AiPanel,
+        panelProps({
+          preset: { text: 'Update the title', nonce: 2, autoRun: true },
+          onBeforeRun: () => pending,
+        }),
+      ),
+    )
+    await flushEffects()
+    const stop = container.querySelector<HTMLButtonElement>('.ai-stop-btn')
+    expect(stop).not.toBeNull()
+    act(() => stop!.click())
+    await act(async () => {
+      resume()
+      await Promise.resolve()
+    })
+    await flushEffects()
+    expect(agentHarness.run).not.toHaveBeenCalled()
+    expect(container.querySelector('.ai-stop-btn')).toBeNull()
+  })
   it('persists a successful tool-only run so reopening can restore the completed turn', async () => {
     const appendChat = vi.fn(async () => undefined)
     Object.defineProperty(window, 'projectApi', {

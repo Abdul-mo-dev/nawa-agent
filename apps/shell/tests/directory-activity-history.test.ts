@@ -117,7 +117,7 @@ it('migrates existing history and persists diagnostics while recovering interrup
   }
   const db = new DatabaseSync(path)
   try {
-    expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(3)
+    expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(4)
   } finally {
     db.close()
   }

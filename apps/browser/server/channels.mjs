@@ -188,6 +188,8 @@ export default [
   'pdf:validate-text-edits',
   'project:appendChat',
   'project:loadChat',
+  'project:loadManagedConversation',
+  'project:saveManagedConversation',
   'project:rebindChat',
   'project:resolveChat',
   'sheets:ai-generate-image',

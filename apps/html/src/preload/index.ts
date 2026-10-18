@@ -125,10 +125,20 @@ const api: HtmlApi = {
 }
 
 /** Chat persistence: the shared project:* handlers are registered once by the shell (docs-main registerProjectIpc) */
-const projectApi: Pick<ProjectApi, 'resolveChat' | 'appendChat' | 'loadChat' | 'rebindChat'> = {
+const projectApi: Pick<
+  ProjectApi,
+  | 'resolveChat'
+  | 'appendChat'
+  | 'loadChat'
+  | 'rebindChat'
+  | 'loadManagedConversation'
+  | 'saveManagedConversation'
+> = {
   resolveChat: (args) => ipcRenderer.invoke('project:resolveChat', args),
   appendChat: (args) => ipcRenderer.invoke('project:appendChat', args),
   loadChat: (args) => ipcRenderer.invoke('project:loadChat', args),
+  loadManagedConversation: (args) => ipcRenderer.invoke('project:loadManagedConversation', args),
+  saveManagedConversation: (args) => ipcRenderer.invoke('project:saveManagedConversation', args),
   rebindChat: (args) => ipcRenderer.invoke('project:rebindChat', args),
 }
 

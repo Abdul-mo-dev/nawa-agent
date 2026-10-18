@@ -70,6 +70,45 @@ export function IconTrash(props: IconProps) {
   )
 }
 
+export function IconCopy(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" />
+      <path d="M10.5 5.5V4A1.5 1.5 0 0 0 9 2.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5" />
+    </Svg>
+  )
+}
+
+export function IconRefresh(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path
+        d="M13 6a5.2 5.2 0 0 0-8.6-2L2.5 6M2.5 2.5V6H6M3 10a5.2 5.2 0 0 0 8.6 2l1.9-2M10 10h3.5v3.5"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  )
+}
+
+export function IconBranch(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="4" cy="3" r="1.5" />
+      <circle cx="4" cy="13" r="1.5" />
+      <circle cx="12" cy="4" r="1.5" />
+      <path d="M4 4.5v7M4 9h4a4 4 0 0 0 4-4" />
+    </Svg>
+  )
+}
+
+export function IconCheck(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="m3 8 3.2 3.2L13 4.5" strokeLinejoin="round" />
+    </Svg>
+  )
+}
+
 /** broom for the clear-queue action */
 export function IconBroom(props: IconProps) {
   return (

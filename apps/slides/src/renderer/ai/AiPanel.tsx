@@ -1,3 +1,4 @@
+import { useEditorConversations } from '@genoffice/ui'
 import {
   registerDirectoryEditor,
   directoryWorkflowActive,
@@ -80,6 +81,7 @@ import { IconNewChat, IconSidebarCollapseLeft } from '../components/icons'
 interface ToolActivity {
   name: string
   summary: string
+  mutated?: boolean | undefined
   /** still executing: rendered as a spinner chip, replaced in place when the tool finishes */
   running?: boolean
   isError?: boolean
@@ -235,6 +237,7 @@ function safeJsonInput(input: unknown): string | undefined {
 }
 
 interface ChatEntry {
+  instruction?: string
   role: 'user' | 'assistant'
   text: string
   error?: string
@@ -406,9 +409,11 @@ export function AiPanel({
     },
   })
   const [chat, setChat] = useState<ChatEntry[]>([])
+  const chatManagementRef = useRef<ReturnType<typeof useEditorConversations<ChatEntry>> | null>(
+    null,
+  )
   /** Past conversation restored from JSONL (read-only transcript, not fed to the model) */
   const [historicChat, setHistoricChat] = useState<ChatEntry[]>([])
-  const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
   const [attachments, setAttachments] = useState<AttachmentMeta[]>([])
   const [attachNotice, setAttachNotice] = useState<string | null>(null)
   /** data-URL previews for image attachments, keyed by path (Genspark composer thumbnails) */
@@ -526,8 +531,6 @@ export function AiPanel({
   imagesRef.current = images
   const attachmentsRef = useRef(attachments)
   attachmentsRef.current = attachments
-  /** attachments consumed by the most recent send — retry resends the same set */
-  const lastAttachmentsRef = useRef<AttachmentMeta[]>([])
   /** the scope quote of the last send, so a retry reuses it instead of re-reading the live selection */
   const lastScopeRef = useRef<AiScopeQuoteData | undefined>(undefined)
   /** composer attachments plus everything already sent this session (deduped by path) */
@@ -543,15 +546,19 @@ export function AiPanel({
   const readAttachmentPathsRef = useRef<Set<string>>(new Set())
 
   const instructionRef = useRef('')
-  const lastInstructionRef = useRef('')
-  /** Paired with lastInstructionRef: keeps the bubble showing only the user's request on retries */
-  const lastDisplayTextRef = useRef<string | undefined>(undefined)
   /** Mirror of the last turn's (the final reply's turn) tool activity — used when persisting the assistant message,
       avoiding side effects inside the setState updater (StrictMode double-invokes updaters, duplicating history writes) */
   const lastTurnToolsRef = useRef<ToolActivity[]>([])
   /** Tool activity of the whole run (with args/output, accumulated across turns) — for full transcript persistence */
   const runToolsRef = useRef<
-    Array<{ name: string; summary: string; isError?: boolean; input?: string; output?: string }>
+    Array<{
+      name: string
+      summary: string
+      mutated?: boolean | undefined
+      isError?: boolean
+      input?: string
+      output?: string
+    }>
   >([])
   /** Last streamed text of the current turn: the only copy left when a run dies before onDone */
   const streamedTextRef = useRef('')
@@ -568,7 +575,8 @@ export function AiPanel({
         chatRefIds.current = ids
         return api.loadChat({ projectId: ids.projectId, chatId: ids.chatId, limit: 200 })
       })
-      .then((msgs) => {
+      .then(async (msgs) => {
+        if (await chatManagementRef.current!.restorePersistent()) return
         if (msgs.length === 0) return
         setHistoricChat(
           msgs.map((m) => ({
@@ -613,7 +621,10 @@ export function AiPanel({
         newFilePath: currentFilePath,
       })
       .then((r) => {
-        if (r?.chatId) chatRefIds.current = r
+        if (r?.chatId) {
+          chatRefIds.current = r
+          chatManagementRef.current!.rebind()
+        }
       })
       .catch(() => {
         /* Silent */
@@ -627,6 +638,7 @@ export function AiPanel({
     tools?: Array<{
       name: string
       summary: string
+      mutated?: boolean | undefined
       isError?: boolean
       input?: string
       output?: string
@@ -693,6 +705,7 @@ export function AiPanel({
 
   /** Synchronous re-entry guard between runWith trigger and loop.run (see the comment inside runWith) */
   const runStartingRef = useRef(false)
+  const runEpochRef = useRef(0)
   /**
    * Resolves the in-flight queue page run: AgentLoop reports completion through
    * events rather than a promise, so onDone/onError hand the outcome back here.
@@ -1420,6 +1433,7 @@ export function AiPanel({
           const activity: ToolActivity = {
             name: call.name,
             summary: execution.summary,
+            mutated: !!execution.mutated,
             isError: execution.isError,
             output: execution.output ? execution.output.slice(0, TOOL_OUTPUT_MAX_CHARS) : undefined,
             // Side channel: display comes from tools, not into LLM context, UI only
@@ -1430,6 +1444,7 @@ export function AiPanel({
             runToolsRef.current.push({
               name: call.name,
               summary: execution.summary,
+              mutated: !!execution.mutated,
               isError: execution.isError,
               input: safeJsonInput(call.input),
               output: execution.output
@@ -1450,6 +1465,7 @@ export function AiPanel({
           setChat((prev) => [...prev, { role: 'assistant', text: '', streaming: true }])
         },
         onDone: ({ text, cancelled, turnLimit, truncated }) => {
+          if (cancelled || turnLimit || truncated) msgQueue.setPaused(true)
           const baseText = turnLimit
             ? [text, tGlobal('aiTurnLimit')].filter(Boolean).join('\n\n')
             : text || (cancelled ? tGlobal('aiStoppedNote') : '')
@@ -1497,6 +1513,7 @@ export function AiPanel({
           if (cancelled && streamedTextRef.current) logRunFailure('stopped')
         },
         onError: (error) => {
+          msgQueue.setPaused(true)
           logRunFailure('error', error)
           qcPagesRef.current = []
           setChat((prev) => {
@@ -1687,24 +1704,26 @@ export function AiPanel({
     // qcRunningRef: the post-generation QC pass edits the deck outside the main loop — no concurrent runs
     if (!instruction || !loop || loop.busy || runStartingRef.current || qcRunningRef.current) return
     runStartingRef.current = true
+    const runEpoch = ++runEpochRef.current
     setInput('')
     // The message consumes the composer attachments: they ride along (echoed on the
     // bubble, images multimodal, files via the files skill) and the composer clears.
     const sentAtts = opts?.attachments ?? attachmentsRef.current
-    if (!opts?.attachments && sentAtts.length > 0) {
+    if (sentAtts.length > 0) {
       const seen = new Set(sentAttachmentsRef.current.map((a) => a.path))
       sentAttachmentsRef.current = [
         ...sentAttachmentsRef.current,
         ...sentAtts.filter((a) => !seen.has(a.path)),
       ]
-      setAttachments([])
-      attachmentsRef.current = []
+      if (!opts?.attachments) {
+        setAttachments([])
+        attachmentsRef.current = []
+      }
     }
-    lastAttachmentsRef.current = sentAtts
+
     inputEditedSinceRunRef.current = false
     instructionRef.current = instruction
-    lastInstructionRef.current = instruction
-    lastDisplayTextRef.current = displayText
+
     lastTurnToolsRef.current = []
     runToolsRef.current = []
     streamedTextRef.current = ''
@@ -1728,6 +1747,7 @@ export function AiPanel({
       {
         role: 'user',
         text: shown,
+        instruction,
         ...(sentAtts.length > 0 ? { attachments: sentAtts } : {}),
         ...(scope ? { scope } : {}),
       },
@@ -1739,6 +1759,7 @@ export function AiPanel({
     persistMessage('user', shown, undefined, sentAtts, scope)
     void collectImageAttachments(sentAtts)
       .then(async (images) => {
+        if (runEpoch !== runEpochRef.current) return
         // AI Beautify sends the current slide's rendering along, so the model sees what it edits;
         // the note rides on the model instruction only — the chat bubble stays the localized preset text
         let modelInstruction = instruction
@@ -1753,13 +1774,16 @@ export function AiPanel({
             modelInstruction += `\n\n(${NO_SCREENSHOT_NOTE})`
           }
         }
-        // Clear the flag before run: loop.run sets running synchronously, leaving no re-entry window
-        runStartingRef.current = false
+        if (runEpoch !== runEpochRef.current) return
         await onBeforeRunRef.current?.()
+        if (runEpoch !== runEpochRef.current) return
         if (await window.slidesApi.beginHistoryBatch()) historyBatchActiveRef.current = true
+        if (runEpoch !== runEpochRef.current) return
+        runStartingRef.current = false
         loop.run(modelInstruction, images)
       })
       .catch(() => {
+        if (runEpoch !== runEpochRef.current) return
         runStartingRef.current = false
         void finishHistoryBatch().finally(() => setBusy(false))
       })
@@ -1774,9 +1798,9 @@ export function AiPanel({
         return
       }
       runStartingRef.current = true
+      const runEpoch = ++runEpochRef.current
       instructionRef.current = instruction
-      lastInstructionRef.current = instruction
-      lastDisplayTextRef.current = undefined
+
       lastTurnToolsRef.current = []
       runToolsRef.current = []
       streamedTextRef.current = ''
@@ -1792,13 +1816,23 @@ export function AiPanel({
       setBusy(true)
       queueRunResolverRef.current = resolve
       void Promise.resolve(onBeforeRunRef.current?.())
-        .then(() => window.slidesApi.beginHistoryBatch())
+        .then(() =>
+          runEpoch === runEpochRef.current ? window.slidesApi.beginHistoryBatch() : false,
+        )
         .then((ok) => {
+          if (runEpoch !== runEpochRef.current) {
+            resolve(false)
+            return
+          }
           if (ok) historyBatchActiveRef.current = true
           runStartingRef.current = false
           loop.run(instruction)
         })
         .catch(() => {
+          if (runEpoch !== runEpochRef.current) {
+            resolve(false)
+            return
+          }
           runStartingRef.current = false
           queueRunResolverRef.current = null
           void finishHistoryBatch().finally(() => setBusy(false))
@@ -1984,21 +2018,37 @@ export function AiPanel({
   }
 
   const cancel = () => {
+    msgQueue.setPaused(true)
+    runEpochRef.current++
+    if (runStartingRef.current) {
+      runStartingRef.current = false
+      setBusy(false)
+      setChat((previous) =>
+        previous.map((message) =>
+          message.streaming
+            ? { ...message, streaming: false, text: message.text || tGlobal('aiStoppedNote') }
+            : message,
+        ),
+      )
+      queueRunResolverRef.current?.(false)
+      queueRunResolverRef.current = null
+    }
     dismissClarify()
     qcAbortRef.current?.abort()
     loopRef.current?.cancel()
   }
 
   // Abort a QC pass still running when the panel unmounts (new file / panel remount by key)
-  useEffect(() => () => qcAbortRef.current?.abort(), [])
-
-  const retry = () =>
-    runWith(lastInstructionRef.current, lastDisplayTextRef.current, {
-      attachments: lastAttachmentsRef.current,
-      retry: true,
-    })
+  useEffect(
+    () => () => {
+      runEpochRef.current++
+      qcAbortRef.current?.abort()
+    },
+    [],
+  )
 
   const newChat = () => {
+    if (!chatManagement.newChat()) return
     msgQueue.clear()
     dismissClarify()
     qcAbortRef.current?.abort()
@@ -2019,12 +2069,6 @@ export function AiPanel({
     sentAttachmentsRef.current = []
     readAttachmentPathsRef.current.clear()
     inputRef.current?.focus()
-  }
-
-  const copyMessage = (text: string, idx: number) => {
-    void navigator.clipboard.writeText(text)
-    setCopiedIdx(idx)
-    window.setTimeout(() => setCopiedIdx((cur) => (cur === idx ? null : cur)), 1200)
   }
 
   const mergeAttachments = (result: AttachmentAddResult | null) => {
@@ -2070,6 +2114,46 @@ export function AiPanel({
 
   const removeAttachment = (path: string) =>
     setAttachments((prev) => prev.filter((a) => a.path !== path))
+
+  const chatManagement = useEditorConversations<ChatEntry>({
+    messages: [...historicChat, ...chat],
+    draft: input,
+    busy,
+    lang,
+    getKey: () => {
+      const ids = chatRefIds.current
+      return ids ? `${ids.projectId}:${ids.chatId}` : null
+    },
+    replace: (messages) => {
+      sentAttachmentsRef.current = [
+        ...new Map(
+          messages
+            .flatMap((message) => message.attachments ?? [])
+            .map((attachment) => [attachment.path, attachment]),
+        ).values(),
+      ]
+      setHistoricChat([])
+      setChat(messages)
+    },
+    setDraft: setInput,
+    loop: () => loopRef.current,
+    beforeSwitch: () => {
+      msgQueue.clear()
+      msgQueue.setPaused(false)
+      dismissClarify()
+      setClarifyAnswers([])
+      setAttachments([])
+      sentAttachmentsRef.current = []
+    },
+    send: (message, text, displayText) => {
+      runWith(text, displayText, {
+        attachments: message.attachments ?? [],
+        scope: message.scope,
+        retry: false,
+      })
+    },
+  })
+  chatManagementRef.current = chatManagement
 
   // collapsed: rail only — after all hooks, so the instance and its state survive
   if (!open) {
@@ -2126,6 +2210,7 @@ export function AiPanel({
               onClick={newChat}
               data-tip={t('aiNewChat')}
               aria-label={t('aiNewChat')}
+              disabled={busy}
             >
               <IconNewChat size={15} />
             </button>
@@ -2143,24 +2228,32 @@ export function AiPanel({
         </div>
       </div>
 
+      {chatManagement.toolbar}
       <div ref={logRef} className="ai-chat" onScroll={onLogScroll}>
         {/* Past conversation (read-only transcript, not fed to the model), displayed continuously with the current turn */}
         {historicChat.length > 0 && (
           <>
-            {historicChat.map((entry, i) => (
-              <div key={`h${i}`} className={`ai-msg ai-msg-${entry.role} ai-msg-historic`}>
-                {entry.role === 'user' && entry.scope && <AiScopeQuote scope={entry.scope} />}
-                {entry.role === 'user' && entry.attachments && entry.attachments.length > 0 && (
-                  <SentAttachments atts={entry.attachments} previews={attachmentPreviews} />
-                )}
-                {entry.tools && entry.tools.length > 0 && <ToolChipList tools={entry.tools} />}
-                {entry.text && (
-                  <div dir="auto">
-                    <Markdown text={entry.text} />
-                  </div>
-                )}
-              </div>
-            ))}
+            {historicChat.map((entry, i) => {
+              const renderMessage = (editor: React.ReactNode) => (
+                <div key={`h${i}`} className={`ai-msg ai-msg-${entry.role} ai-msg-historic`}>
+                  {entry.role === 'user' && entry.scope && <AiScopeQuote scope={entry.scope} />}
+                  {entry.role === 'user' && entry.attachments && entry.attachments.length > 0 && (
+                    <SentAttachments atts={entry.attachments} previews={attachmentPreviews} />
+                  )}
+                  {entry.tools && entry.tools.length > 0 && <ToolChipList tools={entry.tools} />}
+                  {editor ??
+                    (entry.text && (
+                      <div dir="auto">
+                        <Markdown text={entry.text} />
+                      </div>
+                    ))}
+                  {entry.role !== 'user' && chatManagement.actions(i)}
+                </div>
+              )
+              return entry.role === 'user'
+                ? chatManagement.actions(i, renderMessage)
+                : renderMessage(null)
+            })}
             <div className="ai-history-sep">{t('aiHistorySep')}</div>
           </>
         )}
@@ -2200,7 +2293,6 @@ export function AiPanel({
           ) {
             return null
           }
-          const isLast = i === chat.length - 1
           // Action row appears once per completed reply: on the turn's final segment only
           // (mid-turn segments have a following assistant entry; the live turn ends when !busy)
           const nextEntry = chat[i + 1]
@@ -2211,7 +2303,7 @@ export function AiPanel({
             turnEnded &&
             // edits-only turns have no text but still carry the rollback point
             (!!(entry.text || entry.error) || entry.snapshotId != null)
-          return (
+          const renderMessage = (editor: React.ReactNode) => (
             <div
               key={i}
               className={`ai-msg ai-msg-${entry.role}${entry.role === 'assistant' && entry.streaming ? ' ai-msg-streaming' : ''}`}
@@ -2231,7 +2323,7 @@ export function AiPanel({
                   <Markdown text={entry.text} />
                 </div>
               ) : (
-                <span dir="auto">{entry.text}</span>
+                (editor ?? <span dir="auto">{entry.text}</span>)
               )}
               {entry.tools && entry.tools.length > 0 && <ToolChipList tools={entry.tools} />}
               {entry.error && (
@@ -2245,67 +2337,11 @@ export function AiPanel({
               {entry.deckProgress && <DeckProgressCard progress={entry.deckProgress} />}
               {showToolbar && (
                 <div className="ai-msg-toolbar">
-                  {entry.text && (
-                    <button
-                      className="ai-msg-tool-btn"
-                      onClick={() => copyMessage(entry.text, i)}
-                      aria-label={t('aiCopyReply')}
-                      data-tip={t('aiCopyReply')}
-                    >
-                      {copiedIdx === i ? (
-                        <svg
-                          width="14"
-                          height="14"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.8"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <polyline points="20 6 9 17 4 12" />
-                        </svg>
-                      ) : (
-                        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                          <path
-                            d="M14.6113 5.34253C16.0608 5.3428 17.2363 6.518 17.2363 7.96753V15.5066C17.2361 16.956 16.0607 18.1313 14.6113 18.1316H7.07227C5.62267 18.1316 4.44751 16.9561 4.44727 15.5066V7.96753C4.44732 6.51783 5.62255 5.34253 7.07227 5.34253H14.6113ZM7.07227 6.59253C6.31291 6.59253 5.69732 7.20819 5.69727 7.96753V15.5066C5.69751 16.2658 6.31302 16.8816 7.07227 16.8816H14.6113C15.3703 16.8813 15.9861 16.2656 15.9863 15.5066V7.96753C15.9863 7.20835 15.3705 6.5928 14.6113 6.59253H7.07227ZM10.0176 2.8689C10.3626 2.86905 10.6426 3.14882 10.6426 3.4939C10.6425 3.83888 10.3626 4.11874 10.0176 4.1189H4.59961C3.84022 4.1189 3.22461 4.73451 3.22461 5.4939V11.324C3.22433 11.6689 2.94461 11.949 2.59961 11.949C2.25461 11.949 1.97489 11.6689 1.97461 11.324V5.4939C1.97461 4.04415 3.14987 2.8689 4.59961 2.8689H10.0176Z"
-                            fill="currentColor"
-                          />
-                        </svg>
-                      )}
-                    </button>
-                  )}
-                  {isLast && !busy && lastInstructionRef.current && (
-                    <button
-                      className="ai-msg-tool-btn"
-                      onClick={retry}
-                      aria-label={t('aiRegenerate')}
-                      data-tip={t('aiRegenerate')}
-                    >
-                      {/* 24-canvas glyph at 18px (near-full-bleed paths, sized for optical
-                          parity with the copy icon): stroke 1.5 paints 1.125px (1:16) */}
-                      <svg
-                        style={{ width: 18, height: 18 }}
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden
-                      >
-                        <path d="M3.68881 9.85339C4.1791 8.0054 5.28205 6.30704 6.9459 5.09101C10.8046 2.27085 16.2188 3.11279 19.0389 6.97147C19.7242 7.90904 20.1932 8.93842 20.4553 10.0001" />
-                        <path d="M2.00452 8.46411L2.87229 10.7059C2.96814 10.9535 3.24658 11.0765 3.4942 10.9807L5.73594 10.1129" />
-                        <path d="M20.3308 14.4908C19.8405 16.3388 18.7376 18.0372 17.0738 19.2532C13.215 22.0734 7.80083 21.2314 4.98071 17.3728C4.22167 16.3342 3.72792 15.183 3.48686 13.9999" />
-                        <path d="M22.0151 15.8801L21.1474 13.6384C21.0515 13.3908 20.7731 13.2677 20.5255 13.3636L18.2837 14.2314" />
-                      </svg>
-                    </button>
-                  )}
                   {entry.snapshotId != null && (
                     <>
                       {/* hairline between reply actions (icons) and the document action (icon+label);
                           CSS shows it only when an icon button actually precedes it */}
-                      <span className="ai-rollback-sep" aria-hidden />
+
                       <RollbackButton
                         disabled={busy}
                         onClick={() => void rollback(entry.snapshotId!)}
@@ -2326,8 +2362,12 @@ export function AiPanel({
                     ))}
                   </div>
                 ))}
+              {entry.role !== 'user' && chatManagement.actions(historicChat.length + i)}
             </div>
           )
+          return entry.role === 'user'
+            ? chatManagement.actions(historicChat.length + i, renderMessage)
+            : renderMessage(null)
         })}
         {activeClarify && (
           <div className="ai-clarify-chip" role="status">

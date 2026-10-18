@@ -4,14 +4,13 @@ import { useEffect, useRef, useState } from 'react'
  * The chat message queue behind "Enter queues while a reply is running"
  * (MiniMax-style): messages typed while the panel is busy wait in a strip
  * above the composer, and a pump starts the next one the moment the current
- * run settles — finished, failed, or stopped by the user. Nothing here knows
+ * run settles, unless the host pauses it after failure or cancellation. Nothing here knows
  * how a panel runs its loop: it observes `busy` transitions and calls
  * `submit`, which every panel maps onto its own runWith/send.
  *
  * Queue semantics:
- * - settling a run always pumps the next message, including after a stop or
- *   an error (a failed bubble keeps its retry action) — stopping everything
- *   for good is the strip's clear button;
+ * - settling a successful run pumps the next message; `halted` or an explicit
+ *   pause keeps dependent messages waiting after a failed or stopped run;
  * - `paused` closes the gate: the run in flight finishes, but nothing after it
  *   starts until it is opened again. Queued messages stay editable the whole
  *   time, so editing one can never set the next one off;
@@ -45,15 +44,17 @@ export interface ChatRunQueue<M> {
 
 export function useChatRunQueue<M>(args: {
   busy: boolean
+  /** A failed or incomplete turn pauses dependent queued questions. */
+  halted?: boolean
   /**
    * start a run for the dequeued message; return false to keep it queued when
    * the panel is momentarily busy some other way (e.g. a post-run QC pass) —
    * the pump retries while the queue is non-empty and the panel is idle
    */
   submit: (text: string, meta: M) => boolean
-  resetKey?: string | number
+  resetKey?: string | number | undefined
 }): ChatRunQueue<M> {
-  const { busy, submit, resetKey } = args
+  const { busy, submit, resetKey, halted = false } = args
   const [queued, setQueued] = useState<QueuedChatMessage<M>[]>([])
   const [paused, setPausedState] = useState(false)
   // the pump reads the queue synchronously (clear and pump can land in one commit)
@@ -90,9 +91,14 @@ export function useChatRunQueue<M>(args: {
   useEffect(() => {
     const was = busyRef.current
     busyRef.current = busy
+    if (!busy && halted) {
+      pausedRef.current = true
+      setPausedState(true)
+      return
+    }
     // a settle: whatever ended the run (finish, error, stop), the queue continues
     if (was && !busy) tryPumpRef.current()
-  }, [busy])
+  }, [busy, halted])
 
   useEffect(() => {
     // only when a queued message is waiting and the panel is idle: covers
@@ -107,6 +113,8 @@ export function useChatRunQueue<M>(args: {
     if (resetKey === undefined) return
     queuedRef.current = []
     setQueued([])
+    pausedRef.current = false
+    setPausedState(false)
   }, [resetKey])
 
   return {

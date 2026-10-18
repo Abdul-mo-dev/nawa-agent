@@ -1,3 +1,4 @@
+import { useEditorConversations } from '@genoffice/ui'
 import {
   registerDirectoryEditor,
   directoryWorkflowActive,
@@ -193,6 +194,7 @@ const TOOL_OUTPUT_MAX_CHARS = 2000
 interface ToolActivity {
   name: string
   summary: string
+  mutated?: boolean | undefined
   /** still executing: rendered as a spinner chip, replaced in place when the tool finishes */
   running?: boolean
   isError?: boolean
@@ -291,6 +293,9 @@ export function AiPanel({
 }): ReactElement {
   const { lang, t } = useI18n()
   const [chat, setChat] = useState<ChatEntry[]>([])
+  const chatManagementRef = useRef<ReturnType<typeof useEditorConversations<ChatEntry>> | null>(
+    null,
+  )
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
   /** messages queued while a reply runs; the pump re-runs them through send on settle */
@@ -303,7 +308,6 @@ export function AiPanel({
       return true
     },
   })
-  const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
   const [snapshots, setSnapshots] = useState<Snapshot[]>([])
   /** questionnaire / brief cards docked in the composer slot while a tool waits for the user */
   const [activeClarify, setActiveClarify] = useState<ClarifyQuestion[] | null>(null)
@@ -485,12 +489,8 @@ export function AiPanel({
   const runInstructionRef = useRef('')
   /** a queue batch names its own targets: the live selection is hidden from the model while it runs */
   const queueRunRef = useRef(false)
-  /** whether the last started run was a queue batch (survives onDone/onError for the header retry) */
-  const lastQueueRunRef = useRef(false)
   /** what the user saw for that instruction (queue submissions show a summary) */
   const runDisplayRef = useRef('')
-  /** the scope quote of the last send, carried over by the header retry */
-  const lastScopeRef = useRef<AiScopeQuoteData | undefined>(undefined)
   const runMutatedRef = useRef(false)
   /** tool activity of the whole run, for transcript persistence */
   const runToolsRef = useRef<ToolActivity[]>([])
@@ -731,6 +731,7 @@ export function AiPanel({
           const activity: ToolActivity = {
             name: call.name,
             summary: execution.summary,
+            mutated: !!execution.mutated,
             isError: execution.isError,
             output: execution.output?.slice(0, TOOL_OUTPUT_MAX_CHARS),
           }
@@ -747,6 +748,7 @@ export function AiPanel({
           setChat((prev) => [...prev, { role: 'assistant', text: '', streaming: true }])
         },
         onDone: ({ text, cancelled, turnLimit, truncated }) => {
+          if (cancelled || turnLimit || truncated) msgQueue.setPaused(true)
           const base = turnLimit
             ? [text, tGlobal('aiTurnLimit')].filter(Boolean).join('\n\n')
             : text || (cancelled ? tGlobal('aiStopped') : '')
@@ -769,6 +771,7 @@ export function AiPanel({
           setBusy(false)
         },
         onError: (error) => {
+          msgQueue.setPaused(true)
           // once a tool ran the message was delivered; a later turn failing is not a send failure
           const undelivered = runToolsRef.current.length === 0
           setChat((prev) => {
@@ -825,7 +828,8 @@ export function AiPanel({
         }
         return api.loadChat({ projectId: ids.projectId, chatId: ids.chatId, limit: 200 })
       })
-      .then((msgs) => {
+      .then(async (msgs) => {
+        if (await chatManagementRef.current!.restorePersistent()) return
         if (msgs.length === 0) return
         // the user may have sent a message while history was loading — never
         // replace a live transcript (and don't clobber the loop context)
@@ -880,7 +884,10 @@ export function AiPanel({
     void window.projectApi
       .rebindChat({ projectId: ids.projectId, tempChatId: ids.chatId, newFilePath: filePath })
       .then((r) => {
-        if (r?.chatId) chatIdsRef.current = r
+        if (r?.chatId) {
+          chatIdsRef.current = r
+          chatManagementRef.current!.rebind()
+        }
       })
       .catch(() => {
         /* silent */
@@ -922,10 +929,10 @@ export function AiPanel({
     }
     stickToBottomRef.current = true
     queueRunRef.current = queueRun
-    lastQueueRunRef.current = queueRun
+
     runInstructionRef.current = instruction
     runDisplayRef.current = displayText ?? instruction
-    lastScopeRef.current = scope
+
     runMutatedRef.current = false
     depsRef.current.onPrompt(displayText ?? instruction)
     runToolsRef.current = []
@@ -1032,20 +1039,11 @@ export function AiPanel({
   }
 
   const stop = (): void => {
+    msgQueue.setPaused(true)
     dismissCards()
     const loop = loopRef.current
     if (loop?.busy) loop.cancel()
     else cancelPendingSend()
-  }
-
-  const retry = (): void => {
-    send(
-      runInstructionRef.current,
-      runDisplayRef.current,
-      lastQueueRunRef.current,
-      undefined,
-      lastScopeRef.current,
-    )
   }
 
   /** [label](htmlnav://sid/N) links in replies select that element */
@@ -1080,12 +1078,6 @@ export function AiPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preset])
 
-  const copyMessage = (text: string, idx: number): void => {
-    void navigator.clipboard.writeText(text)
-    setCopiedIdx(idx)
-    window.setTimeout(() => setCopiedIdx((cur) => (cur === idx ? null : cur)), 1200)
-  }
-
   const rollback = (snapshot: Snapshot): void => {
     if (busy) return
     depsRef.current.restoreSnapshot(snapshot.doc)
@@ -1093,6 +1085,40 @@ export function AiPanel({
   }
 
   const docEmpty = chat.length === 0 && isDocEmpty(deps.access.getText())
+
+  const chatManagement = useEditorConversations<ChatEntry>({
+    messages: chat,
+    draft: prompt,
+    busy,
+    lang,
+    getKey: () => {
+      const ids = chatIdsRef.current
+      return ids ? `${ids.projectId}:${ids.chatId}` : null
+    },
+    replace: (messages) => {
+      sentAttachmentsRef.current = [
+        ...new Map(
+          messages
+            .flatMap((message) => message.attachments ?? [])
+            .map((attachment) => [attachment.path, attachment]),
+        ).values(),
+      ]
+      setChat(messages)
+    },
+    setDraft: setPrompt,
+    loop: () => loopRef.current,
+    beforeSwitch: () => {
+      msgQueue.clear()
+      msgQueue.setPaused(false)
+      setReceipts([])
+      setAttachments([])
+      sentAttachmentsRef.current = []
+    },
+    send: (message, text, displayText) => {
+      send(text, displayText, message.queueRun, message.attachments ?? [], message.scope)
+    },
+  })
+  chatManagementRef.current = chatManagement
 
   return (
     <aside
@@ -1133,8 +1159,9 @@ export function AiPanel({
             <button
               className="ai-header-btn"
               onClick={() => {
+                if (!chatManagement.newChat()) return
                 msgQueue.clear()
-                stop()
+                msgQueue.setPaused(false)
                 loopRef.current?.reset()
                 setBusy(false)
                 setChat([])
@@ -1145,6 +1172,7 @@ export function AiPanel({
               }}
               data-tip={t('aiNewChat')}
               aria-label={t('aiNewChat')}
+              disabled={busy}
             >
               <IconNewChat />
             </button>
@@ -1160,6 +1188,7 @@ export function AiPanel({
         </div>
       </header>
 
+      {chatManagement.toolbar}
       <div className="ai-chat" ref={chatRef} onScroll={onChatScroll}>
         {chat.length === 0 && (
           <div className="ai-chat-empty">
@@ -1205,7 +1234,7 @@ export function AiPanel({
         {chat.map((entry, i) => {
           if (entry.role === 'user') {
             const own = receipts.filter((r) => r.afterIdx === i)
-            return (
+            return chatManagement.actions(i, (editor) => (
               <div key={i} className="ai-msg ai-msg-user">
                 {entry.scope && <AiScopeQuote scope={entry.scope} />}
                 {entry.attachments && entry.attachments.length > 0 && (
@@ -1213,7 +1242,7 @@ export function AiPanel({
                     <AttachmentList atts={entry.attachments} previews={attachmentPreviews} />
                   </div>
                 )}
-                <span dir="auto">{entry.text}</span>
+                {editor ?? <span dir="auto">{entry.text}</span>}
                 {own.map((r, k) =>
                   r.qa ? (
                     <div key={`ca${k}`} className="ai-clarify-answered">
@@ -1232,37 +1261,13 @@ export function AiPanel({
                   ) : null,
                 )}
                 {entry.undelivered && (
-                  <div className="ai-msg-undelivered">
-                    {t('aiUndelivered')}
-                    {!busy && (
-                      <button
-                        className="ai-retry-btn"
-                        onClick={() =>
-                          send(
-                            entry.instruction ?? entry.text,
-                            entry.text,
-                            entry.queueRun,
-                            entry.attachments ?? [],
-                            entry.scope,
-                          )
-                        }
-                      >
-                        {t('aiRetry')}
-                      </button>
-                    )}
-                  </div>
+                  <div className="ai-msg-undelivered">{t('aiUndelivered')}</div>
                 )}
               </div>
-            )
+            ))
           }
           const hasTools = (entry.tools?.length ?? 0) > 0
           if (!entry.text && !entry.streaming && !hasTools) return null
-          const isLast = i === chat.length - 1
-          // Action row appears once per completed reply: on the turn's final segment only
-          // (mid-turn segments have a following assistant entry; the live turn ends when !busy)
-          const nextEntry = chat[i + 1]
-          const turnEnded = nextEntry ? nextEntry.role === 'user' : !busy
-          const showToolbar = !entry.streaming && turnEnded && !!entry.text && !entry.isError
           return (
             <div
               key={i}
@@ -1280,61 +1285,8 @@ export function AiPanel({
                 )
               )}
               {hasTools && <ToolChipList tools={entry.tools!} />}
-              {showToolbar && (
-                <div className="ai-msg-toolbar">
-                  <button
-                    className="ai-msg-tool-btn"
-                    onClick={() => copyMessage(entry.text, i)}
-                    aria-label={t('aiCopyReplyTitle')}
-                    data-tip={t('aiCopyReplyTitle')}
-                  >
-                    {copiedIdx === i ? (
-                      <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.8"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <polyline points="20 6 9 17 4 12" />
-                      </svg>
-                    ) : (
-                      <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                        <path
-                          d="M14.6113 5.34253C16.0608 5.3428 17.2363 6.518 17.2363 7.96753V15.5066C17.2361 16.956 16.0607 18.1313 14.6113 18.1316H7.07227C5.62267 18.1316 4.44751 16.9561 4.44727 15.5066V7.96753C4.44732 6.51783 5.62255 5.34253 7.07227 5.34253H14.6113ZM7.07227 6.59253C6.31291 6.59253 5.69732 7.20819 5.69727 7.96753V15.5066C5.69751 16.2658 6.31302 16.8816 7.07227 16.8816H14.6113C15.3703 16.8813 15.9861 16.2656 15.9863 15.5066V7.96753C15.9863 7.20835 15.3705 6.5928 14.6113 6.59253H7.07227ZM10.0176 2.8689C10.3626 2.86905 10.6426 3.14882 10.6426 3.4939C10.6425 3.83888 10.3626 4.11874 10.0176 4.1189H4.59961C3.84022 4.1189 3.22461 4.73451 3.22461 5.4939V11.324C3.22433 11.6689 2.94461 11.949 2.59961 11.949C2.25461 11.949 1.97489 11.6689 1.97461 11.324V5.4939C1.97461 4.04415 3.14987 2.8689 4.59961 2.8689H10.0176Z"
-                          fill="currentColor"
-                        />
-                      </svg>
-                    )}
-                  </button>
-                  {isLast && !busy && runInstructionRef.current && (
-                    <button
-                      className="ai-msg-tool-btn"
-                      onClick={retry}
-                      aria-label={t('aiRegenerateTitle')}
-                      data-tip={t('aiRegenerateTitle')}
-                    >
-                      <svg
-                        width="20"
-                        height="20"
-                        viewBox="0 0 16 16"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden
-                      >
-                        <path d="M 12.68 6.65 a 4.86 4.86 0 0 0 -9 -1.08 M 3.32 9.35 a 4.86 4.86 0 0 0 9 1.08" />
-                        <path d="M 12.95 3.05 v 2.7 h -2.7 M 3.05 12.95 v -2.7 h 2.7" />
-                      </svg>
-                    </button>
-                  )}
-                </div>
-              )}
+
+              {chatManagement.actions(i)}
             </div>
           )
         })}

@@ -1,3 +1,4 @@
+import { useEditorConversations } from '@genoffice/ui'
 import {
   registerDirectoryEditor,
   directoryWorkflowActive,
@@ -11,7 +12,7 @@ import { setRendererChatModel, getRendererChatModel } from '@genoffice/ai-provid
 import '@genoffice/ui/chat-model-picker.css'
 import { AiPanelSideButton, useAiPanelWidth } from '@genoffice/ui'
 import { AiQueueStrip, AI_QUEUE_LABELS, useChatRunQueue } from '@genoffice/ui'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Editor } from '@tiptap/core'
 import type { Block } from '@genoffice/docx-engine'
 import {
@@ -84,6 +85,7 @@ import { IconNewChat, IconSidebarCollapse } from '../components/icons'
 interface ToolActivity {
   name: string
   summary: string
+  mutated?: boolean | undefined
   /** still executing: rendered as a spinner chip, replaced in place when the tool finishes */
   running?: boolean
   isError?: boolean
@@ -111,6 +113,7 @@ function safeJsonInput(input: unknown): string | undefined {
 }
 
 interface ChatEntry {
+  instruction?: string
   role: 'user' | 'assistant'
   text: string
   error?: string
@@ -376,6 +379,9 @@ export function AiPanel({
       .catch(() => undefined)
   }
   const [chat, setChat] = useState<ChatEntry[]>([])
+  const chatManagementRef = useRef<ReturnType<typeof useEditorConversations<ChatEntry>> | null>(
+    null,
+  )
   /** a streamed write stopped early: the draft stays in the document until the user keeps or discards it */
   const [activePartial, setActivePartial] = useState<{ blocks: number } | null>(null)
   const partialResolverRef = useRef<((keep: boolean) => void) | null>(null)
@@ -386,7 +392,6 @@ export function AiPanel({
   const [trackChanges, setTrackChanges] = useState(
     () => localStorage.getItem(TRACK_CHANGES_KEY) === '1',
   )
-  const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
   const [attachments, setAttachments] = useState<AttachmentMeta[]>([])
   const [attachNotice, setAttachNotice] = useState<string | null>(null)
   /** data-URL previews for image attachments, keyed by path (Genspark composer thumbnails) */
@@ -505,10 +510,6 @@ export function AiPanel({
   numIdFallbackRef.current = numIdFallback
   const attachmentsRef = useRef(attachments)
   attachmentsRef.current = attachments
-  /** attachments consumed by the most recent send — retry resends the same set */
-  const lastAttachmentsRef = useRef<AttachmentMeta[]>([])
-  /** the scope quote of the last send, so a retry reuses it instead of re-reading the live selection */
-  const lastScopeRef = useRef<AiScopeQuoteData | undefined>(undefined)
   /** composer attachments plus everything already sent this session (deduped by path) */
   const availableAttachments = (): AttachmentMeta[] => {
     if (directoryWorkflowActive()) return directoryWorkflowSources()
@@ -553,12 +554,17 @@ export function AiPanel({
   /** document state before the run's first edit — attached to the turn's final
       segment at run end (mid-turn segments never show the action toolbar) */
   const runSnapshotRef = useRef<PmNode | null>(null)
-  /** last sent instruction, for one-click retry */
-  const lastInstructionRef = useRef('')
   /** Tool activity of the whole run (with args/output, accumulated across turns) — for full
       transcript persistence, and so persisting needn't do side effects inside a setState updater */
   const runToolsRef = useRef<
-    Array<{ name: string; summary: string; isError?: boolean; input?: string; output?: string }>
+    Array<{
+      name: string
+      summary: string
+      mutated?: boolean | undefined
+      isError?: boolean
+      input?: string
+      output?: string
+    }>
   >([])
 
   // ── Chat-history persistence ────────────────────────────────────────────
@@ -572,7 +578,8 @@ export function AiPanel({
         chatRefIds.current = ids
         return api.loadChat({ projectId: ids.projectId, chatId: ids.chatId, limit: 200 })
       })
-      .then((msgs) => {
+      .then(async (msgs) => {
+        if (await chatManagementRef.current!.restorePersistent()) return
         if (msgs.length === 0) return
         setHistoricChat(
           msgs.map((m) => ({
@@ -613,7 +620,10 @@ export function AiPanel({
     void api
       .rebindChat({ projectId: ids.projectId, tempChatId: ids.chatId, newFilePath: filePath })
       .then((r) => {
-        if (r?.chatId) chatRefIds.current = r
+        if (r?.chatId) {
+          chatRefIds.current = r
+          chatManagementRef.current!.rebind()
+        }
       })
       .catch(() => {
         /* silent */
@@ -626,6 +636,7 @@ export function AiPanel({
     tools?: Array<{
       name: string
       summary: string
+      mutated?: boolean | undefined
       isError?: boolean
       input?: string
       output?: string
@@ -834,6 +845,7 @@ export function AiPanel({
           runToolsRef.current.push({
             name: call.name,
             summary: execution.summary,
+            mutated: !!execution.mutated,
             isError: execution.isError,
             input: safeJsonInput(call.input),
             output: execution.output
@@ -850,6 +862,7 @@ export function AiPanel({
                 {
                   name: call.name,
                   summary: execution.summary,
+                  mutated: !!execution.mutated,
                   isError: execution.isError,
                   output: execution.output
                     ? execution.output.slice(0, TOOL_OUTPUT_MAX_CHARS)
@@ -866,6 +879,7 @@ export function AiPanel({
           )
         },
         onDone: ({ text, cancelled, turnLimit, truncated }) => {
+          if (cancelled || turnLimit || truncated) msgQueue.setPaused(true)
           // module-level t: the loop instance is created only once; the component's t goes stale with the first-render closure
           const baseText = turnLimit
             ? [text, tModule('aiTurnLimit')].filter(Boolean).join('\n\n')
@@ -892,6 +906,7 @@ export function AiPanel({
           }
         },
         onError: (error) => {
+          msgQueue.setPaused(true)
           setChat((prev) => {
             const next = [...prev]
             const last = next.at(-1)
@@ -1053,15 +1068,15 @@ export function AiPanel({
     // The message consumes the composer attachments: they ride along (echoed on the
     // bubble, images multimodal, files via the files skill) and the composer clears.
     const sentAtts = attachmentsOverride ?? attachmentsRef.current
-    if (!attachmentsOverride && sentAtts.length > 0) {
+    if (sentAtts.length > 0) {
       const seen = new Set(sentAttachmentsRef.current.map((a) => a.path))
       sentAttachmentsRef.current = [
         ...sentAttachmentsRef.current,
         ...sentAtts.filter((a) => !seen.has(a.path)),
       ]
-      setAttachments([])
+      if (!attachmentsOverride) setAttachments([])
     }
-    lastAttachmentsRef.current = sentAtts
+
     // the queue batch and the continue action carry their own display text: no selection quote
     const scope =
       retryScope !== undefined
@@ -1069,11 +1084,11 @@ export function AiPanel({
         : displayInstruction === instruction
           ? selectionScopeQuote()
           : undefined
-    lastScopeRef.current = scope
+
     // the popover input / composer own the DOM selection now: keep the targeted range visible until the run ends
     if (scope) setInactiveSelectionShown(editor, true)
     instructionRef.current = instruction
-    lastInstructionRef.current = instruction
+
     runToolsRef.current = []
     runSnapshotRef.current = null
     stickToBottomRef.current = true
@@ -1083,6 +1098,7 @@ export function AiPanel({
         {
           role: 'user',
           text: displayInstruction,
+          instruction,
           ...(sentAtts.length > 0 ? { attachments: sentAtts } : {}),
           ...(scope ? { scope } : {}),
         },
@@ -1126,6 +1142,7 @@ export function AiPanel({
   }
 
   const cancel = () => {
+    msgQueue.setPaused(true)
     if (pendingSendRef.current) pendingSendRef.current.aborted = true
     loopRef.current?.cancel()
   }
@@ -1146,14 +1163,6 @@ export function AiPanel({
     onQueueConsume?.(editQueue.map((item) => item.qid))
     runWith(instruction, display)
   }
-
-  const retry = () =>
-    runWith(
-      lastInstructionRef.current,
-      lastInstructionRef.current,
-      lastAttachmentsRef.current,
-      lastScopeRef.current ?? null,
-    )
 
   const continueRun = () => runWith(DOCS_CONTINUE_INSTRUCTION, t('aiContinue'))
 
@@ -1177,6 +1186,7 @@ export function AiPanel({
   }
 
   const newChat = () => {
+    if (!chatManagement.newChat()) return
     msgQueue.clear()
     if (pendingSendRef.current) {
       pendingSendRef.current.aborted = true
@@ -1196,12 +1206,6 @@ export function AiPanel({
     setAttachNotice(null)
     sentAttachmentsRef.current = []
     inputRef.current?.focus()
-  }
-
-  const copyMessage = (text: string, idx: number) => {
-    void navigator.clipboard.writeText(text)
-    setCopiedIdx(idx)
-    window.setTimeout(() => setCopiedIdx((cur) => (cur === idx ? null : cur)), 1200)
   }
 
   const mergeAttachments = (result: AttachmentAddResult | null) => {
@@ -1274,6 +1278,41 @@ export function AiPanel({
     )
   }
 
+  const chatManagement = useEditorConversations<ChatEntry>({
+    messages: [...historicChat, ...chat],
+    draft: input,
+    busy,
+    lang,
+    getKey: () => {
+      const ids = chatRefIds.current
+      return ids ? `${ids.projectId}:${ids.chatId}` : null
+    },
+    replace: (messages) => {
+      sentAttachmentsRef.current = [
+        ...new Map(
+          messages
+            .flatMap((message) => message.attachments ?? [])
+            .map((attachment) => [attachment.path, attachment]),
+        ).values(),
+      ]
+      setHistoricChat([])
+      setChat(messages)
+    },
+    setDraft: setInput,
+    loop: () => loopRef.current,
+    beforeSwitch: () => {
+      msgQueue.clear()
+      msgQueue.setPaused(false)
+      abandonWriter()
+      setAttachments([])
+      sentAttachmentsRef.current = []
+    },
+    send: (message, text, displayText) => {
+      runWith(text, displayText, message.attachments ?? [], message.scope ?? null)
+    },
+  })
+  chatManagementRef.current = chatManagement
+
   // collapsed: rail only — after all hooks, so the instance and its state survive
   if (!open) {
     return (
@@ -1329,6 +1368,7 @@ export function AiPanel({
               onClick={newChat}
               data-tip={t('aiNewChatTitle')}
               aria-label={t('aiNewChatTitle')}
+              disabled={busy}
             >
               <IconNewChat size={16} />
             </button>
@@ -1346,24 +1386,32 @@ export function AiPanel({
         </div>
       </div>
 
+      {chatManagement.toolbar}
       <div ref={logRef} className="ai-chat" onScroll={onLogScroll}>
         {/* past conversation (read-only transcript, not fed to the model), shown continuously with the current turn */}
         {historicChat.length > 0 && (
           <>
-            {historicChat.map((entry, i) => (
-              <div key={`h${i}`} className={`ai-msg ai-msg-${entry.role} ai-msg-historic`}>
-                {entry.role === 'user' && entry.scope && <AiScopeQuote scope={entry.scope} />}
-                {entry.role === 'user' && entry.attachments && entry.attachments.length > 0 && (
-                  <SentAttachments atts={entry.attachments} previews={attachmentPreviews} />
-                )}
-                {entry.tools && entry.tools.length > 0 && <ToolChipList tools={entry.tools} />}
-                {entry.text && (
-                  <div dir="auto">
-                    <Markdown text={entry.text} navs={[docNav, fileNav]} />
-                  </div>
-                )}
-              </div>
-            ))}
+            {historicChat.map((entry, i) => {
+              const renderMessage = (editor: ReactNode) => (
+                <div key={`h${i}`} className={`ai-msg ai-msg-${entry.role} ai-msg-historic`}>
+                  {entry.role === 'user' && entry.scope && <AiScopeQuote scope={entry.scope} />}
+                  {entry.role === 'user' && entry.attachments && entry.attachments.length > 0 && (
+                    <SentAttachments atts={entry.attachments} previews={attachmentPreviews} />
+                  )}
+                  {entry.tools && entry.tools.length > 0 && <ToolChipList tools={entry.tools} />}
+                  {editor ??
+                    (entry.text && (
+                      <div dir="auto">
+                        <Markdown text={entry.text} navs={[docNav, fileNav]} />
+                      </div>
+                    ))}
+                  {entry.role !== 'user' && chatManagement.actions(i)}
+                </div>
+              )
+              return entry.role === 'user'
+                ? chatManagement.actions(i, renderMessage)
+                : renderMessage(null)
+            })}
             <div className="ai-history-sep">{t('aiHistorySep')}</div>
           </>
         )}
@@ -1413,8 +1461,8 @@ export function AiPanel({
             !entry.streaming &&
             turnEnded &&
             // edits-only turns have no text but still carry the rollback point
-            !!(entry.text || entry.error || entry.snapshot)
-          return (
+            !!entry.snapshot
+          const renderMessage = (editor: ReactNode) => (
             <div
               key={i}
               className={`ai-msg ai-msg-${entry.role}${entry.role === 'assistant' && entry.streaming ? ' ai-msg-streaming' : ''}`}
@@ -1434,7 +1482,7 @@ export function AiPanel({
                   <Markdown text={entry.text} navs={[docNav, fileNav]} />
                 </div>
               ) : (
-                <span dir="auto">{entry.text}</span>
+                (editor ?? <span dir="auto">{entry.text}</span>)
               )}
               {entry.tools && entry.tools.length > 0 && <ToolChipList tools={entry.tools} />}
               {entry.error && (
@@ -1447,67 +1495,11 @@ export function AiPanel({
               )}
               {showToolbar && (
                 <div className="ai-msg-toolbar">
-                  {entry.text && (
-                    <button
-                      className="ai-msg-tool-btn"
-                      onClick={() => copyMessage(entry.text, i)}
-                      aria-label={t('aiCopyReplyTitle')}
-                      data-tip={t('aiCopyReplyTitle')}
-                    >
-                      {copiedIdx === i ? (
-                        <svg
-                          width="14"
-                          height="14"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.8"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <polyline points="20 6 9 17 4 12" />
-                        </svg>
-                      ) : (
-                        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                          <path
-                            d="M14.6113 5.34253C16.0608 5.3428 17.2363 6.518 17.2363 7.96753V15.5066C17.2361 16.956 16.0607 18.1313 14.6113 18.1316H7.07227C5.62267 18.1316 4.44751 16.9561 4.44727 15.5066V7.96753C4.44732 6.51783 5.62255 5.34253 7.07227 5.34253H14.6113ZM7.07227 6.59253C6.31291 6.59253 5.69732 7.20819 5.69727 7.96753V15.5066C5.69751 16.2658 6.31302 16.8816 7.07227 16.8816H14.6113C15.3703 16.8813 15.9861 16.2656 15.9863 15.5066V7.96753C15.9863 7.20835 15.3705 6.5928 14.6113 6.59253H7.07227ZM10.0176 2.8689C10.3626 2.86905 10.6426 3.14882 10.6426 3.4939C10.6425 3.83888 10.3626 4.11874 10.0176 4.1189H4.59961C3.84022 4.1189 3.22461 4.73451 3.22461 5.4939V11.324C3.22433 11.6689 2.94461 11.949 2.59961 11.949C2.25461 11.949 1.97489 11.6689 1.97461 11.324V5.4939C1.97461 4.04415 3.14987 2.8689 4.59961 2.8689H10.0176Z"
-                            fill="currentColor"
-                          />
-                        </svg>
-                      )}
-                    </button>
-                  )}
-                  {isLast && !busy && lastInstructionRef.current && (
-                    <button
-                      className="ai-msg-tool-btn"
-                      onClick={retry}
-                      aria-label={t('aiRegenerateTitle')}
-                      data-tip={t('aiRegenerateTitle')}
-                    >
-                      {/* 24-canvas glyph at 18px (near-full-bleed paths, sized for optical
-                          parity with the copy icon): stroke 1.5 paints 1.125px (1:16) */}
-                      <svg
-                        style={{ width: 18, height: 18 }}
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden
-                      >
-                        <path d="M3.68881 9.85339C4.1791 8.0054 5.28205 6.30704 6.9459 5.09101C10.8046 2.27085 16.2188 3.11279 19.0389 6.97147C19.7242 7.90904 20.1932 8.93842 20.4553 10.0001" />
-                        <path d="M2.00452 8.46411L2.87229 10.7059C2.96814 10.9535 3.24658 11.0765 3.4942 10.9807L5.73594 10.1129" />
-                        <path d="M20.3308 14.4908C19.8405 16.3388 18.7376 18.0372 17.0738 19.2532C13.215 22.0734 7.80083 21.2314 4.98071 17.3728C4.22167 16.3342 3.72792 15.183 3.48686 13.9999" />
-                        <path d="M22.0151 15.8801L21.1474 13.6384C21.0515 13.3908 20.7731 13.2677 20.5255 13.3636L18.2837 14.2314" />
-                      </svg>
-                    </button>
-                  )}
                   {entry.snapshot && (
                     <>
                       {/* hairline between reply actions (icons) and the document action (icon+label);
                           CSS shows it only when an icon button actually precedes it */}
-                      <span className="ai-rollback-sep" aria-hidden />
+
                       <RollbackButton
                         disabled={busy}
                         onClick={() => rollback(i, entry.snapshot!)}
@@ -1521,8 +1513,12 @@ export function AiPanel({
                   {t('aiContinue')}
                 </button>
               )}
+              {entry.role !== 'user' && chatManagement.actions(historicChat.length + i)}
             </div>
           )
+          return entry.role === 'user'
+            ? chatManagement.actions(historicChat.length + i, renderMessage)
+            : renderMessage(null)
         })}
       </div>
 

@@ -340,6 +340,140 @@ export class ProjectStore {
     return join(this.chatsDir(projectId), `${chatId}.jsonl`)
   }
 
+  /** Managed paths are authoritative; JSONL remains an active-path mirror for project timelines. */
+  loadManagedConversation(
+    projectId: string,
+    chatId: string,
+  ): { revision: number; state: unknown } | null {
+    const file = `${this.chatPath(projectId, chatId)}.session.json`
+    if (!existsSync(file)) return null
+    if (statSync(file).size > MAX_CHAT_FILE_READ_BYTES)
+      throw new Error('Conversation storage exceeds its size limit.')
+    const result = JSON.parse(readFileSync(file, 'utf8'))
+    if (!Number.isInteger(result.revision) || result.revision < 1)
+      throw new Error('Invalid conversation revision.')
+    this.managedMessages(result.state)
+    return result
+  }
+
+  private managedMessages(state: unknown): Array<{ role: 'user' | 'assistant'; text: string }> {
+    if (!state || typeof state !== 'object') throw new Error('Invalid managed conversation.')
+    const data = state as {
+      schema?: unknown
+      revision?: unknown
+      active?: unknown
+      chats?: unknown
+    }
+    if (
+      data.schema !== 1 ||
+      !Number.isInteger(data.revision) ||
+      !Array.isArray(data.chats) ||
+      data.chats.length > 100
+    )
+      throw new Error('Invalid managed conversation.')
+    const ids = new Set<string>()
+    let active: Array<{ role: 'user' | 'assistant'; text: string }> | undefined
+    for (const chat of data.chats) {
+      if (
+        !chat ||
+        typeof chat.id !== 'string' ||
+        ids.has(chat.id) ||
+        typeof chat.title !== 'string' ||
+        !Array.isArray(chat.versions) ||
+        chat.versions.length > 100
+      )
+        throw new Error('Invalid managed conversation.')
+      ids.add(chat.id)
+      if (
+        chat.actions !== undefined &&
+        (!Array.isArray(chat.actions) ||
+          chat.actions.length > 100 ||
+          chat.actions.some(
+            (action: { id?: unknown; summary?: unknown } | null) =>
+              !action ||
+              typeof action.id !== 'string' ||
+              typeof action.summary !== 'string' ||
+              action.summary.length > 2000,
+          ))
+      )
+        throw new Error('Invalid file-change receipts.')
+      const versions = new Set<string>()
+      for (const version of chat.versions) {
+        if (
+          !version ||
+          typeof version.id !== 'string' ||
+          versions.has(version.id) ||
+          typeof version.draft !== 'string' ||
+          !Array.isArray(version.messages) ||
+          version.messages.length > MAX_CHAT_LIMIT
+        )
+          throw new Error('Invalid conversation version.')
+        versions.add(version.id)
+        for (const message of version.messages) {
+          if (
+            !message ||
+            !['user', 'assistant'].includes(message.role) ||
+            typeof message.text !== 'string'
+          )
+            throw new Error('Invalid conversation message.')
+        }
+        if (chat.id === data.active && version.id === chat.active && !chat.trashed)
+          active = version.messages
+      }
+      if (!versions.has(chat.active)) throw new Error('Invalid selected version.')
+    }
+    if (!active) throw new Error('Invalid active conversation.')
+    return active
+  }
+
+  saveManagedConversation(
+    projectId: string,
+    chatId: string,
+    revision: number,
+    state: unknown,
+  ): { revision: number } {
+    const file = `${this.chatPath(projectId, chatId)}.session.json`
+    if (!Number.isInteger(revision) || revision < 0)
+      throw new Error('Invalid conversation revision.')
+    const json = JSON.stringify(state)
+    if (
+      Buffer.byteLength(json, 'utf8') > MAX_CHAT_FILE_READ_BYTES ||
+      Buffer.byteLength(JSON.stringify({ revision: revision + 1, state }, null, 2), 'utf8') >
+        MAX_CHAT_FILE_READ_BYTES
+    )
+      throw new Error('Conversation storage exceeds its size limit.')
+    const messages = this.managedMessages(state),
+      previous = this.loadManagedConversation(projectId, chatId)
+    if ((previous?.revision ?? 0) !== revision)
+      throw new Error(
+        'This conversation changed in another window. Reopen the file before editing history.',
+      )
+    ensureDir(this.chatsDir(projectId))
+    const mirror = this.chatPath(projectId, chatId),
+      temporary = `${mirror}.${randomBytes(6).toString('hex')}.tmp`
+    try {
+      writeFileSync(
+        temporary,
+        messages
+          .map(
+            (message, index) => JSON.stringify({ ...message, seq: index + 1, ts: nowIso() }) + '\n',
+          )
+          .join(''),
+        'utf8',
+      )
+      renameSync(temporary, mirror)
+      writeJson(file, { revision: revision + 1, state })
+    } catch (error) {
+      try {
+        unlinkSync(temporary)
+      } catch {}
+      throw error
+    }
+    this.seqCounters.set(this.seqKey(projectId, chatId), messages.length)
+    this.pendingFirstWrite.delete(this.seqKey(projectId, chatId))
+    return { revision: revision + 1 }
+  }
+
   /**
    * The key a path is stored under in one of the index maps, looking through the
    * alternate spellings as well: an older version keyed entries under the raw
@@ -830,6 +964,10 @@ export class ProjectStore {
     this.flushPending(toProjectId, toId)
     const oldPath = this.chatPath(fromProjectId, fromId)
     const newPath = this.chatPath(toProjectId, toId)
+    if (existsSync(`${oldPath}.session.json`) && !existsSync(`${newPath}.session.json`)) {
+      ensureDir(dirname(newPath))
+      renameSync(`${oldPath}.session.json`, `${newPath}.session.json`)
+    }
     let mergedMaxSeq: number | undefined
     try {
       if (existsSync(oldPath)) {

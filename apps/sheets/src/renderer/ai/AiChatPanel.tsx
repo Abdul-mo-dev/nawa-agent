@@ -4,6 +4,7 @@ import { setRendererChatModel, getRendererChatModel } from '@genoffice/ai-provid
 import '@genoffice/ui/chat-model-picker.css'
 import { aiPanelWidthAtPointer, AiPanelSideButton } from '@genoffice/ui'
 import React, { useEffect, useRef, useState } from 'react'
+import type { FrozenSelection } from './tools'
 import { AiComposer, AiScopeQuote, AiTypingIndicator, type AiScopeQuoteData } from '@genoffice/ui'
 import { NawaMark } from '../ribbon-icons'
 import { AiQueueStrip, AI_QUEUE_LABELS, useChatRunQueue } from '@genoffice/ui'
@@ -184,6 +185,7 @@ function loadPanelWidth(): number | null {
 }
 
 export interface AiToolChip {
+  readonly mutated?: boolean | undefined
   readonly summary: string
   readonly isError: boolean
   /** still executing: rendered as a spinner chip, replaced in place when the tool finishes */
@@ -195,6 +197,7 @@ export interface AiToolChip {
 }
 
 export interface AiChatMessage {
+  readonly selectionScope?: FrozenSelection | null
   readonly role: 'user' | 'assistant'
   readonly text: string
   readonly tools: readonly AiToolChip[]
@@ -219,6 +222,9 @@ export function AiChatPanel({
   hasContent,
   chat,
   historicChat = [],
+  chatToolbar,
+  chatActions,
+  conversationReset,
   attachments,
   attachNotice,
   onPickAttachments,
@@ -247,6 +253,14 @@ export function AiChatPanel({
   readonly hasContent: boolean
   readonly chat: readonly AiChatMessage[]
   readonly historicChat?: readonly AiChatMessage[]
+  readonly chatToolbar?: React.ReactNode
+  readonly chatActions?:
+    | ((
+        index: number,
+        renderMessage?: (editor: React.ReactNode) => React.ReactNode,
+      ) => React.ReactNode)
+    | undefined
+  readonly conversationReset?: number | undefined
   /// Chat attachments (chips + 📎 button + drag onto the panel), same structure
   /// as the docs/slides AI panels.
   readonly attachments: readonly AttachmentMeta[]
@@ -294,6 +308,8 @@ export function AiChatPanel({
   /** messages queued while a reply runs; the pump re-sends them through onSend on settle */
   const msgQueue = useChatRunQueue<readonly AttachmentMeta[]>({
     busy: aiBusy,
+    halted: chat.at(-1)?.isError === true || chat.at(-1)?.undelivered === true,
+    resetKey: conversationReset,
     submit: (text, atts) => onSendQueued?.(text, atts) ?? false,
   })
   // Panel chrome follows the UI language; message text follows its own content (dir=auto below)
@@ -559,6 +575,7 @@ export function AiChatPanel({
               }}
               data-tip={t('aiNewChat')}
               aria-label={t('aiNewChat')}
+              disabled={aiBusy}
             >
               <IconNewChat size={15} />
             </button>
@@ -574,24 +591,32 @@ export function AiChatPanel({
         </div>
       </header>
 
+      {chatToolbar}
       <div className="ai-chat" ref={chatRef} onScroll={onChatScroll}>
         {/* Past conversation (read-only transcript), shown continuously with the current turn */}
         {historicChat.length > 0 && (
           <>
-            {historicChat.map((entry, i) => (
-              <div key={`h${i}`} className={`ai-msg ai-msg-${entry.role} ai-msg-historic`}>
-                {entry.role === 'user' && entry.scope && <AiScopeQuote scope={entry.scope} />}
-                {entry.role === 'user' && entry.attachments && entry.attachments.length > 0 && (
-                  <SentAttachments atts={entry.attachments} previews={attachmentPreviews} />
-                )}
-                {entry.tools.length > 0 && <ToolChipList tools={entry.tools} />}
-                {entry.text && (
-                  <div dir="auto">
-                    <Markdown text={entry.text} navs={[citationNav, fileNav]} />
-                  </div>
-                )}
-              </div>
-            ))}
+            {historicChat.map((entry, i) => {
+              const renderMessage = (editor: React.ReactNode) => (
+                <div key={`h${i}`} className={`ai-msg ai-msg-${entry.role} ai-msg-historic`}>
+                  {entry.role === 'user' && entry.scope && <AiScopeQuote scope={entry.scope} />}
+                  {entry.role === 'user' && entry.attachments && entry.attachments.length > 0 && (
+                    <SentAttachments atts={entry.attachments} previews={attachmentPreviews} />
+                  )}
+                  {entry.tools.length > 0 && <ToolChipList tools={entry.tools} />}
+                  {editor ??
+                    (entry.text && (
+                      <div dir="auto">
+                        <Markdown text={entry.text} navs={[citationNav, fileNav]} />
+                      </div>
+                    ))}
+                  {entry.role !== 'user' && chatActions?.(i)}
+                </div>
+              )
+              return entry.role === 'user' && chatActions
+                ? chatActions?.(i, renderMessage)
+                : renderMessage(null)
+            })}
             <div className="ai-history-sep">{t('aiHistorySep')}</div>
           </>
         )}
@@ -605,79 +630,75 @@ export function AiChatPanel({
             </div>
           </div>
         )}
-        {chat.map((entry, index) => (
-          <div
-            key={index}
-            className={`ai-msg ai-msg-${entry.role}${entry.isError ? ' ai-msg-error' : ''}${entry.role === 'assistant' && entry.streaming ? ' ai-msg-streaming' : ''}`}
-          >
-            {entry.role === 'user' ? (
-              <>
-                {entry.scope && <AiScopeQuote scope={entry.scope} />}
-                {entry.attachments && entry.attachments.length > 0 && (
-                  <SentAttachments atts={entry.attachments} previews={attachmentPreviews} />
-                )}
-                <span dir="auto">{entry.text}</span>
-                {entry.undelivered && (
-                  <div className="ai-msg-undelivered">
-                    {t('aiUndelivered')}
-                    {!aiBusy && (
-                      <button
-                        className="ai-retry-btn"
-                        onClick={() => onSend(entry.text, entry.attachments ?? [], index)}
-                      >
-                        {t('aiRetry')}
-                      </button>
-                    )}
-                  </div>
-                )}
-              </>
-            ) : (
-              <>
-                {entry.tools.length > 0 && <ToolChipList tools={entry.tools} />}
-                {entry.text ? (
-                  <div dir="auto">
-                    <Markdown text={entry.text} navs={[citationNav, fileNav]} />
-                  </div>
-                ) : (
-                  entry.streaming && (
-                    <span className="ai-typing-row">
-                      <AiTypingIndicator
-                        label={entry.tools.length > 0 ? t('aiWorking') : t('aiThinking')}
-                      />
-                    </span>
-                  )
-                )}
-                {entry.autoApplied && (
-                  <div className="ai-auto-applied">
-                    <span className="ai-auto-applied-text">
-                      {t('aiAutoApplied', { count: entry.autoApplied.opCount })}
-                    </span>
-                    {/* undoSteps 0 = the batch exceeded the undo budget and
+        {chat.map((entry, index) => {
+          const renderMessage = (editor: React.ReactNode) => (
+            <div
+              key={index}
+              className={`ai-msg ai-msg-${entry.role}${entry.isError ? ' ai-msg-error' : ''}${entry.role === 'assistant' && entry.streaming ? ' ai-msg-streaming' : ''}`}
+            >
+              {entry.role === 'user' ? (
+                <>
+                  {entry.scope && <AiScopeQuote scope={entry.scope} />}
+                  {entry.attachments && entry.attachments.length > 0 && (
+                    <SentAttachments atts={entry.attachments} previews={attachmentPreviews} />
+                  )}
+                  {editor ?? <span dir="auto">{entry.text}</span>}
+                  {entry.undelivered && (
+                    <div className="ai-msg-undelivered">{t('aiUndelivered')}</div>
+                  )}
+                </>
+              ) : (
+                <>
+                  {entry.tools.length > 0 && <ToolChipList tools={entry.tools} />}
+                  {entry.text ? (
+                    <div dir="auto">
+                      <Markdown text={entry.text} navs={[citationNav, fileNav]} />
+                    </div>
+                  ) : (
+                    entry.streaming && (
+                      <span className="ai-typing-row">
+                        <AiTypingIndicator
+                          label={entry.tools.length > 0 ? t('aiWorking') : t('aiThinking')}
+                        />
+                      </span>
+                    )
+                  )}
+                  {entry.autoApplied && (
+                    <div className="ai-auto-applied">
+                      <span className="ai-auto-applied-text">
+                        {t('aiAutoApplied', { count: entry.autoApplied.opCount })}
+                      </span>
+                      {/* undoSteps 0 = the batch exceeded the undo budget and
                         kept no stack entry; a forced 1-step undo would revert
                         the user's own previous action instead. */}
-                    {(entry.autoApplied.undoSteps ?? 1) > 0 && (
-                      <button
-                        className="ai-undo-btn"
-                        onClick={() => onUndo(Math.max(1, entry.autoApplied?.undoSteps ?? 1))}
-                        data-tip={t('aiUndoTitle')}
-                      >
-                        {t('aiUndo')}
-                      </button>
-                    )}
-                  </div>
-                )}
-                {entry.loginRequired && (
-                  <button
-                    className="ai-login-btn"
-                    onClick={() => void window.desktopApi.aiGskLogin()}
-                  >
-                    {t('aiGskLoginBtn')}
-                  </button>
-                )}
-              </>
-            )}
-          </div>
-        ))}
+                      {(entry.autoApplied.undoSteps ?? 1) > 0 && (
+                        <button
+                          className="ai-undo-btn"
+                          onClick={() => onUndo(Math.max(1, entry.autoApplied?.undoSteps ?? 1))}
+                          data-tip={t('aiUndoTitle')}
+                        >
+                          {t('aiUndo')}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {entry.loginRequired && (
+                    <button
+                      className="ai-login-btn"
+                      onClick={() => void window.desktopApi.aiGskLogin()}
+                    >
+                      {t('aiGskLoginBtn')}
+                    </button>
+                  )}
+                </>
+              )}
+              {entry.role !== 'user' && chatActions?.(historicChat.length + index)}
+            </div>
+          )
+          return entry.role === 'user' && chatActions
+            ? chatActions(historicChat.length + index, renderMessage)
+            : renderMessage(null)
+        })}
 
         {preview && (
           <section className="preview ai-preview-card" aria-label={t('aiPreviewAria')}>
@@ -882,7 +903,10 @@ export function AiChatPanel({
           textareaRef={inputRef}
           onChange={onPromptChange}
           onSend={send}
-          onStop={onStop}
+          onStop={() => {
+            msgQueue.setPaused(true)
+            onStop()
+          }}
           onPasteFiles={onPasteFiles}
         />
       </div>

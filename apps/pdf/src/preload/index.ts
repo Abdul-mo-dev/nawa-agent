@@ -131,6 +131,10 @@ const projectApi = {
   resolveChat: (args: { filePath: string | null; tempChatId?: string }) =>
     ipcRenderer.invoke('project:resolveChat', args),
   appendChat: (args: unknown) => ipcRenderer.invoke('project:appendChat', args),
+  loadManagedConversation: (args: unknown) =>
+    ipcRenderer.invoke('project:loadManagedConversation', args),
+  saveManagedConversation: (args: unknown) =>
+    ipcRenderer.invoke('project:saveManagedConversation', args),
   loadChat: (args: { projectId: string; chatId: string; limit?: number }) =>
     ipcRenderer.invoke('project:loadChat', args),
   rebindChat: (args: { projectId: string; tempChatId: string; newFilePath: string }) =>

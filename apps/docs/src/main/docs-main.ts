@@ -2011,6 +2011,26 @@ export function registerProjectIpc(): void {
 
   /** Read history */
   ipcMain.handle(
+    'project:loadManagedConversation',
+    (event, args: { projectId: string; chatId: string }) => {
+      assertDirectoryStagePicker(event.sender)
+      return getProjectStore().loadManagedConversation(args.projectId, args.chatId)
+    },
+  )
+  ipcMain.handle(
+    'project:saveManagedConversation',
+    (event, args: { projectId: string; chatId: string; revision: number; state: unknown }) => {
+      assertDirectoryStagePicker(event.sender)
+      return getProjectStore().saveManagedConversation(
+        args.projectId,
+        args.chatId,
+        args.revision,
+        args.state,
+      )
+    },
+  )
+
+  ipcMain.handle(
     'project:loadChat',
     (
       _event,

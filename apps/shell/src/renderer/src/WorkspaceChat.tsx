@@ -21,13 +21,28 @@ import { createPortal } from 'react-dom'
 import { ChatHeaderTarget } from './explorer/chat-header'
 import { AgentLoop, type AgentMessage, type AgentTransport } from '@genoffice/agent-core'
 import { applyChatModel, chatModelLabel, agentPolicyOf } from '@genoffice/ai-provider/browser'
-import { AiComposer, Markdown, ChatModelPicker } from '@genoffice/ui'
+import {
+  AiComposer,
+  Markdown,
+  ChatModelPicker,
+  ChatMessageActions,
+  CHAT_LABELS,
+  questionIndex,
+  turnEnd,
+  isFinalAnswer,
+  exportConversation,
+  AiQueueStrip,
+  AI_QUEUE_LABELS,
+  useChatRunQueue,
+} from '@genoffice/ui'
+import '@genoffice/ui/ai-queue-strip.css'
 import '@genoffice/ui/markdown.css'
 import '@genoffice/ui/chat-model-picker.css'
 import type {
   ConversationRecord,
   HistoryComparison,
   HistoryMessage,
+  HistoryScope,
 } from '../../shared/conversation-api'
 import type { DirectoryActivity } from '../../shared/directory-activity'
 import type { DirectoryCitation, DirectoryValidation } from '../../shared/directory-evidence'
@@ -96,51 +111,64 @@ interface SessionControls {
 }
 const emptyControls: SessionControls = { leave: async () => {}, model: () => '' }
 const messageText = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause))
+type PendingSend = {
+  question: string
+  displayText?: string
+  scope?: HistoryScope
+  userId?: string
+  answerOnly?: boolean
+  previousAnswer?: string
+}
 
 /** Unchanged transcript rows do not re-render Markdown for every streamed token. */
 const DirectoryMessage = memo(function DirectoryMessage({
   message,
   onReview,
   onCitation,
+  actions,
 }: {
   message: HistoryMessage
   onReview?: () => void
   onCitation: (citation: DirectoryCitation) => void
+  actions?: (renderMessage?: (editor: ReactNode) => ReactNode) => ReactNode
 }) {
   const { s } = useSidebarText()
   // Activity has its own quiet row, never an empty message attributed to Nawa.
   // This also fixes the display of activity-only records already saved in history.
   if (!message.text && !message.activity) return null
+  const renderMessage = (editor: ReactNode) => (
+    <div
+      className={`ws-chat-msg ws-chat-${message.role}${message.error ? ' ws-chat-error' : ''}`}
+      aria-label={message.role === 'user' ? s('You') : 'Nawa'}
+      title={[message.modelLabel, new Date(message.createdAt).toLocaleString()]
+        .filter(Boolean)
+        .join(' · ')}
+    >
+      <div dir="auto">
+        {message.role === 'assistant' ? (
+          <Markdown
+            text={message.text}
+            nav={{
+              scheme: 'RAG:',
+              isAllowed: (href) => !!message.citations?.some((c) => c.id === href),
+              onNavigate: (href) => {
+                const citation = message.citations?.find((c) => c.id === href)
+                if (citation) onCitation(citation)
+              },
+            }}
+          />
+        ) : (
+          (editor ?? message.text)
+        )}
+      </div>
+      {message.role !== 'user' && actions?.()}
+    </div>
+  )
   return (
     <>
       {message.activity && <ActivityTimeline activity={message.activity} onReview={onReview} />}
-      {message.text && (
-        <div
-          className={`ws-chat-msg ws-chat-${message.role}${message.error ? ' ws-chat-error' : ''}`}
-          aria-label={message.role === 'user' ? s('You') : 'Nawa'}
-          title={[message.modelLabel, new Date(message.createdAt).toLocaleString()]
-            .filter(Boolean)
-            .join(' · ')}
-        >
-          <div dir="auto">
-            {message.role === 'assistant' ? (
-              <Markdown
-                text={message.text}
-                nav={{
-                  scheme: 'RAG:',
-                  isAllowed: (href) => !!message.citations?.some((c) => c.id === href),
-                  onNavigate: (href) => {
-                    const citation = message.citations?.find((c) => c.id === href)
-                    if (citation) onCitation(citation)
-                  },
-                }}
-              />
-            ) : (
-              message.text
-            )}
-          </div>
-        </div>
-      )}
+      {message.text &&
+        (message.role === 'user' && actions ? actions(renderMessage) : renderMessage(null))}
     </>
   )
 })
@@ -160,6 +188,8 @@ function HistoryWorkspace(props: WorkspaceChatProps) {
   const [loading, setLoading] = useState(true)
   const [transitioning, setTransitioning] = useState(false)
   const [retry, setRetry] = useState(0)
+  const [pendingSend, setPendingSend] = useState<PendingSend | undefined>()
+  const [lastDeletedId, setLastDeletedId] = useState<string | null>(null)
   const controls = useRef<SessionControls>(emptyControls)
   const transitionLock = useRef(false)
   const alive = useRef(true)
@@ -174,9 +204,10 @@ function HistoryWorkspace(props: WorkspaceChatProps) {
       /* UI preference only. */
     }
   }
-  const activate = (record: ConversationRecord) => {
+  const activate = (record: ConversationRecord, pending?: PendingSend) => {
     if (!alive.current) return
     setSession(record)
+    setPendingSend(pending)
     setMountVersion((value) => value + 1)
     remember(record)
     setHistoryVersion((value) => value + 1)
@@ -267,6 +298,7 @@ function HistoryWorkspace(props: WorkspaceChatProps) {
   const deleteChat = (id: string) =>
     transition(async () => {
       await window.nawaHistory.delete(id)
+      setLastDeletedId(id)
       if (session?.id === id) {
         const list = await window.nawaHistory.list({ folder: props.folder })
         activate(
@@ -280,6 +312,27 @@ function HistoryWorkspace(props: WorkspaceChatProps) {
         )
       }
       if (alive.current) setHistoryVersion((value) => value + 1)
+    })
+  const historyAction = (work: () => Promise<void>) =>
+    transition(async () => {
+      await work()
+      if (session) {
+        try {
+          activate(await window.nawaHistory.get(session.id))
+        } catch {
+          const list = await window.nawaHistory.list({ folder: props.folder })
+          activate(
+            list.conversations[0]
+              ? await window.nawaHistory.get(list.conversations[0].id)
+              : await window.nawaHistory.create({
+                  folder: props.folder,
+                  folderName: props.folderName,
+                  modelId: controls.current.model(),
+                }),
+          )
+        }
+      }
+      setHistoryVersion((value) => value + 1)
     })
   if (!session)
     return (
@@ -310,6 +363,8 @@ function HistoryWorkspace(props: WorkspaceChatProps) {
       key={`${session.id}:${mountVersion}`}
       {...props}
       session={session}
+      pendingSend={pendingSend}
+      onActivate={activate}
       controls={controls}
       transitioning={transitioning}
       parentError={error}
@@ -347,6 +402,17 @@ function HistoryWorkspace(props: WorkspaceChatProps) {
               onOpen={openChat}
               onRename={renameChat}
               onDelete={deleteChat}
+              recentlyDeletedId={lastDeletedId}
+              onArchive={(id, archived) =>
+                historyAction(() => window.nawaHistory.archive(id, archived))
+              }
+              onRestore={(id) =>
+                historyAction(async () => {
+                  await window.nawaHistory.restore(id)
+                  if (lastDeletedId === id) setLastDeletedId(null)
+                })
+              }
+              onPurge={(id) => historyAction(() => window.nawaHistory.purge(id))}
               onClose={() => setHistoryOpen(false)}
             />
           )}
@@ -358,6 +424,8 @@ function HistoryWorkspace(props: WorkspaceChatProps) {
 
 type DirectoryChatProps = WorkspaceChatProps & {
   session: ConversationRecord
+  pendingSend?: PendingSend
+  onActivate: (record: ConversationRecord, pending?: PendingSend) => void
   controls: { current: SessionControls }
   transitioning: boolean
   parentError: string | null
@@ -379,6 +447,8 @@ function DirectoryChat({
   scopeDirs = [],
   onOpenFile,
   session,
+  pendingSend,
+  onActivate,
   controls,
   transitioning,
   parentError,
@@ -392,6 +462,7 @@ function DirectoryChat({
 }: DirectoryChatProps) {
   const { s } = useSidebarText()
   const { lang } = useI18n()
+  const labels = CHAT_LABELS[lang]
   const langRef = useRef(lang)
   langRef.current = lang
   const headerTarget = useContext(ChatHeaderTarget)
@@ -424,6 +495,20 @@ function DirectoryChat({
     input = data.draft,
     modelId = data.modelId
   const [busy, setBusy] = useState(false)
+  const [explanationOnly, setExplanationOnly] = useState(false)
+  const [actionPending, setActionPending] = useState(false)
+  const managementLock = useRef(false)
+  const msgQueue = useChatRunQueue<HistoryScope>({
+    busy: busy || actionPending,
+    resetKey: session.id,
+    submit: (question, scope) => {
+      if (active.current !== null || managementLock.current || transitioning) return false
+      void send(undefined, { question, scope })
+      return true
+    },
+  })
+  const queueControl = useRef(msgQueue)
+  queueControl.current = msgQueue
   const [notice, setNotice] = useState<string | null>(null)
   const [comparison, setComparison] = useState<HistoryComparison | null>(null)
   const [checking, setChecking] = useState(false)
@@ -551,16 +636,18 @@ function DirectoryChat({
             : message,
         ),
       )
-    updateMessages((previous) =>
-      previous.map((message) =>
-        message.request?.outcome === 'running'
-          ? { ...message, request: { ...message.request, outcome: 'cancelled' } }
-          : message,
-      ),
-    )
+    if (current.some((message) => message.request?.outcome === 'running'))
+      updateMessages((previous) =>
+        previous.map((message) =>
+          message.request?.outcome === 'running'
+            ? { ...message, request: { ...message.request, outcome: 'cancelled' } }
+            : message,
+        ),
+      )
   }, [buffer, updateMessages])
   const stop = useCallback(
     (reason = 'Stopped. The partial response is saved in this conversation.') => {
+      queueControl.current.setPaused(true)
       invalidateRun()
       sealPartial()
       if (alive.current) {
@@ -619,6 +706,8 @@ function DirectoryChat({
     controls.current = {
       model: () => buffer.getSnapshot().modelId,
       leave: async () => {
+        queueControl.current.setPaused(true)
+        queueControl.current.clear()
         invalidateRun()
         cancelComparison()
         sealPartial()
@@ -709,12 +798,26 @@ function DirectoryChat({
       })
   }
 
-  const send = async (preparation?: { paths: string[]; folder: string | null }) => {
-    const question = preparation
-      ? 'Prepare and review the selected files for data analysis, then export a SQLite database. Inspect every table and its source evidence, apply clear validated policies, preserve source files, and report any tables needing a decision. Export the Ready tables and show the database path. Do not require separate setup or manual approval of clear tables.'
-      : buffer.getSnapshot().draft.trim()
-    if (selectionIssue) {
-      setNotice(selectionIssue)
+  const send = async (
+    preparation?: { paths: string[]; folder: string | null },
+    options?: PendingSend,
+  ) => {
+    const question =
+      options?.question ??
+      (preparation
+        ? 'Prepare and review the selected files for data analysis, then export a SQLite database. Inspect every table and its source evidence, apply clear validated policies, preserve source files, and report any tables needing a decision. Export the Ready tables and show the database path. Do not require separate setup or manual approval of clear tables.'
+        : buffer.getSnapshot().draft.trim())
+    const chosen = options?.scope ?? selection
+    if (
+      [chosen.opened, ...chosen.files, ...chosen.directories].some(
+        (path) => path && !registeredRoots.some((root) => isWithin(path, root)),
+      )
+    ) {
+      setNotice(
+        s(
+          'A selected path is outside the opened workspace folders. Add its folder to use it in Chat.',
+        ),
+      )
       return
     }
     if (!question || active.current !== null || transitioning || !alive.current) return
@@ -722,11 +825,11 @@ function DirectoryChat({
     cancelComparison()
     setChecking(false)
     const runId = ++epoch.current,
-      capturedScope = scopeKey,
+      capturedScope = selectionKey(chosen),
       capturedModel = modelId
     const selected = preparation
       ? selectionSnapshot(preparation.folder, preparation.paths, [])
-      : selectionSnapshot(selection.opened, selection.files, selection.directories)
+      : selectionSnapshot(chosen.opened, chosen.files, chosen.directories)
     const route = preparation
       ? {
           ...directoryRoute(question, selected),
@@ -736,8 +839,17 @@ function DirectoryChat({
         }
       : directoryRoute(question, selected)
     const previousMessages = buffer.getSnapshot().messages
+    const actionMessages = [
+      ...new Map(
+        [...(buffer.getSnapshot().actions ?? []), ...previousMessages].map((message) => [
+          message.id,
+          message,
+        ]),
+      ).values(),
+    ]
     active.current = runId
     setBusy(true)
+    setExplanationOnly(!!options?.answerOnly)
     setResponseSelection(selected)
     setNotice(null)
     // Selection is immutable for this request. Explorer changes (including a commit
@@ -748,7 +860,7 @@ function DirectoryChat({
       epoch.current === runId &&
       modelRef.current === capturedModel
     const startedAt = Date.now(),
-      userMessageId = crypto.randomUUID(),
+      userMessageId = options?.userId ?? crypto.randomUUID(),
       assistantMessageId = crypto.randomUUID()
     const trace: DirectoryActivity = {
       id: crypto.randomUUID(),
@@ -768,9 +880,15 @@ function DirectoryChat({
         {
           id: userMessageId,
           role: 'user',
-          text: preparation ? s('Prepare & export selected files') : question,
+          text:
+            options?.displayText ?? (preparation ? s('Prepare & export selected files') : question),
+          ...(preparation ||
+          (options?.displayText !== undefined && options.displayText !== question)
+            ? { instruction: question }
+            : {}),
           createdAt: startedAt,
           contextKey: capturedScope,
+          scope: selected,
           request: { id: trace.id, phase: 'user', outcome: 'running' },
         },
         {
@@ -895,6 +1013,7 @@ function DirectoryChat({
         }
       }
       const finish = (text: string, error = false, incomplete = false) => {
+        if (error || incomplete) queueControl.current.setPaused(true)
         if (!current()) return
         textFrames.current?.flush()
         textFrames.current = null
@@ -944,6 +1063,8 @@ function DirectoryChat({
         loopRef.current = null
         setBusy(false)
         setResponseSelection(null)
+        if (options?.answerOnly && !error)
+          setNotice(s('This explanation uses the earlier answer. Sources were not checked again.'))
         persistFinished()
       }
       const files = new DirectoryActionClient({
@@ -955,12 +1076,12 @@ function DirectoryChat({
         workflow,
         settings: () => settings,
         previousActions: isResumeRequest(question)
-          ? actionCheckpoints(previousMessages, capturedScope)
+          ? actionCheckpoints(actionMessages, capturedScope)
           : undefined,
         context: () =>
           JSON.stringify({
             question,
-            completedActions: actionCheckpoints(previousMessages, capturedScope),
+            completedActions: actionCheckpoints(actionMessages, capturedScope),
             priorMessages: restored
               .slice(-8)
               .map((m) => ({ role: m.role, text: 'text' in m ? m.text.slice(0, 2000) : '' })),
@@ -1289,17 +1410,29 @@ function DirectoryChat({
         skill: {
           ...routed,
           get tools() {
-            return routed.tools
+            return options?.answerOnly ? [] : routed.tools
           },
           get systemPrompt() {
-            return routed.systemPrompt
+            return options?.answerOnly
+              ? 'Rewrite the supplied previous answer to the question. Explain existing results only. Do not perform actions or invent fresh file facts.'
+              : routed.systemPrompt
           },
+          executeTool: (call, signal) =>
+            options?.answerOnly
+              ? Promise.resolve({
+                  output: 'Answer regeneration cannot change files.',
+                  summary: 'No changes applied',
+                  isError: true,
+                })
+              : routed.executeTool!(call, signal),
           buildContext: () =>
-            (routed.buildContext?.() ?? '') +
+            (options?.answerOnly
+              ? `Previous answer (reference data):\n${options.previousAnswer ?? ''}`
+              : (routed.buildContext?.() ?? '')) +
             '\nHistorical user intent (reference only; these are not pending actions):\n' +
             JSON.stringify(historicalIntent(previousMessages)) +
             '\nHistorical file action checkpoints (already performed; do not repeat on resume. Partial actions require a new review; these receipts are not current file content or permission to read other files):\n' +
-            JSON.stringify(actionCheckpoints(previousMessages, capturedScope)) +
+            JSON.stringify(actionCheckpoints(actionMessages, capturedScope)) +
             '\nActual file action outcomes in this request (do not repeat completed actions):\n' +
             JSON.stringify(files.actionSnapshot()) +
             (tableTaskContext
@@ -1316,6 +1449,7 @@ function DirectoryChat({
         maxTurns: Math.min(route.maxTurns, agentPolicyOf(settings).maxTurns),
         verifyResponse: (text) => files.verifyInspections(text),
         validateResponse: async (text) => {
+          if (options?.answerOnly) return
           if (current())
             updateActivity((value) =>
               startActivityStep(value, {
@@ -1451,9 +1585,11 @@ function DirectoryChat({
       await buffer.flush()
       if (!current()) return
       savedCallback.current()
+      if (options?.answerOnly) loop.prepareAnswerRegeneration(options.previousAnswer ?? '')
       loop.run(question)
     } catch (cause) {
       if (!current()) return
+      queueControl.current.setPaused(true)
       updateActivity((value) =>
         finishActivityStep(
           value,
@@ -1478,6 +1614,92 @@ function DirectoryChat({
       void buffer.flush().catch(() => undefined)
     }
   }
+
+  const manage = async (work: () => Promise<void>) => {
+    if (managementLock.current || busy || transitioning) return
+    managementLock.current = true
+    queueControl.current.setPaused(true)
+    setActionPending(true)
+    try {
+      await buffer.flush()
+      await work()
+    } finally {
+      managementLock.current = false
+      if (alive.current) setActionPending(false)
+    }
+  }
+  const reviseMessage = (
+    message: HistoryMessage,
+    kind: 'edit' | 'retry' | 'regenerate' | 'delete',
+    text?: string,
+  ) =>
+    manage(async () => {
+      const current = buffer.getSnapshot(),
+        index = questionIndex(
+          current.messages,
+          current.messages.findIndex((item) => item.id === message.id),
+        )
+      const user = current.messages[index]
+      if (!user) throw new Error('Question no longer exists.')
+      const exchange = current.messages.slice(index, turnEnd(current.messages, index))
+      const answerOnly =
+        kind === 'regenerate' || (kind === 'retry' && exchange.some((item) => item.request?.action))
+      const record = await window.nawaHistory.revise({
+        id: current.id,
+        revision: current.revision,
+        messageId: message.id,
+        kind,
+        text,
+      })
+      onActivate(
+        record,
+        kind === 'delete'
+          ? undefined
+          : {
+              question: text ?? user.instruction ?? user.text,
+              displayText: text ?? user.text,
+              scope: user.scope,
+              userId: kind === 'edit' ? undefined : user.id,
+              answerOnly,
+              previousAnswer: exchange
+                .filter((item) => item.role === 'assistant')
+                .map((item) => item.text)
+                .join('\n\n'),
+            },
+      )
+    })
+  const switchVersion = (versionId: string) =>
+    manage(async () => {
+      const record = buffer.getSnapshot()
+      onActivate(
+        await window.nawaHistory.switchVersion({
+          id: record.id,
+          revision: record.revision,
+          versionId,
+        }),
+      )
+    })
+  const branchMessage = (message: HistoryMessage) =>
+    manage(async () => {
+      const record = buffer.getSnapshot()
+      onActivate(
+        await window.nawaHistory.branch({
+          id: record.id,
+          revision: record.revision,
+          messageId: message.id,
+        }),
+      )
+    })
+  useEffect(() => {
+    if (!pendingSend) return
+    const timer = setTimeout(() => {
+      void send(undefined, pendingSend)
+    }, 0)
+    return () => clearTimeout(timer)
+    // Each activated version owns at most one initial send, including under StrictMode.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.id, session.activeVersionId])
+  const activeVersion = data.versions?.find((version) => version.id === data.activeVersionId)
 
   const newChatAction = (
     <button
@@ -1521,6 +1743,65 @@ function DirectoryChat({
         </header>
       )}
       {historyPanel}
+      <div className="chat-session-toolbar">
+        <strong>{data.title}</strong>
+        {(data.versions?.length ?? 0) > 1 && (
+          <label>
+            {labels.versions}{' '}
+            <select
+              aria-label={labels.versions}
+              value={data.activeVersionId}
+              disabled={busy || actionPending || transitioning}
+              onChange={(event) =>
+                void switchVersion(event.target.value).catch((cause) =>
+                  setNotice(messageText(cause)),
+                )
+              }
+            >
+              {data.versions?.map((version, index) => (
+                <option key={version.id} value={version.id}>
+                  {index + 1} / {data.versions?.length} · {version.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {activeVersion?.kind === 'delete' && activeVersion.parentVersionId && (
+          <button
+            type="button"
+            disabled={busy || actionPending}
+            onClick={() =>
+              void switchVersion(activeVersion.parentVersionId!).catch((cause) =>
+                setNotice(messageText(cause)),
+              )
+            }
+          >
+            {labels.undoChat}
+          </button>
+        )}
+        <button type="button" onClick={() => exportConversation(data.title, messages, 'md')}>
+          {labels.export}
+        </button>
+        {data.sourceConversationId && (
+          <button
+            type="button"
+            className="chat-session-source"
+            disabled={busy || actionPending}
+            onClick={() =>
+              void manage(async () => {
+                onActivate(await window.nawaHistory.get(data.sourceConversationId!))
+              }).catch((cause) => setNotice(messageText(cause)))
+            }
+          >
+            {labels.original} · {labels.currentFiles}
+          </button>
+        )}
+        {explanationOnly && (
+          <span className="chat-session-source">
+            {labels.regenerate} · {s('No file changes')}
+          </span>
+        )}
+      </div>
       <PanelDialog
         open={optionsOpen}
         title={s('Chat options')}
@@ -1564,6 +1845,21 @@ function DirectoryChat({
           error={checkError}
           recheck={() => void checkChanges()}
         />
+        {!!data.actions?.length && (
+          <details>
+            <summary>
+              {labels.fileChanges} · {data.actions.length}
+            </summary>
+            <ul>
+              {data.actions.map((message) => (
+                <li key={message.id}>
+                  {message.text ||
+                    (message.request?.action ? directoryCommitText(message.request.action) : '')}
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
         <details className="workspace-privacy-note">
           <summary>{s('Storage and file checks')}</summary>
           <p>
@@ -1658,6 +1954,49 @@ function DirectoryChat({
               key={message.id}
               message={message}
               onCitation={openCitation}
+              actions={(renderMessage) => {
+                const index = messages.indexOf(message)
+                if (
+                  message.role === 'assistant' &&
+                  (!isFinalAnswer(messages, index) ||
+                    (busy && turnEnd(messages, index) === messages.length))
+                )
+                  return null
+                return (
+                  <ChatMessageActions
+                    renderMessage={renderMessage}
+                    text={message.text}
+                    lang={lang}
+                    disabled={busy || actionPending || transitioning}
+                    deleteCount={
+                      messages
+                        .slice(questionIndex(messages, messages.indexOf(message)))
+                        .filter((item) => item.role === 'user').length
+                    }
+                    onEdit={
+                      message.role === 'user'
+                        ? (text) => reviseMessage(message, 'edit', text)
+                        : undefined
+                    }
+                    onRetry={
+                      message.role === 'user' &&
+                      ['failed', 'cancelled'].includes(message.request?.outcome ?? '')
+                        ? () => reviseMessage(message, 'retry')
+                        : undefined
+                    }
+                    onRegenerate={
+                      message.role === 'assistant' &&
+                      !message.error &&
+                      message.text &&
+                      isFinalAnswer(messages, index)
+                        ? () => reviseMessage(message, 'regenerate')
+                        : undefined
+                    }
+                    onBranch={() => branchMessage(message)}
+                    onDelete={() => reviseMessage(message, 'delete')}
+                  />
+                )
+              }}
               onReview={
                 needsReview && activityRecord.current?.messageId === message.id
                   ? openReview
@@ -1719,6 +2058,24 @@ function DirectoryChat({
         )}
         <fieldset className="ws-chat-composer" disabled={transitioning}>
           <AiComposer
+            queueStrip={
+              <AiQueueStrip
+                items={msgQueue.queued}
+                labels={AI_QUEUE_LABELS[lang]}
+                paused={msgQueue.paused}
+                onTogglePause={msgQueue.togglePaused}
+                onUpdate={msgQueue.update}
+                onMove={msgQueue.move}
+                onRemove={msgQueue.remove}
+                onClear={msgQueue.clear}
+              />
+            }
+            onQueue={() => {
+              if (!input.trim() || selectionIssue) return
+              msgQueue.enqueue(input, selection)
+              buffer.edit((record) => ({ ...record, draft: '' }))
+            }}
+            queuePlaceholder={AI_QUEUE_LABELS[lang].queuePlaceholder}
             footerStart={
               <div className="nawa-composer-controls">
                 <div className="nawa-conversation-picker">{historyDropdown}</div>
@@ -1741,7 +2098,7 @@ function DirectoryChat({
             busy={busy}
             textareaRef={inputRef}
             iconOnly
-            sendDisabled={!!selectionIssue}
+            sendDisabled={!!selectionIssue || actionPending}
             placeholder={s('Ask about your files…')}
             ariaLabel={s('Message Nawa')}
             hintIdle={s('Enter to send')}

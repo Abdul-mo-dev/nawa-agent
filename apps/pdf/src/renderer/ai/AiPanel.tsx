@@ -1,3 +1,4 @@
+import { useEditorConversations } from '@genoffice/ui'
 import { registerDirectoryEditor, directoryModelSettings } from '@genoffice/agent-core'
 import { ChatModelPicker } from '@genoffice/ui'
 import { setRendererChatModel, getRendererChatModel } from '@genoffice/ai-provider/browser'
@@ -40,6 +41,7 @@ const PANEL_WIDTH_KEY = 'pdf-ai-panel-width'
 interface ToolActivity {
   name: string
   summary: string
+  mutated?: boolean | undefined
   isError?: boolean
   output?: string
 }
@@ -87,6 +89,9 @@ export function AiPanel({
 }): ReactElement {
   const { lang, t } = useI18n()
   const [chat, setChat] = useState<ChatEntry[]>([])
+  const chatManagementRef = useRef<ReturnType<typeof useEditorConversations<ChatEntry>> | null>(
+    null,
+  )
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
   /** messages queued while a reply runs; the pump re-runs them through send on settle */
@@ -126,14 +131,26 @@ export function AiPanel({
             chatId: string
             role: 'user' | 'assistant'
             text: string
-            tools?: Array<{ name: string; summary: string; isError?: boolean; output?: string }>
+            tools?: Array<{
+              name: string
+              summary: string
+              mutated?: boolean | undefined
+              isError?: boolean
+              output?: string
+            }>
             scope?: AiScopeQuoteData
           }): Promise<void>
           loadChat(args: { projectId: string; chatId: string; limit?: number }): Promise<
             Array<{
               role: 'user' | 'assistant'
               text: string
-              tools?: Array<{ name: string; summary: string; isError?: boolean; output?: string }>
+              tools?: Array<{
+                name: string
+                summary: string
+                mutated?: boolean | undefined
+                isError?: boolean
+                output?: string
+              }>
               scope?: AiScopeQuoteData
             }>
           >
@@ -200,7 +217,8 @@ export function AiPanel({
         chatIdsRef.current = ids
         return store.loadChat({ projectId: ids.projectId, chatId: ids.chatId, limit: 200 })
       })
-      .then((msgs) => {
+      .then(async (msgs) => {
+        if (await chatManagementRef.current!.restorePersistent()) return
         if (msgs.length === 0) return
         setChat((prev) => [
           ...msgs.map((m) => ({
@@ -401,6 +419,7 @@ export function AiPanel({
           runToolsRef.current.push({
             name: call.name,
             summary: execution.summary,
+            mutated: !!execution.mutated,
             isError: execution.isError,
             output: execution.output?.slice(0, 2000),
           })
@@ -410,6 +429,7 @@ export function AiPanel({
               {
                 name: call.name,
                 summary: execution.summary,
+                mutated: !!execution.mutated,
                 isError: execution.isError,
                 output: execution.output?.slice(0, 2000),
               },
@@ -424,6 +444,7 @@ export function AiPanel({
           setChat((prev) => [...prev, { role: 'assistant', text: '', streaming: true }])
         },
         onDone: ({ text, cancelled, turnLimit, truncated }) => {
+          if (cancelled || turnLimit || truncated) msgQueue.setPaused(true)
           const base = turnLimit
             ? [text, tGlobal('aiTurnLimit')].filter(Boolean).join('\n\n')
             : text || (cancelled ? tGlobal('aiStopped') : '')
@@ -452,6 +473,7 @@ export function AiPanel({
           }
         },
         onError: (error) => {
+          msgQueue.setPaused(true)
           setChat((prev) => {
             const next = [...prev]
             // the loop rolled this run's user message out of the model context — surface that
@@ -521,7 +543,10 @@ export function AiPanel({
     })()
   }
 
-  const stop = (): void => loopRef.current?.cancel()
+  const stop = (): void => {
+    msgQueue.setPaused(true)
+    loopRef.current?.cancel()
+  }
 
   /** Enter while a reply runs: the draft joins the queue above the composer */
   const enqueueDraft = () => {
@@ -578,6 +603,30 @@ export function AiPanel({
     void window.pdfApi.openSourcePath(path)
   })
 
+  const chatManagement = useEditorConversations<ChatEntry>({
+    messages: chat,
+    draft: prompt,
+    busy,
+    lang,
+    getKey: () => {
+      const ids = chatIdsRef.current
+      return ids ? `${ids.projectId}:${ids.chatId}` : null
+    },
+    replace: (messages) => {
+      setChat(messages)
+    },
+    setDraft: setPrompt,
+    loop: () => loopRef.current,
+    beforeSwitch: () => {
+      msgQueue.clear()
+      msgQueue.setPaused(false)
+    },
+    send: (message, text) => {
+      send(text, message.scope ?? null)
+    },
+  })
+  chatManagementRef.current = chatManagement
+
   return (
     <aside
       ref={asideRef}
@@ -606,7 +655,8 @@ export function AiPanel({
             <button
               className="ai-header-btn"
               onClick={() => {
-                stop()
+                if (!chatManagement.newChat()) return
+                msgQueue.setPaused(false)
                 loopRef.current?.reset()
                 msgQueue.clear()
                 setBusy(false)
@@ -614,6 +664,7 @@ export function AiPanel({
               }}
               data-tip={t('aiNewChat')}
               aria-label={t('aiNewChat')}
+              disabled={busy}
             >
               <IconNewChat />
             </button>
@@ -629,6 +680,7 @@ export function AiPanel({
         </div>
       </header>
 
+      {chatManagement.toolbar}
       <div className="ai-chat" ref={chatRef} onScroll={onChatScroll}>
         {chat.length === 0 && (
           <div className="ai-chat-empty">
@@ -658,25 +710,15 @@ export function AiPanel({
         )}
         {chat.map((entry, i) => {
           if (entry.role === 'user') {
-            return (
+            return chatManagement.actions(i, (editor) => (
               <div key={i} className="ai-msg ai-msg-user">
                 {entry.scope && <AiScopeQuote scope={entry.scope} />}
-                <span dir="auto">{entry.text}</span>
+                {editor ?? <span dir="auto">{entry.text}</span>}
                 {entry.undelivered && (
-                  <div className="ai-msg-undelivered">
-                    {t('aiUndelivered')}
-                    {!busy && (
-                      <button
-                        className="ai-retry-btn"
-                        onClick={() => send(entry.text, entry.scope ?? null)}
-                      >
-                        {t('aiRetry')}
-                      </button>
-                    )}
-                  </div>
+                  <div className="ai-msg-undelivered">{t('aiUndelivered')}</div>
                 )}
               </div>
-            )
+            ))
           }
           const hasTools = (entry.tools?.length ?? 0) > 0
           if (!entry.text && !hasTools) return null
@@ -691,6 +733,7 @@ export function AiPanel({
                   <Markdown text={entry.text} navs={[pdfNav, fileNav]} />
                 </div>
               )}
+              {chatManagement.actions(i)}
             </div>
           )
         })}

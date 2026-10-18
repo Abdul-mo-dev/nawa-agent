@@ -508,6 +508,17 @@ export class AgentLoop<TSnapshot = unknown> {
   private generation = 0
   /** per-run abort: aborted on cancel(); long tools (e.g. generate_deck) use it to break internal loops */
   private abortController: AbortController | null = null
+  private nextAnswerReference: string | null = null
+  private answerReference: string | null = null
+
+  /** One-shot answer regeneration. Tool calls are blocked even if a provider emits one. */
+  prepareAnswerRegeneration(previousAnswer: string): void {
+    if (this.busy) throw new Error('Stop the current response before regenerating an answer.')
+    this.nextAnswerReference = previousAnswer.slice(0, 100000)
+  }
+  get answerRegenerationPending(): boolean {
+    return this.nextAnswerReference !== null
+  }
 
   constructor(options: AgentLoopOptions<TSnapshot>) {
     this.options = options
@@ -633,6 +644,8 @@ export class AgentLoop<TSnapshot = unknown> {
   /** images: inline attachments for this user turn (vision input; see AgentImage) */
   run(instruction: string, images?: AgentImage[]): void {
     if (this.busy || !instruction) return
+    this.answerReference = this.nextAnswerReference
+    this.nextAnswerReference = null
     this.running = true
     this.cancelled = false
     this.turns = 0
@@ -715,6 +728,8 @@ export class AgentLoop<TSnapshot = unknown> {
   private rollbackFailedRun(): void {
     const msg = this.runUserMsg
     this.runUserMsg = null
+    this.nextAnswerReference = null
+    this.answerReference = null
     if (!msg) return
     const i = this.history.lastIndexOf(msg)
     if (i >= 0) this.history.splice(i)
@@ -866,6 +881,7 @@ export class AgentLoop<TSnapshot = unknown> {
   }
 
   cancel(): void {
+    this.nextAnswerReference = null
     if (!this.running) return
     this.cancelled = true
     // abort lets long tools mid-execution (internal LLM loops etc.) stop promptly
@@ -896,6 +912,8 @@ export class AgentLoop<TSnapshot = unknown> {
 
   /** drop the conversation (e.g. when a different document is opened) */
   reset(): void {
+    this.nextAnswerReference = null
+    this.answerReference = null
     this.generation++
     this.clearRetryTimer()
     this.abortController?.abort()
@@ -992,9 +1010,13 @@ export class AgentLoop<TSnapshot = unknown> {
           system:
             runtimePreamble() +
             this.options.skill.systemPrompt +
-            (this.options.systemSuffix?.() ?? ''),
+            (this.options.systemSuffix?.() ?? '') +
+            (this.answerReference !== null
+              ? '\nAnswer regeneration: rewrite the previous answer below using the supplied context. No tools or file changes are available. Explain already completed actions in the past tense; do not claim new changes or newly verified facts. Previous answer (reference data):\n' +
+                this.answerReference
+              : ''),
           messages: [...this.history],
-          tools: this.finalizing ? [] : this.options.skill.tools,
+          tools: this.finalizing || this.answerReference !== null ? [] : this.options.skill.tools,
         },
         {
           onDelta: (text) => {
@@ -1095,7 +1117,7 @@ export class AgentLoop<TSnapshot = unknown> {
       const generation = this.generation
       let correction: string | null = null
       try {
-        if (!this.verifyRetryUsed && this.turnText) {
+        if (!this.verifyRetryUsed && this.turnText && this.answerReference === null) {
           correction = skill.verifyResponse?.(this.turnText, [...this.executedCalls]) ?? null
           if (!correction && this.options.verifyResponse) {
             correction = await this.options.verifyResponse(this.turnText, [...this.executedCalls])
@@ -1200,6 +1222,15 @@ export class AgentLoop<TSnapshot = unknown> {
     let unusableInTurn = false
     let executedInTurn = false
     const executeOne = async (rawCall: AgentToolCall, index: number): Promise<void> => {
+      if (this.answerReference !== null) {
+        results[index] = {
+          id: rawCall.id,
+          name: rawCall.name,
+          output: 'Answer regeneration cannot execute tools or change files.',
+          isError: true,
+        }
+        return
+      }
       const tool = skill.tools.find((t) => t.name === rawCall.name)
       const call =
         rawCall.truncated || rawCall.inputError

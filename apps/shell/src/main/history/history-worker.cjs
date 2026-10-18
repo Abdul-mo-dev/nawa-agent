@@ -295,7 +295,13 @@ function normalizeMetadata(item, interrupted = false) {
             }
           })
         })()
-  return { request: normalized, citations }
+  return {
+    request: normalized,
+    citations,
+    ...(item.instruction !== undefined
+      ? { instruction: string(item.instruction, 'instruction', 1024 * 1024) }
+      : {}),
+  }
 }
 function normalizeMessages(input, legacy = false) {
   if (!Array.isArray(input) || input.length > LIMITS.messages)
@@ -345,6 +351,7 @@ function normalizeMessages(input, legacy = false) {
         !legacy && /^[0-9a-f]{64}$/.test(item.snapshotHash || '') ? item.snapshotHash : '',
       activity,
       ...metadata,
+      ...(item.scope ? { scope: normalizeScope(item.scope) } : {}),
     })
   }
   return result
@@ -363,7 +370,7 @@ class HistoryStore {
     this.databasePath = databasePath
     this.db = new DatabaseSync(databasePath)
     const version = this.db.prepare('PRAGMA user_version').get().user_version
-    if (version > 3) {
+    if (version > 4) {
       this.db.close()
       throw new Error(
         'This history database was created by a newer Nawa version. It was not modified.',
@@ -419,7 +426,30 @@ class HistoryStore {
           .some((column) => column.name === 'metadata_json')
       )
         this.db.exec("ALTER TABLE messages ADD COLUMN metadata_json TEXT NOT NULL DEFAULT ''")
-      this.db.exec('PRAGMA user_version=3')
+      const columns = this.db
+        .prepare('PRAGMA table_info(conversations)')
+        .all()
+        .map((column) => column.name)
+      for (const [name, type] of [
+        ['active_version', "TEXT NOT NULL DEFAULT 'main'"],
+        ['archived_at', 'INTEGER'],
+        ['trashed_at', 'INTEGER'],
+        ['source_conversation_id', 'TEXT'],
+      ]) {
+        if (!columns.includes(name))
+          this.db.exec(`ALTER TABLE conversations ADD COLUMN ${name} ${type}`)
+      }
+      this.db.exec(`CREATE TABLE IF NOT EXISTS conversation_versions (
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        id TEXT NOT NULL, label TEXT NOT NULL, created_at INTEGER NOT NULL,
+        source_message_id TEXT, kind TEXT NOT NULL, state_json TEXT NOT NULL, parent_version_id TEXT,
+        PRIMARY KEY(conversation_id,id)
+      ) STRICT; PRAGMA user_version=4`)
+      this.db.exec(`CREATE TABLE IF NOT EXISTS conversation_actions (
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        message_id TEXT NOT NULL, data_json TEXT NOT NULL,
+        PRIMARY KEY(conversation_id,message_id)
+      ) STRICT`)
     })
   }
   transaction(callback) {
@@ -441,7 +471,9 @@ class HistoryStore {
   row(id) {
     string(id, 'conversation ID', 100)
     const row = this.db
-      .prepare('SELECT * FROM conversations WHERE id=? AND deleted_at IS NULL')
+      .prepare(
+        'SELECT * FROM conversations WHERE id=? AND deleted_at IS NULL AND trashed_at IS NULL',
+      )
       .get(id)
     if (!row) throw new Error('Conversation no longer exists. Choose another chat from History.')
     return row
@@ -455,6 +487,9 @@ class HistoryStore {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       modelId: row.model_id,
+      archivedAt: row.archived_at,
+      trashedAt: row.trashed_at,
+      sourceConversationId: row.source_conversation_id,
       messageCount: Number(
         row.message_count ??
           this.db.prepare('SELECT count(*) AS n FROM messages WHERE conversation_id=?').get(row.id)
@@ -478,6 +513,9 @@ class HistoryStore {
         contextKey: message.context_key,
         modelLabel: message.model_label,
         snapshotHash: message.snapshot_hash || undefined,
+        ...(message.metadata_json && JSON.parse(message.metadata_json).scope
+          ? { scope: normalizeScope(JSON.parse(message.metadata_json).scope) }
+          : {}),
         activity: message.activity_json
           ? normalizeActivity(JSON.parse(message.activity_json), true, row.updated_at)
           : undefined,
@@ -485,17 +523,51 @@ class HistoryStore {
           ? normalizeMetadata(JSON.parse(message.metadata_json), true)
           : {}),
       }))
+    const actions = [
+      ...new Map(
+        [
+          ...this.db
+            .prepare('SELECT data_json FROM conversation_actions WHERE conversation_id=?')
+            .all(id)
+            .map((item) => JSON.parse(item.data_json)),
+          ...messages.filter((message) => message.request?.action),
+        ].map((message) => [message.id, message]),
+      ).values(),
+    ].sort((a, b) => a.createdAt - b.createdAt)
     return {
       ...this.summary(row),
       revision: row.revision,
       draft: row.draft,
       messages,
+      actions,
       baselineId: row.baseline_id,
       lastChatAt: row.last_chat_at,
+      activeVersionId: row.active_version,
+      versions: this.db
+        .prepare(
+          'SELECT * FROM conversation_versions WHERE conversation_id=? ORDER BY created_at,id',
+        )
+        .all(id)
+        .map((version) => ({
+          id: version.id,
+          label: version.label,
+          createdAt: version.created_at,
+          sourceMessageId: version.source_message_id,
+          parentVersionId: version.parent_version_id,
+          kind: version.kind,
+        })),
     }
   }
   list(input = {}) {
-    const filters = ['c.deleted_at IS NULL'],
+    if (input.view && !['active', 'archived', 'trash'].includes(input.view))
+      throw new Error('Invalid history view.')
+    const filters = [
+        'c.deleted_at IS NULL',
+        input.view === 'trash' ? 'c.trashed_at IS NOT NULL' : 'c.trashed_at IS NULL',
+        ...(input.view === 'trash'
+          ? []
+          : [input.view === 'archived' ? 'c.archived_at IS NOT NULL' : 'c.archived_at IS NULL']),
+      ],
       args = []
     if (Object.hasOwn(input, 'folder')) {
       filters.push('c.workspace_key=?')
@@ -503,8 +575,11 @@ class HistoryStore {
     }
     const query = string(input.query ?? '', 'search', 200, true).trim()
     if (query) {
-      filters.push("c.title LIKE ? ESCAPE '\\'")
-      args.push(`%${query.replace(/[\\%_]/g, '\\$&')}%`)
+      filters.push(
+        "(c.title LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id=c.id AND m.text LIKE ? ESCAPE '\\'))",
+      )
+      const pattern = `%${query.replace(/[\\%_]/g, '\\$&')}%`
+      args.push(pattern, pattern)
     }
     const offset =
       Number.isInteger(input.offset) && input.offset >= 0 ? Math.min(input.offset, 1000000) : 0
@@ -519,6 +594,38 @@ class HistoryStore {
       )
       .all(...args, offset)
     return { conversations: rows.map((row) => this.summary(row)), total }
+  }
+  exportConversation(id) {
+    const conversation = this.get(id)
+    const versions = this.db
+      .prepare('SELECT * FROM conversation_versions WHERE conversation_id=? ORDER BY created_at,id')
+      .all(id)
+      .map((row) => {
+        const state =
+          row.id === conversation.activeVersionId ? conversation : JSON.parse(row.state_json)
+        return {
+          id: row.id,
+          label: row.label,
+          createdAt: row.created_at,
+          sourceMessageId: row.source_message_id,
+          parentVersionId: row.parent_version_id,
+          kind: row.kind,
+          messages: state.messages,
+          draft: state.draft,
+        }
+      })
+    if (!versions.length)
+      versions.push({
+        id: conversation.activeVersionId,
+        label: 'Original',
+        createdAt: conversation.createdAt,
+        sourceMessageId: null,
+        parentVersionId: null,
+        kind: 'original',
+        messages: conversation.messages,
+        draft: conversation.draft,
+      })
+    return { conversation, versions }
   }
   create(input) {
     const folder = folderValue(input.folder),
@@ -553,6 +660,20 @@ class HistoryStore {
       const oldRows = this.db
         .prepare('SELECT * FROM messages WHERE conversation_id=? ORDER BY ordinal')
         .all(row.id)
+      this.rememberActions(
+        row.id,
+        oldRows
+          .filter((old) => old.metadata_json && JSON.parse(old.metadata_json).request?.action)
+          .map((old) => ({
+            id: old.id,
+            role: old.role,
+            text: old.text,
+            createdAt: old.created_at,
+            contextKey: old.context_key,
+            ...JSON.parse(old.metadata_json),
+          })),
+      )
+      this.rememberActions(row.id, messages)
       if (input.delta === true) {
         const removedIds = input.removedIds ?? []
         if (
@@ -649,8 +770,13 @@ class HistoryStore {
           message.modelLabel,
           message.snapshotHash,
           message.activity ? JSON.stringify(message.activity) : '',
-          message.request || message.citations
-            ? JSON.stringify({ request: message.request, citations: message.citations })
+          message.request || message.citations || message.scope || message.instruction
+            ? JSON.stringify({
+                request: message.request,
+                citations: message.citations,
+                instruction: message.instruction,
+                scope: message.scope,
+              })
             : '',
         ]
         const old = previous.get(message.id)
@@ -675,10 +801,40 @@ class HistoryStore {
       .run(title, Date.now(), row.id)
   }
   delete(id) {
+    this.row(id)
+    this.db
+      .prepare('UPDATE conversations SET trashed_at=?,revision=revision+1 WHERE id=?')
+      .run(Date.now(), id)
+  }
+  restore(id) {
+    string(id, 'conversation ID', 100)
+    const result = this.db
+      .prepare(
+        'UPDATE conversations SET trashed_at=NULL,revision=revision+1 WHERE id=? AND deleted_at IS NULL AND trashed_at IS NOT NULL',
+      )
+      .run(id)
+    if (!result.changes) throw new Error('Conversation is not in Trash.')
+  }
+  archive(id, archived) {
+    this.row(id)
+    if (typeof archived !== 'boolean') throw new Error('Invalid archive state.')
+    this.db
+      .prepare('UPDATE conversations SET archived_at=?,revision=revision+1 WHERE id=?')
+      .run(archived ? Date.now() : null, id)
+  }
+  purge(id) {
     this.transaction(() => {
-      this.row(id)
+      string(id, 'conversation ID', 100)
+      const row = this.db
+        .prepare(
+          'SELECT * FROM conversations WHERE id=? AND deleted_at IS NULL AND trashed_at IS NOT NULL',
+        )
+        .get(id)
+      if (!row) throw new Error('Move this conversation to Trash before deleting permanently.')
       this.db.prepare('DELETE FROM messages WHERE conversation_id=?').run(id)
       this.db.prepare('DELETE FROM snapshots WHERE conversation_id=?').run(id)
+      this.db.prepare('DELETE FROM conversation_versions WHERE conversation_id=?').run(id)
+      this.db.prepare('DELETE FROM conversation_actions WHERE conversation_id=?').run(id)
       // Tombstone prevents queued autosaves and legacy imports from recreating deleted chats.
       this.db
         .prepare(
@@ -686,6 +842,159 @@ class HistoryStore {
         folder=NULL,folder_name='',workspace_key='',baseline_id=NULL,revision=revision+1 WHERE id=?`,
         )
         .run(Date.now(), id)
+    })
+  }
+  checkpoint(record) {
+    this.rememberActions(record.id, record.messages)
+    const state = JSON.stringify({
+      messages: record.messages,
+      draft: record.draft,
+      lastChatAt: record.lastChatAt,
+    })
+    this.db
+      .prepare(
+        `INSERT INTO conversation_versions(conversation_id,id,label,created_at,source_message_id,kind,state_json)
+      VALUES(?,?,?,?,?,?,?) ON CONFLICT(conversation_id,id) DO UPDATE SET state_json=excluded.state_json`,
+      )
+      .run(
+        record.id,
+        record.activeVersionId || 'main',
+        'Original',
+        record.createdAt,
+        null,
+        'original',
+        state,
+      )
+  }
+  rememberActions(id, messages) {
+    const insert = this.db.prepare(
+      'INSERT INTO conversation_actions(conversation_id,message_id,data_json) VALUES(?,?,?) ON CONFLICT(conversation_id,message_id) DO UPDATE SET data_json=excluded.data_json',
+    )
+    for (const message of messages) {
+      if (!message.request?.action) continue
+      const receipt = normalizeMessages([
+        {
+          id: message.id,
+          role: 'assistant',
+          text: message.text,
+          createdAt: message.createdAt,
+          contextKey: message.contextKey,
+          request: message.request,
+        },
+      ])[0]
+      insert.run(id, receipt.id, JSON.stringify(receipt))
+    }
+  }
+  checkedRecord(input) {
+    const record = this.get(input.id)
+    if (record.revision !== input.revision)
+      throw new Error('This chat changed. Reopen History before trying again.')
+    if (
+      this.db
+        .prepare('SELECT 1 FROM messages WHERE conversation_id=? AND streaming=1')
+        .get(record.id)
+    )
+      throw new Error('Stop the current response before changing conversation history.')
+    return record
+  }
+  revise(input) {
+    return this.transaction(() => {
+      if (!['edit', 'retry', 'regenerate', 'delete'].includes(input.kind))
+        throw new Error('Invalid conversation action.')
+      const record = this.checkedRecord(input)
+      const target = record.messages.findIndex((message) => message.id === input.messageId)
+      if (target < 0) throw new Error('Message no longer exists.')
+      let start = target
+      while (start >= 0 && record.messages[start].role !== 'user') start--
+      if (start < 0) throw new Error('This answer has no question to revise.')
+      if (input.kind === 'edit') string(input.text, 'question', 1024 * 1024)
+      if (record.versions.length >= 100)
+        throw new Error('This chat has 100 versions. Branch into a new chat to continue.')
+      this.checkpoint(record)
+      const messages = record.messages.slice(0, start),
+        id = randomUUID()
+      const state = {
+        messages,
+        draft:
+          input.kind === 'delete'
+            ? record.draft
+            : (input.text ?? record.messages[start].instruction ?? record.messages[start].text),
+        lastChatAt: record.lastChatAt,
+      }
+      const label = `${input.kind[0].toUpperCase()}${input.kind.slice(1)} ${record.versions.length + 1}`
+      const bytes = Number(
+        this.db
+          .prepare(
+            'SELECT coalesce(sum(length(state_json)),0) AS n FROM conversation_versions WHERE conversation_id=?',
+          )
+          .get(record.id).n,
+      )
+      if (bytes + JSON.stringify(state).length > 32 * 1024 * 1024)
+        throw new Error('Saved versions exceed 32 Mi characters. Branch into a new chat.')
+      this.db
+        .prepare(
+          'INSERT INTO conversation_versions(conversation_id,id,label,created_at,source_message_id,kind,state_json,parent_version_id) VALUES(?,?,?,?,?,?,?,?)',
+        )
+        .run(
+          record.id,
+          id,
+          label,
+          Date.now(),
+          record.messages[start].id,
+          input.kind,
+          JSON.stringify(state),
+          record.activeVersionId,
+        )
+      this.db.prepare('UPDATE conversations SET active_version=? WHERE id=?').run(id, record.id)
+      this.save({ ...record, ...state, baselineId: null })
+      return this.get(record.id)
+    })
+  }
+  switchVersion(input) {
+    return this.transaction(() => {
+      const record = this.checkedRecord(input)
+      string(input.versionId, 'version ID', 100)
+      if (record.activeVersionId === input.versionId) return record
+      const version = this.db
+        .prepare('SELECT * FROM conversation_versions WHERE conversation_id=? AND id=?')
+        .get(record.id, input.versionId)
+      if (!version) throw new Error('Conversation version no longer exists.')
+      this.checkpoint(record)
+      const state = JSON.parse(version.state_json)
+      this.db
+        .prepare('UPDATE conversations SET active_version=? WHERE id=?')
+        .run(version.id, record.id)
+      this.save({ ...record, ...state, baselineId: null })
+      return this.get(record.id)
+    })
+  }
+  branch(input) {
+    return this.transaction(() => {
+      const record = this.checkedRecord(input)
+      const index = record.messages.findIndex((message) => message.id === input.messageId)
+      if (index < 0) throw new Error('Message no longer exists.')
+      const copy = this.create({
+        folder: record.folder,
+        folderName: record.folderName,
+        modelId: record.modelId,
+      })
+      const nextQuestion = record.messages.findIndex(
+        (message, position) => position > index && message.role === 'user',
+      )
+      this.save({
+        ...copy,
+        messages: record.messages.slice(
+          0,
+          nextQuestion < 0 ? record.messages.length : nextQuestion,
+        ),
+        baselineId: null,
+        lastChatAt: record.lastChatAt,
+      })
+      this.db
+        .prepare('UPDATE conversations SET title=?,source_conversation_id=? WHERE id=?')
+        .run(`${record.title.slice(0, 180)} (branch)`, record.id, copy.id)
+      this.rememberActions(copy.id, record.actions)
+      return this.get(copy.id)
     })
   }
   importLegacy(entries) {
@@ -1153,6 +1462,9 @@ async function startWorker() {
         case 'get':
           result = store.get(payload.id)
           break
+        case 'export':
+          result = store.exportConversation(payload.id)
+          break
         case 'save':
           result = store.save(payload)
           break
@@ -1161,6 +1473,24 @@ async function startWorker() {
           break
         case 'delete':
           result = store.delete(payload.id)
+          break
+        case 'restore':
+          result = store.restore(payload.id)
+          break
+        case 'purge':
+          result = store.purge(payload.id)
+          break
+        case 'archive':
+          result = store.archive(payload.id, payload.archived)
+          break
+        case 'branch':
+          result = store.branch(payload)
+          break
+        case 'revise':
+          result = store.revise(payload)
+          break
+        case 'switchVersion':
+          result = store.switchVersion(payload)
           break
         case 'capture':
         case 'compare':

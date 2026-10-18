@@ -8,6 +8,7 @@
 // ────────────────────────────────────────────────────────────
 
 export interface ToolActivity {
+  mutated?: boolean | undefined
   name: string
   summary: string
   isError?: boolean

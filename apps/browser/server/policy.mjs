@@ -26,6 +26,8 @@ const COMMON = new Set([
   // AI chat history has no server persistence in browser mode; stubbed in NativeHost.
   'project:resolveChat',
   'project:loadChat',
+  'project:loadManagedConversation',
+  'project:saveManagedConversation',
   'project:appendChat',
   'project:rebindChat',
 ])

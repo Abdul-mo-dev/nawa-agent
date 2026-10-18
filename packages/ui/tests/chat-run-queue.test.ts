@@ -20,6 +20,7 @@ afterEach(() => {
 
 interface ProbeProps {
   busy: boolean
+  halted?: boolean
   submit: (text: string, meta: string | undefined) => boolean
   resetKey?: string | number
 }
@@ -29,6 +30,7 @@ let latest: ChatRunQueue<string | undefined>
 function Probe(props: ProbeProps) {
   latest = useChatRunQueue<string | undefined>({
     busy: props.busy,
+    halted: props.halted,
     submit: props.submit,
     resetKey: props.resetKey,
   })
@@ -279,4 +281,15 @@ it('ignores blank drafts', () => {
   render({ busy: true, submit: () => true })
   act(() => latest.enqueue('   ', undefined))
   expect(latest.queued).toHaveLength(0)
+})
+
+it('pauses after a failed turn and waits for an explicit resume', () => {
+  const submit = vi.fn(() => true)
+  render({ busy: true, submit })
+  act(() => latest.enqueue('depends on the first answer', undefined))
+  render({ busy: false, halted: true, submit })
+  expect(submit).not.toHaveBeenCalled()
+  expect(latest.paused).toBe(true)
+  act(() => latest.setPaused(false))
+  expect(submit).toHaveBeenCalledTimes(1)
 })

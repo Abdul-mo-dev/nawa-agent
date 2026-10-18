@@ -1,6 +1,15 @@
 export { ChatModelPicker, type ChatModelPickerProps } from './ChatModelPicker'
 export { AiPanelSideButton } from './AiPanelSideButton'
 export { AiComposer } from './AiComposer'
+export { ChatMessageActions, CHAT_LABELS } from './ChatMessageActions'
+export { useEditorConversations } from './use-editor-conversations'
+export {
+  questionIndex,
+  turnEnd,
+  isFinalAnswer,
+  exportConversation,
+  type ConversationMessage,
+} from './conversation'
 export { AiQueueStrip } from './AiQueueStrip'
 export { useChatRunQueue, type ChatRunQueue, type QueuedChatMessage } from './chat-run-queue'
 export { AI_QUEUE_LABELS, type AiQueueStripLabels } from './strings-ai-queue'

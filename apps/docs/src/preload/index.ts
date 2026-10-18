@@ -256,6 +256,8 @@ const projectApi: ProjectApi = {
   resolveChat: (args) => ipcRenderer.invoke('project:resolveChat', args),
   appendChat: (args) => ipcRenderer.invoke('project:appendChat', args),
   loadChat: (args) => ipcRenderer.invoke('project:loadChat', args),
+  loadManagedConversation: (args) => ipcRenderer.invoke('project:loadManagedConversation', args),
+  saveManagedConversation: (args) => ipcRenderer.invoke('project:saveManagedConversation', args),
   rebindChat: (args) => ipcRenderer.invoke('project:rebindChat', args),
 }
 
