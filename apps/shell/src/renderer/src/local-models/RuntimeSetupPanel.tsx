@@ -24,13 +24,16 @@ export function RuntimeSetupPanel({
     [working, setWorking] = useState(false),
     [error, setError] = useState('')
   const [options, setOptions] = useState<RuntimeSetupOptions>({
-    models: true,
+    chatModel: true,
+    embeddingModel: true,
+    runtime: true,
     office: true,
     startModels: true,
     useDefaults: true,
     backend: 'cuda',
   })
   const alive = useRef(true)
+  const initialized = useRef(false)
   const blockedRef = useRef(blocked)
   blockedRef.current = blocked
   const busy = working || view?.state === 'installing'
@@ -47,7 +50,13 @@ export function RuntimeSetupPanel({
       void window.nawaRuntimeSetup
         .inspect()
         .then((next) => {
-          if (alive.current) setView(next)
+          if (alive.current) {
+            setView(next)
+            if (!initialized.current) {
+              initialized.current = true
+              if (next.runtime) setOptions((previous) => ({ ...previous, runtime: false }))
+            }
+          }
         })
         .catch((cause) => {
           if (alive.current) setError(String(cause))
@@ -63,19 +72,23 @@ export function RuntimeSetupPanel({
       clearInterval(timer)
     }
   }, [])
-  const activate = async (result: RuntimeSetupSnapshot) => {
-    const chat = result.profiles.find((profile) => profile.kind === 'chat'),
-      embedding = result.profiles.find((profile) => profile.kind === 'embedding')
-    if (!chat || !embedding)
-      throw new Error('Install both default model profiles before activating them.')
-    const rag = await window.nawaRag.settings()
-    await window.nawaRag.save(
-      embeddingConnection(rag.settings, embedding, `nawa-defaults-v1:${Date.now()}`),
-      '',
-    )
-    const ai = await window.aiOffice.getAiSettings()
-    await window.aiOffice.setAiSettings(chatConnection(ai, chat))
-    await window.nawaRuntimeSetup!.activated()
+  const activate = async (result: RuntimeSetupSnapshot, selected?: string[]) => {
+    for (const kind of result.activationKinds) {
+      if (selected && !selected.includes(kind)) continue
+      const profile = result.profiles.find((item) => item.kind === kind)
+      if (!profile) throw new Error('The installed model profile no longer exists.')
+      if (kind === 'embedding') {
+        const rag = await window.nawaRag.settings()
+        await window.nawaRag.save(
+          embeddingConnection(rag.settings, profile, `nawa-defaults-v1:${Date.now()}`),
+          '',
+        )
+      } else {
+        const ai = await window.aiOffice.getAiSettings()
+        await window.aiOffice.setAiSettings(chatConnection(ai, profile))
+      }
+      await window.nawaRuntimeSetup!.activated([kind])
+    }
     window.dispatchEvent(new Event('nawa:models-changed'))
     onChanged?.()
   }
@@ -84,14 +97,30 @@ export function RuntimeSetupPanel({
     setWorking(true)
     setError('')
     try {
-      const result = install ? await window.nawaRuntimeSetup.install(options) : view!
+      const canConnect =
+        (options.chatModel || options.embeddingModel) && (!!view?.runtime || options.runtime)
+      const request = {
+        ...options,
+        startModels: options.startModels && canConnect,
+        useDefaults: options.useDefaults && canConnect,
+      }
+      const result = install ? await window.nawaRuntimeSetup.install(request) : view!
       if (
-        result.state === 'ready' &&
+        (result.state === 'ready' || !install) &&
         result.needsActivation &&
-        (!install || (options.models && options.useDefaults)) &&
+        !!result.runtime &&
+        (!install || request.useDefaults) &&
         !blockedRef.current
       )
-        await activate(result)
+        await activate(
+          result,
+          install
+            ? [
+                ...(options.chatModel ? ['chat'] : []),
+                ...(options.embeddingModel ? ['embedding'] : []),
+              ]
+            : undefined,
+        )
       if (alive.current) setView(await window.nawaRuntimeSetup.inspect())
     } catch (cause) {
       if (alive.current) setError(cause instanceof Error ? cause.message : String(cause))
@@ -102,29 +131,31 @@ export function RuntimeSetupPanel({
   }
   if (!window.nawaRuntimeSetup) return null
   const stage = view?.stage && copy[view.stage as keyof typeof copy]
+  const selectedModels = options.chatModel || options.embeddingModel
+  const canConnect = selectedModels && (options.runtime || !!view?.runtime)
   return (
     <section className="runtime-setup" aria-label={copy.summary}>
       <p>{copy.intro}</p>
       <p className="runtime-setup-hint">{copy.size}</p>
       <fieldset disabled={busy || blocked || !view?.supported}>
-        {(['models', 'office', 'startModels', 'useDefaults'] as const).map((key) => (
+        <legend>{copy.downloads}</legend>
+        {(['chatModel', 'embeddingModel', 'runtime', 'office'] as const).map((key) => (
           <label className="runtime-setup-choice" key={key}>
             <input
               type="checkbox"
               checked={options[key]}
-              disabled={(key === 'startModels' || key === 'useDefaults') && !options.models}
               onChange={(event) =>
                 setOptions((previous) => ({ ...previous, [key]: event.target.checked }))
               }
             />
-            {copy[key === 'startModels' ? 'start' : key === 'useDefaults' ? 'defaults' : key]}
+            {copy[key === 'runtime' ? 'runtimeChoice' : key]}
           </label>
         ))}
         <label className="runtime-setup-field">
           {copy.backend}
           <select
             className="set-input"
-            disabled={view?.reuseRuntime}
+            disabled={!options.runtime}
             value={options.backend}
             onChange={(event) =>
               setOptions((previous) => ({
@@ -139,6 +170,28 @@ export function RuntimeSetupPanel({
           </select>
         </label>
         {view?.reuseRuntime && <p className="runtime-setup-hint">{copy.reuseRuntime}</p>}
+        <p className="runtime-setup-hint">
+          {view?.runtime ? copy.runtimeReady : copy.runtimeMissing}
+        </p>
+        <div className="runtime-setup-after">
+          <strong>{copy.afterDownload}</strong>
+          {(['startModels', 'useDefaults'] as const).map((key) => (
+            <label className="runtime-setup-choice" key={key}>
+              <input
+                type="checkbox"
+                checked={options[key] && canConnect}
+                disabled={!canConnect}
+                onChange={(event) =>
+                  setOptions((previous) => ({ ...previous, [key]: event.target.checked }))
+                }
+              />
+              {copy[key === 'startModels' ? 'start' : 'defaults']}
+            </label>
+          ))}
+          {selectedModels && !canConnect && (
+            <p className="runtime-setup-hint">{copy.downloadOnly}</p>
+          )}
+        </div>
       </fieldset>
       <p className="runtime-setup-hint">{copy.included}</p>
       {view && (
@@ -173,7 +226,12 @@ export function RuntimeSetupPanel({
         <button
           type="button"
           className="set-btn primary"
-          disabled={busy || blocked || !view?.supported || (!options.models && !options.office)}
+          disabled={
+            busy ||
+            blocked ||
+            !view?.supported ||
+            (!selectedModels && !options.runtime && !options.office)
+          }
           onClick={() => void perform(true)}
         >
           {view?.state === 'failed' || view?.state === 'canceled' ? copy.retry : copy.install}
@@ -193,7 +251,7 @@ export function RuntimeSetupPanel({
           <button
             type="button"
             className="set-btn"
-            disabled={busy || blocked}
+            disabled={busy || blocked || !view.runtime}
             onClick={() => void perform(false)}
           >
             {copy.activate}

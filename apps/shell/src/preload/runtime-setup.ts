@@ -8,7 +8,7 @@ const api: RuntimeSetupApi = {
   install: (options) => invoke('install', options),
   cancel: () => invoke('cancel'),
   dismiss: () => invoke('dismiss'),
-  activated: () => invoke('activated'),
+  activated: (kinds) => invoke('activated', kinds),
   reveal: () => invoke('reveal'),
   openLanguages: () => invoke('openLanguages'),
 }

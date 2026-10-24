@@ -55,4 +55,33 @@ describe('saved credentials for model discovery', () => {
       ),
     ).toEqual({ baseUrl: 'https://models.example/v1', apiKey: 'explicit-key' })
   })
+  it('uses the selected chat profile key when multiple accounts share a server', () => {
+    const settings = defaultAiSettings()
+    settings.chatModels = ['first', 'second'].map((id) => ({
+      id,
+      name: id,
+      provider: 'custom',
+      config: { baseUrl: 'https://models.example/v1', model: 'a', apiKey: `${id}-key` },
+    }))
+    for (const id of ['first', 'second']) {
+      expect(
+        resolveModelCatalogRequest(
+          { baseUrl: 'https://models.example/v1', apiKey: REDACTED_AI_KEY, profileId: id },
+          settings,
+        ),
+      ).toEqual({ baseUrl: 'https://models.example/v1', apiKey: `${id}-key` })
+    }
+    expect(
+      resolveModelCatalogRequest(
+        { baseUrl: 'https://other.example/v1', apiKey: REDACTED_AI_KEY, profileId: 'first' },
+        settings,
+      ),
+    ).toEqual({ baseUrl: '' })
+    expect(
+      resolveModelCatalogRequest(
+        { baseUrl: 'https://models.example/v1', apiKey: REDACTED_AI_KEY, profileId: 'missing' },
+        settings,
+      ),
+    ).toEqual({ baseUrl: '' })
+  })
 })

@@ -26,7 +26,7 @@ export function registerRuntimeSetupIpc(
       case 'dismiss':
         return service.dismiss()
       case 'activated':
-        return service.activated()
+        return service.activated(args[0])
       case 'reveal': {
         await mkdir(service.directory, { recursive: true })
         const error = await shell.openPath(service.directory)

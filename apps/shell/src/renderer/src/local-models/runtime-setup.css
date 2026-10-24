@@ -5,6 +5,14 @@
 .runtime-setup p {
   line-height: 1.6;
 }
+.runtime-setup legend {
+  font-weight: 600;
+  padding: 0;
+}
+.runtime-setup-after {
+  border-top: 1px solid var(--border);
+  padding-block-start: 14px;
+}
 .runtime-setup fieldset {
   margin: 0;
   padding: 0;

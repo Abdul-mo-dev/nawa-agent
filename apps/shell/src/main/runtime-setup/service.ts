@@ -29,6 +29,7 @@ interface Saved {
   dismissed?: boolean
   installed?: boolean
   needsActivation?: boolean
+  activationKinds?: LocalModelProfile['kind'][]
   office?: string
   profileIds?: string[]
 }
@@ -205,6 +206,16 @@ export class RuntimeSetupService {
       ocr: this.options.ocrAvailable(),
       office: await findLibreOffice(),
       needsActivation: !!this.saved.needsActivation,
+      activationKinds: this.saved.needsActivation
+        ? (this.saved.activationKinds ??
+          local.config.profiles
+            .filter((profile) => this.saved.profileIds?.includes(profile.id))
+            .map((profile) => profile.kind))
+        : [],
+      runtime:
+        local.config.executablePath && existsSync(local.config.executablePath)
+          ? local.config.executablePath
+          : null,
       reuseRuntime: !!local.config.executablePath && !this.ownedEngine(local.config.executablePath),
       profiles: local.config.profiles.filter((profile) =>
         this.saved.profileIds?.includes(profile.id),
@@ -216,10 +227,18 @@ export class RuntimeSetupService {
     this.saved.dismissed = true
     await this.persist()
   }
-  async activated(): Promise<void> {
+  async activated(raw?: unknown): Promise<void> {
     await this.initialize()
-    this.saved.needsActivation = false
-    this.saved.dismissed = true
+    if (
+      raw !== undefined &&
+      (!Array.isArray(raw) || raw.some((kind) => !['chat', 'embedding'].includes(kind)))
+    )
+      throw new Error('Choose valid model roles to activate.')
+    const pending = (await this.inspect()).activationKinds
+    this.saved.activationKinds =
+      raw === undefined ? [] : pending.filter((kind) => !(raw as string[]).includes(kind))
+    this.saved.needsActivation = this.saved.activationKinds.length > 0
+    this.saved.dismissed = !this.saved.needsActivation
     await this.persist()
   }
   cancel(): void {
@@ -257,12 +276,14 @@ export class RuntimeSetupService {
     if (
       !input ||
       !['cuda', 'cpu', 'vulkan'].includes(input.backend) ||
-      ['models', 'office', 'startModels', 'useDefaults'].some(
+      ['chatModel', 'embeddingModel', 'runtime', 'office', 'startModels', 'useDefaults'].some(
         (key) => typeof (input as unknown as Record<string, unknown>)[key] !== 'boolean',
       ) ||
-      (!input.models && !input.office)
+      (!input.chatModel && !input.embeddingModel && !input.runtime && !input.office)
     )
-      throw new Error('Choose models or Office conversion to install.')
+      throw new Error(
+        'Choose a chat model, embedding model, llama.cpp runtime or Office conversion to install.',
+      )
     if (this.abort) throw new Error('Setup is already running.')
     const controller = (this.abort = new AbortController()),
       signal = controller.signal
@@ -274,6 +295,12 @@ export class RuntimeSetupService {
       const run = this.options.run ?? runSetupProcess,
         arch = this.options.arch ?? process.arch
       const current = await this.models.inspect()
+      const selectedModels = input.chatModel || input.embeddingModel
+      const selectedAssets = (this.options.assets ?? MODEL_ASSETS).filter(
+        (asset) =>
+          (input.chatModel && ['chat', 'template'].includes(asset.id)) ||
+          (input.embeddingModel && ['embedding', 'projector'].includes(asset.id)),
+      )
       let executable = current.config.executablePath
       const requestedEngine = join(
         this.userData,
@@ -282,17 +309,14 @@ export class RuntimeSetupService {
         `default-b11541-${input.backend}-${arch}`,
         'llama-server.exe',
       )
-      if (
-        this.ownedEngine(executable) &&
-        resolve(executable).toLowerCase() !== resolve(requestedEngine).toLowerCase()
-      )
-        executable = ''
+      if (input.runtime) executable = existsSync(requestedEngine) ? requestedEngine : ''
+      else if (executable && !existsSync(executable)) executable = ''
       const disk = await statfs(this.directory)
       let needed =
         512 * 1024 ** 2 + (input.office && !(await findLibreOffice()) ? 2 * 1024 ** 3 : 0)
-      if (input.models && !executable && input.backend === 'cuda') needed += 3 * 1024 ** 3
-      if (input.models)
-        for (const asset of this.options.assets ?? MODEL_ASSETS) {
+      if (input.runtime && !executable && input.backend === 'cuda') needed += 3 * 1024 ** 3
+      if (selectedModels)
+        for (const asset of selectedAssets) {
           const path = join(this.userData, 'local-models', 'defaults-v1', asset.name)
           const cached = Math.max(
             await stat(path).then(
@@ -310,7 +334,11 @@ export class RuntimeSetupService {
         throw new Error(
           'There is not enough free disk space to finish setup. Free disk space and retry.',
         )
-      if (input.models || input.office) {
+      if (
+        input.runtime ||
+        input.office ||
+        (selectedModels && !!executable && (input.startModels || input.useDefaults))
+      ) {
         const needsVc =
           this.options.needsVc?.() ??
           !['vcruntime140.dll', 'msvcp140.dll'].every((name) =>
@@ -339,7 +367,7 @@ export class RuntimeSetupService {
           )
         }
       }
-      if (input.models) {
+      if (input.runtime) {
         if (!executable) {
           const root = join(
             this.userData,
@@ -424,33 +452,45 @@ export class RuntimeSetupService {
               'CUDA did not find a supported NVIDIA GPU. Update the NVIDIA driver or select CPU or Vulkan.',
             )
         }
+      }
+      if (selectedModels || input.runtime) {
         const root = join(this.userData, 'local-models', 'defaults-v1')
-        for (const asset of this.options.assets ?? MODEL_ASSETS)
-          await this.asset(asset, join(root, asset.name), signal)
+        for (const asset of selectedAssets) await this.asset(asset, join(root, asset.name), signal)
         this.stage = 'configure'
         const defaults = await this.defaultProfiles(
           root,
           current.config.profiles,
-          input.startModels,
+          input.startModels && !!executable,
+          input,
         )
         const next = [...current.config.profiles]
         for (const profile of defaults)
           if (!next.some((value) => value.id === profile.id)) next.push(profile)
         await this.models.save({ executablePath: executable, profiles: next }, current.revision)
-        this.saved.profileIds = defaults.map((profile) => profile.id)
-        this.saved.needsActivation = input.useDefaults
+        this.saved.profileIds = [
+          ...new Set([...(this.saved.profileIds ?? []), ...defaults.map((profile) => profile.id)]),
+        ]
+        const pending = (await this.inspect()).activationKinds
+        if (input.useDefaults && executable)
+          this.saved.activationKinds = [
+            ...new Set([...pending, ...defaults.map((profile) => profile.kind)]),
+          ]
+        else this.saved.activationKinds = pending
+        this.saved.needsActivation = this.saved.activationKinds.length > 0
         await this.persist()
-        for (const profile of defaults) {
+        for (const profile of next.filter((profile) =>
+          this.saved.profileIds?.includes(profile.id),
+        )) {
           await writeJson(join(this.directory, `${profile.kind}.command.json`), {
             executable,
             arguments: localModelArguments(profile),
           })
           await writeFile(
             join(this.directory, `Start-${profile.kind}.ps1`),
-            `$ErrorActionPreference = 'Stop'\r\n$command = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '${profile.kind}.command.json') | ConvertFrom-Json\r\n$runtimeArgs = @($command.arguments)\r\n& $command.executable @runtimeArgs\r\nexit $LASTEXITCODE\r\n`,
+            `$ErrorActionPreference = 'Stop'\r\n$command = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot '${profile.kind}.command.json') | ConvertFrom-Json\r\nif ([string]::IsNullOrWhiteSpace($command.executable) -or -not (Test-Path -LiteralPath $command.executable)) { throw 'Configure llama-server in Nawa before starting this model.' }\r\n$runtimeArgs = @($command.arguments)\r\n& $command.executable @runtimeArgs\r\nexit $LASTEXITCODE\r\n`,
           )
         }
-        if (input.startModels) {
+        if (input.startModels && executable) {
           for (const profile of defaults) {
             signal.throwIfAborted()
             this.stage = profile.kind === 'chat' ? 'startChat' : 'startEmbedding'
@@ -508,10 +548,14 @@ export class RuntimeSetupService {
       await this.persist()
       await writeJson(join(this.directory, 'third-party-sources.json'), {
         version: 1,
-        models: (this.options.assets ?? MODEL_ASSETS).map((asset) => ({
-          ...asset,
-          license: 'Apache-2.0',
-        })),
+        models: (this.options.assets ?? MODEL_ASSETS)
+          .filter((asset) =>
+            existsSync(join(this.userData, 'local-models', 'defaults-v1', asset.name)),
+          )
+          .map((asset) => ({
+            ...asset,
+            license: 'Apache-2.0',
+          })),
         runtime: {
           ...engineAsset(arch, input.backend),
           license: 'MIT',
@@ -553,67 +597,81 @@ export class RuntimeSetupService {
     root: string,
     existing: LocalModelProfile[],
     autoStart: boolean,
+    selection: Pick<RuntimeSetupOptions, 'chatModel' | 'embeddingModel'>,
   ): Promise<LocalModelProfile[]> {
     const argument = (name: string, value = '') => ({ enabled: true, name, value })
     const chatPort =
       existing.find((profile) => profile.id === 'nawa-default-chat')?.port ??
-      (await freePort(
-        8083,
-        existing.map((profile) => profile.port),
-      ))
+      (selection.chatModel
+        ? await freePort(
+            8083,
+            existing.map((profile) => profile.port),
+          )
+        : 8083)
     const embeddingPort =
       existing.find((profile) => profile.id === 'nawa-default-embedding')?.port ??
-      (await freePort(8086, [...existing.map((profile) => profile.port), chatPort]))
+      (selection.embeddingModel
+        ? await freePort(8086, [
+            ...existing.map((profile) => profile.port),
+            ...(selection.chatModel ? [chatPort] : []),
+          ])
+        : 8086)
     const common = { gpuLayers: 'auto' as const, threads: 0, pooling: 'model' as const, autoStart }
-    return [
-      existing.find((profile) => profile.id === 'nawa-default-chat') ?? {
-        ...common,
-        id: 'nawa-default-chat',
-        name: 'Gemma 4 E4B',
-        alias: 'gemma-4-e4b',
-        kind: 'chat',
-        port: chatPort,
-        contextSize: 65536,
-        modelPath: join(root, 'gemma-4-E4B_q4_0-it.gguf'),
-        arguments: [
-          argument('-b', '512'),
-          argument('-ub', '128'),
-          argument('-np', '2'),
-          argument('-fa', 'on'),
-          argument('-ctk', 'q8_0'),
-          argument('-ctv', 'q8_0'),
-          argument('--jinja'),
-          argument('--reasoning', 'off'),
-          argument('--reasoning-budget', '0'),
-          argument('--temp', '0.2'),
-          argument('--top-p', '0.85'),
-          argument('--top-k', '20'),
-          argument('--min-p', '0.05'),
-          argument('--n-predict', '1024'),
-          argument('--presence-penalty', '0'),
-          argument('--repeat-penalty', '1'),
-          argument('--chat-template-file', join(root, 'chat_template.jinja')),
-        ],
-      },
-      existing.find((profile) => profile.id === 'nawa-default-embedding') ?? {
-        ...common,
-        id: 'nawa-default-embedding',
-        name: 'EmbeddingGemma 2',
-        alias: 'embeddinggemma-2',
-        kind: 'embedding',
-        port: embeddingPort,
-        contextSize: 8192,
-        modelPath: join(root, 'embeddinggemma-2-Q8_0.gguf'),
-        arguments: [
-          argument('-b', '2048'),
-          argument('-ub', '512'),
-          argument('-np', '1'),
-          argument('-ctk', 'f32'),
-          argument('-ctv', 'f32'),
-          argument('--video-fps', '1'),
-          argument('--mmproj', join(root, 'mmproj-embeddinggemma-2-Q8_0.gguf')),
-        ],
-      },
-    ]
+    const profiles: LocalModelProfile[] = []
+    if (selection.chatModel)
+      profiles.push(
+        existing.find((profile) => profile.id === 'nawa-default-chat') ?? {
+          ...common,
+          id: 'nawa-default-chat',
+          name: 'Gemma 4 E4B',
+          alias: 'gemma-4-e4b',
+          kind: 'chat',
+          port: chatPort,
+          contextSize: 65536,
+          modelPath: join(root, 'gemma-4-E4B_q4_0-it.gguf'),
+          arguments: [
+            argument('-b', '512'),
+            argument('-ub', '128'),
+            argument('-np', '2'),
+            argument('-fa', 'on'),
+            argument('-ctk', 'q8_0'),
+            argument('-ctv', 'q8_0'),
+            argument('--jinja'),
+            argument('--reasoning', 'off'),
+            argument('--reasoning-budget', '0'),
+            argument('--temp', '0.2'),
+            argument('--top-p', '0.85'),
+            argument('--top-k', '20'),
+            argument('--min-p', '0.05'),
+            argument('--n-predict', '1024'),
+            argument('--presence-penalty', '0'),
+            argument('--repeat-penalty', '1'),
+            argument('--chat-template-file', join(root, 'chat_template.jinja')),
+          ],
+        },
+      )
+    if (selection.embeddingModel)
+      profiles.push(
+        existing.find((profile) => profile.id === 'nawa-default-embedding') ?? {
+          ...common,
+          id: 'nawa-default-embedding',
+          name: 'EmbeddingGemma 2',
+          alias: 'embeddinggemma-2',
+          kind: 'embedding',
+          port: embeddingPort,
+          contextSize: 8192,
+          modelPath: join(root, 'embeddinggemma-2-Q8_0.gguf'),
+          arguments: [
+            argument('-b', '2048'),
+            argument('-ub', '512'),
+            argument('-np', '1'),
+            argument('-ctk', 'f32'),
+            argument('-ctv', 'f32'),
+            argument('--video-fps', '1'),
+            argument('--mmproj', join(root, 'mmproj-embeddinggemma-2-Q8_0.gguf')),
+          ],
+        },
+      )
+    return profiles
   }
 }

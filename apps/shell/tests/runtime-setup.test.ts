@@ -1,4 +1,5 @@
 import { mkdtemp, writeFile, readFile, rm, mkdir } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
@@ -19,7 +20,9 @@ const assets = MODEL_ASSETS.map((asset) => ({
   sha256: createHash('sha256').update(gguf).digest('hex'),
 }))
 const install = {
-  models: true,
+  chatModel: true,
+  embeddingModel: true,
+  runtime: false,
   office: false,
   startModels: false,
   useDefaults: true,
@@ -110,7 +113,7 @@ it('rejects arbitrary options and concurrent installations', async () => {
     return new Response(gguf)
   })
   await expect(service.install({ ...install, backend: 'shell-command' })).rejects.toThrow(
-    'Choose models',
+    'Choose a chat model',
   )
   const pending = service.install(install)
   await vi.waitFor(async () => expect((await service.inspect()).state).toBe('installing'))
@@ -170,7 +173,7 @@ async function cudaSetup({ devices = true, missingLibraries = false } = {}) {
 }
 it('upgrades a managed CPU runtime to CUDA with both verified archives and exports CUDA commands', async () => {
   const { service, root } = await cudaSetup()
-  const result = await service.install(install)
+  const result = await service.install({ ...install, runtime: true })
   expect(result.state, result.error).toBe('ready')
   expect(await readFile(join(root, 'cublas64_12.dll'), 'utf8')).toBe('CUDA runtime')
   expect(await readFile(join(root, 'CUDA-LICENSE.txt'), 'utf8')).toBe('NVIDIA notices')
@@ -182,16 +185,108 @@ it('upgrades a managed CPU runtime to CUDA with both verified archives and expor
 })
 it('does not publish an incomplete CUDA runtime when its redistributable download fails', async () => {
   const { service, root } = await cudaSetup({ missingLibraries: true })
-  expect((await service.install(install)).state).toBe('failed')
+  expect((await service.install({ ...install, runtime: true })).state).toBe('failed')
   await expect(readFile(join(root, 'llama-server.exe'))).rejects.toThrow('ENOENT')
   expect((await models.inspect()).config.profiles).toEqual([])
 })
 it('reports missing CUDA devices before downloading models instead of silently using the CPU', async () => {
   const { service, fetcher } = await cudaSetup({ devices: false })
-  expect(await service.install(install)).toMatchObject({
+  expect(await service.install({ ...install, runtime: true })).toMatchObject({
     state: 'failed',
     error: expect.stringContaining('NVIDIA GPU'),
   })
   expect(fetcher).toHaveBeenCalledTimes(2)
   expect((await models.inspect()).config.profiles).toEqual([])
+})
+
+it.each([
+  ['chat', true, false, ['chat', 'template']],
+  ['embedding', false, true, ['embedding', 'projector']],
+] as const)(
+  'downloads and configures only the selected %s model',
+  async (kind, chatModel, embeddingModel, ids) => {
+    const fetcher = vi.fn(async () => new Response(gguf))
+    const result = await setup(fetcher).install({ ...install, chatModel, embeddingModel })
+    expect(result.state, result.error).toBe('ready')
+    expect(result.profiles.map((profile) => profile.kind)).toEqual([kind])
+    expect(result.activationKinds).toEqual([kind])
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    for (const asset of assets) {
+      expect(existsSync(join(directory, 'local-models/defaults-v1', asset.name))).toBe(
+        ids.includes(asset.id as never),
+      )
+    }
+    const other = kind === 'chat' ? 'embedding' : 'chat'
+    expect(existsSync(join(directory, 'setup', `${other}.command.json`))).toBe(false)
+  },
+)
+
+it('downloads model files without llama.cpp, CUDA validation, VC installation or autostart', async () => {
+  const current = await models.inspect()
+  await models.save({ ...current.config, executablePath: '' }, current.revision)
+  const fetcher = vi.fn(async () => new Response(gguf)),
+    run = vi.fn(async () => 'version')
+  const service = new RuntimeSetupService(directory, models, {
+    platform: 'win32',
+    arch: 'x64',
+    ocrAvailable: () => true,
+    needsVc: () => true,
+    assets,
+    fetch: fetcher,
+    run,
+  })
+  const result = await service.install({ ...install, chatModel: false, startModels: true })
+  expect(result.state, result.error).toBe('ready')
+  expect(result.runtime).toBeNull()
+  expect(result.needsActivation).toBe(false)
+  expect(result.profiles).toHaveLength(1)
+  expect(result.profiles[0]).toMatchObject({ kind: 'embedding', autoStart: false })
+  expect(fetcher).toHaveBeenCalledTimes(2)
+  expect(run).not.toHaveBeenCalled()
+})
+
+it('downloads llama.cpp alone without downloading weights or creating model profiles', async () => {
+  const { service, fetcher, root } = await cudaSetup()
+  const result = await service.install({
+    ...install,
+    chatModel: false,
+    embeddingModel: false,
+    runtime: true,
+  })
+  expect(result.state, result.error).toBe('ready')
+  expect(result.runtime).toBe(join(root, 'llama-server.exe'))
+  expect(result.profiles).toEqual([])
+  expect(result.needsActivation).toBe(false)
+  expect(fetcher).toHaveBeenCalledTimes(2)
+  for (const asset of assets)
+    expect(existsSync(join(directory, 'local-models/defaults-v1', asset.name))).toBe(false)
+})
+
+it('preserves an existing CPU runtime when downloading only an embedding model', async () => {
+  const { service, fetcher } = await cudaSetup()
+  const before = (await models.inspect()).config.executablePath
+  const result = await service.install({ ...install, chatModel: false, runtime: false })
+  expect(result.state, result.error).toBe('ready')
+  expect((await models.inspect()).config.executablePath).toBe(before)
+  expect(fetcher).toHaveBeenCalledTimes(2)
+  expect(result.profiles[0].kind).toBe('embedding')
+})
+
+it('tracks pending activation separately and preserves the first model when adding the second', async () => {
+  const service = setup()
+  await service.install({ ...install, embeddingModel: false })
+  const current = await models.inspect()
+  current.config.profiles[0].name = 'Keep this chat configuration'
+  await models.save(current.config, current.revision)
+  const result = await service.install({ ...install, chatModel: false })
+  expect(result.profiles).toHaveLength(2)
+  expect(result.profiles.find((profile) => profile.kind === 'chat')?.name).toBe(
+    'Keep this chat configuration',
+  )
+  expect(result.activationKinds).toEqual(['chat', 'embedding'])
+  await service.activated(['embedding'])
+  expect((await setup().inspect()).activationKinds).toEqual(['chat'])
+  await service.activated(['chat'])
+  expect((await setup().inspect()).needsActivation).toBe(false)
+  await expect(service.activated(['other'])).rejects.toThrow('valid model roles')
 })

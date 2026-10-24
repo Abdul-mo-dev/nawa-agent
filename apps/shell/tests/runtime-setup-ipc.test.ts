@@ -42,6 +42,8 @@ it('restricts dependency downloads and installers to the trusted top-level setti
   await expect(
     state.handler({ sender: home, senderFrame: home.mainFrame }, 'run-shell'),
   ).rejects.toThrow('Unknown runtime setup')
-  await state.handler({ sender: home, senderFrame: home.mainFrame }, 'install', { models: true })
-  expect(state.install).toHaveBeenCalledWith({ models: true })
+  await state.handler({ sender: home, senderFrame: home.mainFrame }, 'install', {
+    embeddingModel: true,
+  })
+  expect(state.install).toHaveBeenCalledWith({ embeddingModel: true })
 })

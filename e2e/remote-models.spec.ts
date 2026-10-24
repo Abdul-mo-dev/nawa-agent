@@ -22,7 +22,20 @@ test('remote chat and embedding profiles persist, use their own protected creden
     for await (const chunk of request) chunks.push(Buffer.from(chunk))
     const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {}
     const authorization = request.headers.authorization ?? ''
-    calls.push({ model: body.model, authorization, input: body.input })
+    calls.push({ model: body.model ?? '$catalog', authorization, input: body.input })
+    if (request.method === 'GET' && request.url === '/v1/models') {
+      const models =
+        authorization === 'Bearer chat-key-a'
+          ? ['chat-a', 'chat-a-extra']
+          : authorization === 'Bearer chat-key-b'
+            ? ['chat-b']
+            : authorization === 'Bearer embedding-key'
+              ? ['embed-a']
+              : null
+      response.writeHead(models ? 200 : 401, { 'Content-Type': 'application/json' })
+      response.end(JSON.stringify({ data: models?.map((id) => ({ id })) ?? [] }))
+      return
+    }
     const expected =
       body.model === 'chat-a'
         ? 'chat-key-a'
@@ -92,8 +105,13 @@ test('remote chat and embedding profiles persist, use their own protected creden
       const editor = panel.getByRole('form', { name: 'Edit remote model', exact: true })
       await editor.getByLabel('Display name', { exact: true }).fill(name)
       await editor.getByLabel('API base URL', { exact: true }).fill(baseUrl)
-      await editor.getByLabel('Model ID or alias', { exact: true }).fill(model)
       await editor.getByLabel('API key (optional)', { exact: true }).fill(key)
+      await expect(
+        editor
+          .getByLabel('Available models', { exact: true })
+          .locator(`option[value="model:${model}"]`),
+      ).toHaveCount(1)
+      await editor.getByLabel('Available models', { exact: true }).selectOption(`model:${model}`)
       await editor.getByRole('button', { name: 'Test connection', exact: true }).click()
       await expect(panel.getByText('Connection verified.', { exact: true })).toBeVisible()
       await editor.getByRole('button', { name: 'Save profile', exact: true }).click()
@@ -121,8 +139,13 @@ test('remote chat and embedding profiles persist, use their own protected creden
     await editor.getByLabel('Use this model for', { exact: true }).selectOption('embedding')
     await editor.getByLabel('Display name', { exact: true }).fill('Remote vectors')
     await editor.getByLabel('API base URL', { exact: true }).fill(baseUrl)
-    await editor.getByLabel('Model ID or alias', { exact: true }).fill('embed-a')
     await editor.getByLabel('API key (optional)', { exact: true }).fill('embedding-key')
+    await expect(
+      editor
+        .getByLabel('Available models', { exact: true })
+        .locator('option[value="model:embed-a"]'),
+    ).toHaveCount(1)
+    await editor.getByLabel('Available models', { exact: true }).selectOption('model:embed-a')
     await editor.getByText('Embedding options', { exact: true }).click()
     await editor.getByLabel('Document prefix', { exact: true }).fill('document: ')
     await editor.getByLabel('Query prefix', { exact: true }).fill('query: ')
@@ -169,6 +192,10 @@ test('remote chat and embedding profiles persist, use their own protected creden
         (call) => call.model === 'embed-a' && call.authorization === 'Bearer embedding-key',
       ),
     ).toBe(true)
+    for (const key of ['chat-key-a', 'chat-key-b', 'embedding-key'])
+      expect(
+        calls.some((call) => call.model === '$catalog' && call.authorization === `Bearer ${key}`),
+      ).toBe(true)
     await page.screenshot({ path: screenshotPath('remote-models-profiles') })
     await closeAndSaveVideo(launched, 'remote-models')
     launched = await launchShell({
@@ -293,6 +320,25 @@ for (const locale of [
           await launched.page
             .locator('.set-pane')
             .evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+          JSON.stringify(
+            await launched.page.locator('.set-pane').evaluate((pane) => {
+              const bounds = pane.getBoundingClientRect()
+              return {
+                width: pane.clientWidth,
+                scroll: pane.scrollWidth,
+                outside: [...pane.querySelectorAll('*')]
+                  .filter((node) => node.getBoundingClientRect().right > bounds.right + 1)
+                  .slice(0, 12)
+                  .map((node) => ({
+                    tag: node.tagName,
+                    class: String(node.className),
+                    width: node.getBoundingClientRect().width,
+                    min: getComputedStyle(node).minWidth,
+                    text: node.textContent?.slice(0, 70),
+                  })),
+              }
+            }),
+          ),
         ).toBe(true)
         await launched.page.screenshot({
           path: screenshotPath(`remote-models-${locale.lang}-${theme}`),

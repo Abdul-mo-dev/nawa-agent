@@ -6,7 +6,7 @@ export function resolveModelCatalogRequest(
   settings: AiSettings,
 ): { baseUrl: string; apiKey?: string } {
   if (!input || typeof input !== 'object') return { baseUrl: '' }
-  const request = input as { baseUrl?: unknown; apiKey?: unknown }
+  const request = input as { baseUrl?: unknown; apiKey?: unknown; profileId?: unknown }
   if (typeof request.baseUrl !== 'string') return { baseUrl: '' }
   const baseUrl = request.baseUrl.trim()
   if (request.apiKey !== REDACTED_AI_KEY) {
@@ -24,6 +24,14 @@ export function resolveModelCatalogRequest(
   }
   const target = keyForUrl(baseUrl)
   if (!target) return { baseUrl: '' }
+  if (request.profileId !== undefined) {
+    const profile = settings.chatModels?.find(
+      (model) => model.id === request.profileId && model.provider === 'custom',
+    )
+    if (!profile || keyForUrl(profile.config.baseUrl ?? '') !== target) return { baseUrl: '' }
+    const apiKey = profile.config.apiKey
+    return apiKey && apiKey !== REDACTED_AI_KEY ? { baseUrl, apiKey } : { baseUrl: '' }
+  }
   const candidates = [
     ...Object.values(settings.providers),
     ...(settings.customEndpoints ?? []),

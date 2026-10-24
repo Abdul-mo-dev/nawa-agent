@@ -2,7 +2,9 @@ import type { LocalModelProfile } from './local-models-api'
 
 export const RUNTIME_SETUP_CHANNEL = 'nawa:runtime-setup:v1'
 export interface RuntimeSetupOptions {
-  models: boolean
+  chatModel: boolean
+  embeddingModel: boolean
+  runtime: boolean
   office: boolean
   startModels: boolean
   useDefaults: boolean
@@ -20,6 +22,8 @@ export interface RuntimeSetupSnapshot {
   ocr: boolean
   office: string | null
   needsActivation: boolean
+  activationKinds: LocalModelProfile['kind'][]
+  runtime: string | null
   reuseRuntime: boolean
   profiles: LocalModelProfile[]
 }
@@ -28,7 +32,7 @@ export interface RuntimeSetupApi {
   install(options: RuntimeSetupOptions): Promise<RuntimeSetupSnapshot>
   cancel(): Promise<void>
   dismiss(): Promise<void>
-  activated(): Promise<void>
+  activated(kinds?: LocalModelProfile['kind'][]): Promise<void>
   reveal(): Promise<void>
   openLanguages(): Promise<void>
 }

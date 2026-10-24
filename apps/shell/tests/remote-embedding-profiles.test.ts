@@ -93,6 +93,11 @@ it('tests and applies the selected profile with its own key, prefixes, model and
   )
   await api.models({ ...state.profiles[1], model: '' })
   expect(rag.models).toHaveBeenLastCalledWith(expect.anything(), 'beta-secret')
+  await api.models({ ...state.profiles[1], model: '', allowRemote: false })
+  expect(rag.models).toHaveBeenLastCalledWith(
+    expect.objectContaining({ enabled: false, allowRemote: true, timeoutMs: 5000 }),
+    'beta-secret',
+  )
   const before = await api.list()
   await api.apply('remote-beta', before.revision)
   expect(rag.save).toHaveBeenLastCalledWith(

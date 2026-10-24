@@ -55,6 +55,8 @@ function normalize(raw: unknown, requireModel = true): RemoteEmbeddingProfile {
     ...p,
     backend: 'local',
     enabled: requireModel,
+    // Listing server metadata does not send document text or enable file search.
+    allowRemote: requireModel ? p.allowRemote : true,
     tokenizer: 'conservative',
     chunkTokens: Math.min(384, p.maxInputTokens - 1),
     overlapTokens: Math.min(48, Math.floor((p.maxInputTokens - 1) / 4)),
@@ -223,6 +225,7 @@ export class RemoteEmbeddingProfiles {
       ...profile,
       backend: 'local' as const,
       enabled: false,
+      timeoutMs: 5000,
       tokenizer: 'conservative' as const,
       chunkTokens: Math.min(384, profile.maxInputTokens - 1),
       overlapTokens: Math.min(48, Math.floor((profile.maxInputTokens - 1) / 4)),

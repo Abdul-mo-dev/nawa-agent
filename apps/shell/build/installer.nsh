@@ -49,7 +49,7 @@
 !macroend
 
 !macro customFinishPage
-  !define MUI_FINISHPAGE_TEXT "Nawa is installed. On first launch, setup can download the default chat and embedding models, their chat template, and missing Office conversion tools. Allow internet access and about 12 GiB free disk space."
+  !define MUI_FINISHPAGE_TEXT "Nawa is installed. On first launch, choose separate downloads for chat, embeddings, llama.cpp, and Office conversion. Setup needs internet access; selecting all components can require about 12 GiB free disk space."
   !ifndef HIDE_RUN_AFTER_FINISH
     Function NawaStartAfterSetup
       ${StdUtils.ExecShellAsUser} $0 "$launchLink" "open" "--nawa-setup"

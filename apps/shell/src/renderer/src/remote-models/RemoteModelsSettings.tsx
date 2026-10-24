@@ -16,6 +16,7 @@ import { useI18n } from '../locale'
 import { remoteModelStrings } from '../i18n/strings-remote-models'
 import { usePanelActivity } from '../explorer/panel-state'
 import { ModelPolicyEditor } from '../ModelPolicyEditor'
+import { RemoteModelPicker } from './RemoteModelPicker'
 import './remote-models.css'
 
 type Role = 'chat' | 'embedding'
@@ -40,7 +41,7 @@ const blank = (): Draft => ({
   name: '',
   role: 'chat',
   isNew: true,
-  baseUrl: 'https://api.example.com/v1',
+  baseUrl: '',
   model: '',
   hasKey: false,
   key: '',
@@ -305,6 +306,7 @@ export function RemoteModelsSettings({
         id={`${id}-${key}`}
         className="set-input"
         value={draft![key]}
+        placeholder={key === 'baseUrl' ? 'https://server.example/v1' : undefined}
         maxLength={key === 'name' ? 160 : key === 'model' ? 256 : 2048}
         dir={key === 'name' ? undefined : 'ltr'}
         spellCheck={false}
@@ -424,7 +426,6 @@ export function RemoteModelsSettings({
                 </select>
               </label>
               {field('baseUrl', copy.url)}
-              {field('model', copy.model)}
               <label className="rm-field" htmlFor={`${id}-key`}>
                 <span>{copy.key}</span>
                 <input
@@ -441,6 +442,13 @@ export function RemoteModelsSettings({
                 />
               </label>
             </div>
+            <RemoteModelPicker
+              key={`${draft.id}:${draft.role}`}
+              profile={draft}
+              onChange={(model) =>
+                update({ model, policy: { ...draft.policy, tested: undefined } })
+              }
+            />
             {draft.hasKey && draft.key === undefined && (
               <button
                 type="button"

@@ -108,7 +108,11 @@ test('Office setup installs to a private path containing spaces and restores it 
       await page.getByText('Default models and dependencies', { exact: true }).click()
     }
     const panel = page.locator('.runtime-setup')
-    await panel.getByLabel('Install default chat and embedding models', { exact: true }).uncheck()
+    await panel.getByLabel('Chat model — Gemma 4 E4B and chat template', { exact: true }).uncheck()
+    await panel
+      .getByLabel('Embedding model — EmbeddingGemma 2 and projector', { exact: true })
+      .uncheck()
+    await panel.getByLabel('Download and use llama.cpp', { exact: true }).uncheck()
     await panel.getByRole('button', { name: 'Install and set up', exact: true }).click()
     await expect
       .poll(async () => (await page.evaluate(() => window.nawaRuntimeSetup!.inspect())).state, {
@@ -182,9 +186,21 @@ for (const locale of [
       await expect(
         launched.page.getByRole('button', { name: locale.install, exact: true }),
       ).toBeVisible()
-      await expect(launched.page.locator('.runtime-setup input[type=checkbox]')).toHaveCount(4)
+      await expect(launched.page.locator('.runtime-setup input[type=checkbox]')).toHaveCount(6)
       await expect(launched.page.locator('.runtime-setup select')).toHaveValue('cuda')
       await expect(launched.page.locator('.runtime-setup select option')).toHaveCount(3)
+      const choices = launched.page.locator('.runtime-setup input[type=checkbox]')
+      await choices.nth(0).uncheck()
+      await expect(choices.nth(1)).toBeChecked()
+      await expect(choices.nth(2)).toBeChecked()
+      await choices.nth(2).uncheck()
+      await expect(choices.nth(1)).toBeEnabled()
+      await expect(choices.nth(1)).toBeChecked()
+      await expect(choices.nth(4)).toBeDisabled()
+      await expect(choices.nth(5)).toBeDisabled()
+      await expect(launched.page.locator('.runtime-setup select')).toBeDisabled()
+      await choices.nth(2).check()
+      await choices.nth(0).check()
       await expect(launched.page.getByRole('tablist')).toHaveCount(0)
       await expect(launched.page.locator('.runtime-setup')).toContainText('Gemma 4 E4B')
       await expect(launched.page.locator('.runtime-setup')).toContainText('EmbeddingGemma 2')
@@ -264,7 +280,9 @@ test('default models install from verified cached assets, activate both connecti
     const panel = page.locator('.runtime-setup')
     await expect(panel.locator('select')).toHaveValue('cuda')
     await panel.getByLabel('Install Office conversion when missing', { exact: true }).uncheck()
-    await panel.getByLabel('Start models now and when Nawa opens', { exact: true }).uncheck()
+    await panel
+      .getByLabel('Start selected models now and when Nawa opens', { exact: true })
+      .uncheck()
     await panel.getByRole('button', { name: 'Install and set up', exact: true }).click()
     await expect
       .poll(
