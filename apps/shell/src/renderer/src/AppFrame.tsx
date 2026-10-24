@@ -5,6 +5,7 @@ import { Home, type HomeTarget } from './Home'
 import { Onboarding } from './Onboarding'
 import { TabBar } from './TabBar'
 import { ExplorerHome } from './explorer/ExplorerHome'
+import { RuntimeSetupWelcome } from './local-models/RuntimeSetupPanel'
 
 interface AppFrameProps {
   initialOnboardingSeen: boolean
@@ -67,6 +68,7 @@ export function AppFrame({ initialOnboardingSeen }: AppFrameProps) {
         )}
       </div>
       {showOnboarding && homeActive && <Onboarding onDone={finishOnboarding} />}
+      <RuntimeSetupWelcome visible={!showOnboarding && homeActive} />
     </div>
   )
 }

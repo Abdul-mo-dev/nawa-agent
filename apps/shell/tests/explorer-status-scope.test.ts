@@ -5,6 +5,9 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { FileList } from '../src/renderer/src/explorer/FileList'
 import { DEFAULT_PREFERENCES, type Item } from '../src/renderer/src/explorer/model'
 import type { FolderRoot } from '../src/shared/home-api'
+import { RAG_IMAGE_OCR_NOTICE } from '@genoffice/file-parse/formats'
+import { LocaleProvider } from '../src/renderer/src/locale'
+import { RagBadge } from '../src/renderer/src/rag/RagStatus'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
@@ -196,6 +199,135 @@ it('shows live per-file indexing and analysis icons with details on hover and fo
   await act(async () => icons('data')[0].blur())
   await act(async () => icons('indexed')[3].focus())
   expect(document.querySelector('[role="tooltip"]')?.textContent).toContain('OCR unavailable')
+})
+
+it.each(['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'tif', 'tiff'])(
+  'shows successful %s OCR as indexed text while keeping its coverage notice',
+  async (extension) => {
+    const image = {
+      ...items[0],
+      path: `${workspace}\\scan.${extension}`,
+      name: `scan.${extension}`,
+      ext: extension,
+    }
+    ragStatuses.mockResolvedValue([
+      {
+        path: image.path,
+        status: 'embedded',
+        chunks: 1,
+        partial: true,
+        warnings: [RAG_IMAGE_OCR_NOTICE],
+      },
+    ])
+    await render(roots, [image])
+    const icon = host.querySelector<HTMLElement>('.ex-column-indexed [data-state]')!
+    expect(icon.dataset.state).toBe('ready')
+    expect(icon.getAttribute('aria-label')).toBe('Search: Image text indexed (OCR)')
+    await act(async () => icon.focus())
+    const details = document.querySelector('[role="tooltip"]')?.textContent
+    expect(details).toContain('1 passages')
+    expect(details).toContain('Layout and visual meaning are not embedded')
+  },
+)
+
+it('keeps image failures and incomplete extraction warnings visible', async () => {
+  const images = ['failed', 'incomplete', 'unknown'].map((name) => ({
+    ...items[0],
+    path: `${workspace}\\${name}.png`,
+    name: `${name}.png`,
+    ext: 'png',
+  }))
+  ragStatuses.mockResolvedValue([
+    {
+      path: images[0].path,
+      status: 'failed',
+      chunks: 0,
+      error: 'Local OCR found no readable text in this image.',
+    },
+    {
+      path: images[1].path,
+      status: 'embedded',
+      chunks: 1,
+      partial: true,
+      warnings: [RAG_IMAGE_OCR_NOTICE, 'Later image pages could not be extracted.'],
+    },
+    { path: images[2].path, status: 'embedded', chunks: 1, partial: true, warnings: [] },
+  ])
+  await render(roots, images)
+  const icons = [...host.querySelectorAll<HTMLElement>('.ex-column-indexed [data-state]')]
+  expect(icons.map((icon) => icon.dataset.state)).toEqual(['failed', 'attention', 'attention'])
+  await act(async () => icons[0].focus())
+  expect(document.querySelector('[role="tooltip"]')?.textContent).toContain(
+    'Local OCR found no readable text',
+  )
+})
+
+it.each([
+  { extension: 'pdf', warning: 'No text recovered on pages: 3. These pages are not embedded.' },
+  { extension: 'xlsx', warning: 'Missing worksheet: Annual totals' },
+  {
+    extension: 'zip',
+    warning:
+      'attachments/archive.7z: unsupported or hidden archive entry; content was not embedded.',
+  },
+])(
+  'identifies indexed $extension text without hiding missing content',
+  async ({ extension, warning }) => {
+    const entry = {
+      ...items[0],
+      path: `${workspace}\\partial.${extension}`,
+      name: `partial.${extension}`,
+      ext: extension,
+    }
+    ragStatuses.mockResolvedValue([
+      { path: entry.path, status: 'embedded', chunks: 3, partial: true, warnings: [warning] },
+    ])
+    await render(roots, [entry])
+    const icon = host.querySelector<HTMLElement>('.ex-column-indexed [data-state]')!
+    expect(icon.dataset.state).toBe('attention')
+    expect(icon.getAttribute('aria-label')).toBe('Search: Text indexed with limitations')
+    await act(async () => icon.focus())
+    const details = document.querySelector('[role="tooltip"]')?.textContent
+    expect(details).toContain('3 passages')
+    expect(details).toContain('Extracted text was embedded.')
+    expect(details).toContain(warning)
+  },
+)
+
+it.each([
+  {
+    lang: 'ar' as const,
+    label: 'تمت فهرسة نص الصورة بالتعرف الضوئي',
+    detail: 'تم التعرف على نص الصورة محلياً وفهرسته.',
+  },
+  {
+    lang: 'ja' as const,
+    label: '画像内のテキストを索引登録済み（OCR）',
+    detail: '画像内のテキストをローカルでOCR認識し、索引登録しました。',
+  },
+])('explains successful OCR in $lang', async ({ lang, label, detail }) => {
+  await act(async () =>
+    root.render(
+      createElement(
+        LocaleProvider,
+        { initial: lang },
+        createElement(RagBadge, {
+          value: {
+            path: `${workspace}\\scan.png`,
+            status: 'embedded',
+            chunks: 1,
+            partial: true,
+            warnings: [RAG_IMAGE_OCR_NOTICE],
+          },
+        }),
+      ),
+    ),
+  )
+  const icon = host.querySelector<HTMLElement>('[data-state]')!
+  expect(icon.dataset.state).toBe('ready')
+  expect(icon.getAttribute('aria-label')).toContain(label)
+  await act(async () => icon.focus())
+  expect(document.querySelector('[role="tooltip"]')?.textContent).toContain(detail)
 })
 
 it('updates progress while a file status request is still waiting and drops the active overlay after completion', async () => {

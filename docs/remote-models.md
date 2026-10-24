@@ -1,0 +1,15 @@
+# Remote model profiles
+
+Nawa 0.11.2 adds **Settings → AI & Models → Remote models** for named connections to existing OpenAI-compatible servers and cloud APIs. This section supports chat and embedding profiles on the same settings page as Nawa's managed local servers.
+
+Choose **Add remote model**, select **Chat** or **Embeddings**, and enter a display name, API base URL, model ID or alias, and optional API key. Use **Test connection**, then **Save profile**. A base URL can include the provider's API path, for example `https://models.example/proxy/openai`. A bare server address uses `/v1` for embeddings.
+
+**Use as default** selects a saved chat profile for new/default conversations or applies an embedding profile to file search. Saved chat profiles also appear in the conversation model selector; conversations with a specific selection keep that selection. Chat limits, location and tool capabilities remain available in the profile's advanced settings. The chat connection test verifies an actual function call and tool-result round trip with synthetic data.
+
+Embedding profiles keep the server, model/revision, vector dimensions, input-token limit and retrieval prefixes together. LAN and remote embedding servers require explicit permission to send text. The connection test sends synthetic text; actual indexing sends extracted file text, and searches send query text. Set the model's required prefixes in **Embedding options**. Changing embedding identity or chunking can require re-indexing affected files. Saving an embedding profile does not select it; choose **Use as default** to apply its settings, including changes to a saved API key.
+
+API keys remain separate per profile. The renderer receives saved-key indicators, while persisted credentials use the operating system's protected storage. Changing a server address requires re-entering or explicitly removing its saved key. Saving a conflicting edit fails instead of overwriting another settings editor's changes. Select another default, or disable file search for embeddings, before deleting an active profile.
+
+Chat profiles use the existing protected `userData/ai-settings.json` store. Embedding profiles use `userData/remote-models/embedding-profiles-v1.json`; the selected embedding connection continues to use the canonical RAG settings and protected credential. Application updates keep these files. Regular uninstallation retains them with the rest of Nawa's user data.
+
+Remote API profiles connect to already running services. Nawa's **Local models** section owns the Start/Stop controls for processes that Nawa launches. MyAgent remains a separate integration; its files and running services are not modified by creating these profiles.

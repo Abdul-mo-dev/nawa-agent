@@ -1,4 +1,7 @@
 /** Browser-safe ingestion capability catalog; extraction still validates saved bytes. */
+export const RAG_IMAGE_OCR_NOTICE =
+  'Image text was recognized locally by OCR. Layout and visual meaning are not embedded; verify exact wording against the original image.'
+
 export const RAG_TEXT_EXTENSIONS = [
   'txt',
   'md',

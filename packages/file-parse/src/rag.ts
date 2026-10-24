@@ -9,7 +9,12 @@ import {
   xmlBlocks,
 } from './rag-text'
 import { decodeXml } from './rag-xml'
-import { RAG_TEXT_EXTENSIONS, RAG_OFFICE_EXTENSIONS, RAG_IMAGE_EXTENSIONS } from './formats'
+import {
+  RAG_TEXT_EXTENSIONS,
+  RAG_OFFICE_EXTENSIONS,
+  RAG_IMAGE_EXTENSIONS,
+  RAG_IMAGE_OCR_NOTICE,
+} from './formats'
 import type { RagDocument } from './rag-types'
 export type { RagBlock, RagDocument } from './rag-types'
 export interface RagOcrOptions {
@@ -207,9 +212,7 @@ export async function parseFileToRag(path: string, ocr?: RagOcrOptions): Promise
       format: ext,
       blocks: markdownBlocks(text).map((b) => ({ ...b, locator: `image OCR, ${b.locator}` })),
       partial: true,
-      warnings: [
-        'Image text was recognized locally by OCR. Layout and visual meaning are not embedded; verify exact wording against the original image.',
-      ],
+      warnings: [RAG_IMAGE_OCR_NOTICE],
     }
   }
   if (ext === 'doc' || ext === 'ppt') {

@@ -11,6 +11,20 @@
 
 !define GENOFFICE_PATH_MAX 7900
 
+!ifndef BUILD_UNINSTALLER
+!macro customFinishPage
+  !define MUI_FINISHPAGE_TEXT "Nawa is installed. On first launch, setup can download the default chat and embedding models, their chat template, and missing Office conversion tools. Allow internet access and about 12 GiB free disk space."
+  !ifndef HIDE_RUN_AFTER_FINISH
+    Function NawaStartAfterSetup
+      ${StdUtils.ExecShellAsUser} $0 "$launchLink" "open" "--nawa-setup"
+    FunctionEnd
+    !define MUI_FINISHPAGE_RUN
+    !define MUI_FINISHPAGE_RUN_FUNCTION "NawaStartAfterSetup"
+  !endif
+  !insertmacro MUI_PAGE_FINISH
+!macroend
+!endif
+
 ; electron-builder emits its association macros before customHeader expands.
 ; Override them there so Open With registration never claims a user's defaults
 ; and executable paths containing spaces remain valid Windows commands.

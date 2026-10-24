@@ -1,10 +1,13 @@
 import type { RagFileStatus, RagProgress } from '../../../shared/rag-api'
+import { RAG_IMAGE_EXTENSIONS, RAG_IMAGE_OCR_NOTICE } from '@genoffice/file-parse/formats'
 import { FileStatusIcon, type FileStatusState } from '../explorer/FileStatusIcon'
 import { pathKey } from '../explorer/model'
 import { useSidebarText } from '../explorer/sidebar-i18n'
 import { useFileStatuses } from '../explorer/useFileStatuses'
 import { fileCapabilities } from '../../../shared/file-capabilities'
 import { fileStatusHelp } from '../explorer/file-status-help'
+
+const imageExtensions = new Set<string>(RAG_IMAGE_EXTENSIONS.map((extension) => '.' + extension))
 
 export function useRagStatuses(files: Array<{ path: string; mtimeMs: number; sizeBytes: number }>) {
   return useFileStatuses(files, window.nawaRag, 'File search status is unavailable.')
@@ -88,11 +91,30 @@ export function RagBadge({
       ),
     )
   } else if (value?.status === 'embedded' || job?.status === 'embedded') {
-    state = value?.partial ? 'attention' : 'ready'
-    label = value?.partial ? 'Partially indexed' : 'Indexed for search'
+    // The standard OCR coverage notice describes successful text indexing.
+    // Additional warnings still need attention, even for a supported image.
+    const imageTextIndexed =
+      value?.status === 'embedded' &&
+      value.chunks > 0 &&
+      !value.error &&
+      imageExtensions.has(fileCapabilities(path ?? value.path).extension) &&
+      value.warnings?.length === 1 &&
+      value.warnings[0] === RAG_IMAGE_OCR_NOTICE
+    state = value?.partial && !imageTextIndexed ? 'attention' : 'ready'
+    label = imageTextIndexed
+      ? 'Image text indexed (OCR)'
+      : value?.partial
+        ? 'Text indexed with limitations'
+        : 'Indexed for search'
     if (value?.chunks) details.push(s('{count} passages', { count: value.chunks }))
     if (value?.indexedAt)
       details.push(s('Indexed: {date}', { date: new Date(value.indexedAt).toLocaleString() }))
+    if (value?.partial && !imageTextIndexed)
+      details.push(
+        s(
+          'Extracted text was embedded. Some content, layout or visual information may be unavailable. See the details below.',
+        ),
+      )
   } else if (!value) {
     state = 'busy'
     label = 'Checking file…'
@@ -119,7 +141,7 @@ export function RagBadge({
     !/content changed|embedding profile changed/i.test(reason)
   )
     details.push(s(fileStatusHelp(reason, 'search')))
-  details.push(...(value?.warnings ?? []))
+  details.push(...(value?.warnings ?? []).map((warning) => s(warning)))
   if (path) {
     const capability = fileCapabilities(path)
     if (capability.extension === '.xls')

@@ -15,7 +15,7 @@ export function embeddingUrl(base: string): URL {
     throw new Error('Use an HTTP(S) base URL without credentials, a query, or a fragment.')
   }
   let pathname = url.pathname.replace(/\/+$/, '').replace(/\/embeddings$/, '')
-  if (!pathname.endsWith('/v1')) pathname += '/v1'
+  if (!pathname) pathname = '/v1'
   url.pathname = pathname + '/embeddings'
   return url
 }

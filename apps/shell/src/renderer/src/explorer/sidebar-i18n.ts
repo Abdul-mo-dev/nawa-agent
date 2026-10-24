@@ -1,5 +1,6 @@
 import { useI18n } from '../locale'
 import { modelPolicyStrings } from '../i18n/strings-model-policy'
+import { fileStatusStrings } from '../i18n/strings-file-status'
 
 /** English is the fallback for untranslated copy, as in the Explorer catalog. */
 export const sidebarArabic: Record<string, string> = {
@@ -827,6 +828,7 @@ export function sidebarText(
 ): string {
   const tabIndex = ['Chat', 'Knowledge', 'Models'].indexOf(text)
   const translated =
+    fileStatusStrings[lang]?.[text] ??
     modelPolicyStrings[lang]?.[text] ??
     (lang === 'ar' ? sidebarArabic[text] : tabIndex >= 0 ? tabs[lang]?.[tabIndex] : undefined)
   return (translated ?? text).replace(/\{(\w+)\}/g, (match, key: string) =>

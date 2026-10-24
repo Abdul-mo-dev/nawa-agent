@@ -1,6 +1,8 @@
 # AI & Models
 
-Open **Settings → AI & Models**. This section manages local llama.cpp runtimes directly in Nawa. The optional MyAgent integration continues to administer the separate MyAgent service.
+Open **Settings → AI & Models**. This page manages local llama.cpp runtimes and [saved remote API profiles](remote-models.md) for chat and embeddings. The optional MyAgent integration continues to administer the separate MyAgent service.
+
+New Windows installations offer a guided download and configuration of the default chat/embedding models, chat template and missing runtime dependencies. Existing users can open **Default models and dependencies** on this page. See [Windows installation and runtime setup](runtime-setup.md).
 
 ## Set up a local model
 

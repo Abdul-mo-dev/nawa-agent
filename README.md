@@ -575,6 +575,11 @@ Settings → **AI & Models** also manages local llama.cpp engines, verified GGUF
 downloads, saved launch profiles, and independent Start / Stop controls for chat
 and embedding servers. See [Local models](docs/local-models.md) for setup.
 
+New Windows installations offer [guided runtime setup](docs/runtime-setup.md)
+for the default Gemma chat model, EmbeddingGemma file-search model, chat template,
+and missing Office conversion tools. Models are downloaded on first launch;
+the application installer includes the OCR helper and native editor runtimes.
+
 </details>
 
 <details>

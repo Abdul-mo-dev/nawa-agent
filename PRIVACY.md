@@ -1,6 +1,6 @@
 # GenOffice Privacy
 
-Last updated: August 26, 2026
+Last updated: October 24, 2026
 
 GenOffice opens, edits, and saves documents locally. Document editing does not
 upload files to GenOffice. AI features require a network connection and send
@@ -19,6 +19,19 @@ send the entered search term or repository ID to those services. These requests
 do not include document content. Managed local servers listen on `127.0.0.1`;
 using them for chat or embeddings sends the selected context to that local
 process. Models and profiles are stored locally, separately from the installer.
+
+Saved remote API profiles can send chat context or extracted file text and search
+queries to a user-configured OpenAI-compatible server. Remote embedding profiles
+require explicit permission for this transmission. Connection tests use synthetic
+probes. Profile API keys use OS-protected storage; the settings interface receives
+saved-key indicators instead of stored key values.
+
+The first-run runtime setup also downloads the official chat template and
+embedding projector from Hugging Face, LibreOffice from The Document Foundation,
+and Microsoft's Visual C++ runtime from Microsoft when needed. These setup
+downloads do not include document content. Completed assets and resumable partial
+downloads remain in Nawa's per-user storage. Windows manages OCR recognition
+languages; the setup screen can open Windows language settings.
 
 ## Usage analytics
 

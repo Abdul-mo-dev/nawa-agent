@@ -7,6 +7,8 @@ import {
   type RagSettingsView,
 } from '../../../shared/rag-api'
 import './rag.css'
+import { useI18n } from '../locale'
+import { remoteModelStrings } from '../i18n/strings-remote-models'
 
 export function RagSettings({
   myAgentOnly = false,
@@ -21,6 +23,8 @@ export function RagSettings({
 }) {
   const { s } = useSidebarText(),
     id = useId()
+  const { lang } = useI18n(),
+    apiCopy = remoteModelStrings[lang]
   const [retry, setRetry] = useState(0)
   const [settings, setSettings] = useState<Settings>({ ...DEFAULT_RAG_SETTINGS })
   const [view, setView] = useState<RagSettingsView | null>(null)
@@ -219,8 +223,8 @@ export function RagSettings({
       ) : (
         <>
           <div className="nawa-embedding-source">
-            <strong>llama.cpp</strong>
-            <span>{s('Local embedding server')}</span>
+            <strong>{apiCopy.api}</strong>
+            <span>{apiCopy.server}</span>
           </div>
           {textField('baseUrl', 'Server address')}
           <div className="nawa-embedding-model">

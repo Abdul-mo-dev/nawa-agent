@@ -1,6 +1,7 @@
 import { discoverLinkedImages, stageLinkedImages, finalizeWorkflowAssets } from './assets'
 import { DirectorySearchService } from '../directory-file-index/service'
 import { registerRagIpc } from '../rag/service'
+import { registerRemoteEmbeddingIpc } from '../remote-models/ipc'
 import { registerAnalyticsIpc } from '../analytics/service'
 import { PreparedFileRefresh } from '../prepared-files/refresh'
 import { registerMyAgentSettingsIpc } from '../myagent/service'
@@ -45,6 +46,7 @@ export function registerDirectoryActionsIpc(options: {
     onCleared: (folder) => refresh.forget('search', folder),
     onCancelled: () => refresh.pause('search'),
   })
+  registerRemoteEmbeddingIpc(options.isHomeSender, rag)
   registerMyAgentSettingsIpc({
     isHomeSender: options.isHomeSender,
     connection: () => rag.myAgentConnection(),

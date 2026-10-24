@@ -15,6 +15,9 @@ import { chatConnection, embeddingConnection } from './connections'
 import { LocalProfileEditor } from './LocalProfileEditor'
 import { ModelDownloads } from './ModelDownloads'
 import './local-models.css'
+import { RuntimeSetupPanel } from './RuntimeSetupPanel'
+import { runtimeSetupStrings } from '../i18n/strings-runtime-setup'
+import { RemoteModelsSettings } from '../remote-models/RemoteModelsSettings'
 
 interface ChatSummary {
   name: string
@@ -56,8 +59,12 @@ export function LocalModelsSettings({
   const [currentChat, setCurrentChat] = useState<ChatSummary | null>(null),
     [currentEmbedding, setCurrentEmbedding] = useState<RagConfiguration | null>(null)
   const [embeddingVersion, setEmbeddingVersion] = useState(0)
-  const [busy, setBusy] = useState(false),
+  const [localBusy, setBusy] = useState(false),
     [downloadPending, setDownloadPending] = useState(false)
+  const [setupRunning, setSetupRunning] = useState(false)
+  const [remoteEditing, setRemoteEditing] = useState(false),
+    [remoteWorking, setRemoteWorking] = useState(false)
+  const busy = localBusy || setupRunning || remoteWorking
   const [error, setError] = useState(''),
     [notice, setNotice] = useState('')
   const [confirm, setConfirm] = useState<'profile' | 'refresh' | { model: string } | null>(null)
@@ -284,6 +291,19 @@ export function LocalModelsSettings({
     <section className="lm-settings" aria-label={copy.title}>
       <h3 className="set-pane-title">{copy.title}</h3>
       <p className="lm-intro">{copy.overviewIntro}</p>
+      <details className="lm-runtime-setup">
+        <summary>{runtimeSetupStrings[lang].summary}</summary>
+        <RuntimeSetupPanel
+          blocked={applyBlocked || dirty || localBusy || remoteEditing || remoteWorking}
+          onBusyChange={setSetupRunning}
+          onChanged={() => {
+            void window.nawaLocalModels
+              ?.inspect()
+              .then((next) => accept(next, true))
+              .catch((cause) => setError(String(cause)))
+          }}
+        />
+      </details>
       <div className="lm-connections">
         <section className="lm-connection-card" aria-labelledby={`${id}-chat-title`}>
           <div className="lm-card-label" id={`${id}-chat-title`}>
@@ -300,7 +320,7 @@ export function LocalModelsSettings({
             className="set-btn"
             aria-expanded={connectionEditor === 'chat'}
             aria-controls={`${id}-chat-editor`}
-            disabled={busy}
+            disabled={busy || remoteEditing}
             onClick={() => openConnection('chat')}
           >
             {copy.configureChat}
@@ -325,7 +345,7 @@ export function LocalModelsSettings({
             className="set-btn"
             aria-expanded={connectionEditor === 'embedding'}
             aria-controls={`${id}-embedding-editor`}
-            disabled={busy}
+            disabled={busy || remoteEditing}
             onClick={() => openConnection('embedding')}
           >
             {copy.configureEmbedding}
@@ -348,13 +368,28 @@ export function LocalModelsSettings({
           <RagSettings key={embeddingVersion} compact suspended={busy || embeddingSuspended} />
         )}
       </div>
+      <RemoteModelsSettings
+        blocked={applyBlocked || dirty || localBusy || setupRunning}
+        embedding={currentEmbedding}
+        onEmbeddingApplied={(settings) => {
+          setCurrentEmbedding(settings)
+          setEmbeddingVersion((value) => value + 1)
+        }}
+        onEditingChange={setRemoteEditing}
+        onWorkingChange={setRemoteWorking}
+      />
       <section className="lm-local-section" aria-labelledby={`${id}-local-title`}>
         <div className="lm-section-heading">
           <div>
             <h4 id={`${id}-local-title`}>{copy.localModels}</h4>
             <p className="lm-hint">{copy.localDescription}</p>
           </div>
-          <button type="button" className="set-btn" disabled={busy || !draft} onClick={() => add()}>
+          <button
+            type="button"
+            className="set-btn"
+            disabled={busy || remoteEditing || !draft}
+            onClick={() => add()}
+          >
             {copy.addModel}
           </button>
         </div>

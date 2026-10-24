@@ -910,6 +910,7 @@ const config = {
     artifactName: winArm64 ? 'Nawa-Setup-${version}-arm64.${ext}' : 'Nawa-Setup-${version}.${ext}',
     oneClick: false,
     allowToChangeInstallationDirectory: true,
+    runAfterFinish: true,
   },
   beforePack: async (context) => {
     ensurePlatformHelpers()

@@ -1,0 +1,62 @@
+.runtime-setup {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.runtime-setup p {
+  line-height: 1.6;
+}
+.runtime-setup fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.runtime-setup-choice {
+  display: flex;
+  align-items: start;
+  gap: 8px;
+  margin-block: 12px;
+}
+.runtime-setup-choice input {
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+.runtime-setup-field {
+  display: grid;
+  gap: 8px;
+  margin-block: 16px;
+}
+.runtime-setup-hint,
+.runtime-setup-dependencies {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.runtime-setup-dependencies {
+  padding-inline-start: 20px;
+  line-height: 1.7;
+}
+.runtime-setup-progress {
+  display: grid;
+  gap: 8px;
+  margin-block: 16px;
+}
+.runtime-setup-progress progress {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.runtime-setup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-block: 16px;
+}
+.runtime-setup-error {
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+.runtime-setup-dialog {
+  width: min(680px, calc(100vw - 32px));
+}
+.runtime-setup > details {
+  margin-top: 16px;
+}
