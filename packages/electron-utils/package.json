@@ -17,6 +17,7 @@
     "./font-catalog": "./src/font-catalog.ts",
     "./font-store": "./src/font-store.ts",
     "./headless-export": "./src/headless-export.ts",
+    "./offline-license": "./src/offline-license.ts",
     "./legacy-office": "./src/legacy-office.ts",
     "./print-window": "./src/print-window.ts",
     "./remote-image": "./src/remote-image.ts",

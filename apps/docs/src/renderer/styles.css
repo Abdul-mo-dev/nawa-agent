@@ -448,7 +448,7 @@ html.genoffice-popover-open .ribbon-tabs {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  margin-right: 6px;
+  margin-inline-end: 6px;
 }
 
 .ribbon-tab {
@@ -495,7 +495,7 @@ html.genoffice-popover-open .ribbon-tabs {
   background: var(--word-blue);
   border-radius: 4px;
   padding: 6px 16px;
-  margin-right: 6px;
+  margin-inline-end: 6px;
 }
 
 .ribbon-tab-file:hover,
@@ -784,7 +784,7 @@ html.genoffice-popover-open .ribbon-tabs {
 /* Split buttons stack a caret beside the icon; without the label row the pair
  * needs to sit on one line. */
 .ribbon-compact .rb-caret-svg {
-  margin-left: 2px;
+  margin-inline-start: 2px;
 }
 
 /* The table tabs stack two rows of controls (font block, cell size grid), which
@@ -802,7 +802,7 @@ html.genoffice-popover-open .ribbon-tabs {
 
 .rb-big-icon .rb-caret-svg {
   display: block;
-  margin-left: 3px;
+  margin-inline-start: 3px;
   color: var(--text-dim);
 }
 
@@ -946,7 +946,7 @@ html.genoffice-popover-open .ribbon-tabs {
   border-radius: 3px;
   padding: 3px 8px;
   font-size: 12px;
-  text-align: left;
+  text-align: start;
   white-space: nowrap;
   cursor: pointer;
   color: var(--text);
@@ -1022,7 +1022,7 @@ html.genoffice-popover-open .ribbon-tabs {
 /* the combobox inputs and their carets render as one bordered control, Word-style */
 .rb-font-size,
 .rb-font-family {
-  border-right: none;
+  border-inline-end: none;
   border-radius: 3px 0 0 3px;
 }
 
@@ -1031,7 +1031,7 @@ html.genoffice-popover-open .ribbon-tabs {
   width: 18px;
   height: 28px;
   border: 1px solid var(--border-strong);
-  border-left: none;
+  border-inline-start: none;
   border-radius: 0 3px 3px 0;
   background: var(--surface);
 }
@@ -1168,7 +1168,7 @@ html.genoffice-popover-open .ribbon-tabs {
 .rb-caret-inline {
   font-size: 8px;
   color: var(--text-dim);
-  margin-left: 2px;
+  margin-inline-start: 2px;
 }
 
 /* font color button with color bar */
@@ -3195,7 +3195,7 @@ th.cell-rev-del {
 .nav-pane {
   position: relative;
   flex: none;
-  border-right: 1px solid var(--border);
+  border-inline-end: 1px solid var(--border);
   background: var(--surface);
   display: flex;
   flex-direction: column;
@@ -3205,7 +3205,7 @@ th.cell-rev-del {
 .nav-pane-resizer {
   position: absolute;
   top: 0;
-  right: -3px;
+  inset-inline-end: -3px;
   bottom: 0;
   width: 7px;
   cursor: col-resize;
@@ -8816,7 +8816,7 @@ body.docs-crop-active
 }
 
 .ai-input-footer .ai-send-btn {
-  margin-left: auto;
+  margin-inline-start: auto;
 }
 
 /* attach — brand-supplied paperclip art, 20×20 (5/9 of the 36px enter button), same as the sheets panel */
@@ -9200,7 +9200,7 @@ body.docs-crop-active
 }
 
 .status-item {
-  margin-right: 14px;
+  margin-inline-end: 14px;
   flex-shrink: 0;
 }
 
@@ -9288,7 +9288,7 @@ body.docs-crop-active
   display: flex;
   align-items: center;
   gap: 2px;
-  margin-right: 6px;
+  margin-inline-end: 6px;
 }
 
 .status-view-btn {

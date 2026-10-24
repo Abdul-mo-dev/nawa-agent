@@ -9,6 +9,8 @@
 
 <h1 align="center">Nawa</h1>
 
+Private Windows deployment: [offline approval for a small set of PCs](docs/approved-pcs.md).
+
 <p align="center"><b>An open-source AI Office suite, forked from GenOffice.</b><br>
 Word, Excel, PowerPoint and PDF files, edited by you and your AI, saved back in the real formats.</p>
 
@@ -37,6 +39,7 @@ document — not a chat box bolted on the side, but an editor that reads the
 file, makes the change, and shows you exactly what it touched.
 
 The interface and in-app help are available in English, Japanese, and Arabic.
+Arabic mirrors the interface right-to-left; document content keeps its own direction.
 
 - **Real formats, byte-preserving.** Only what you edit is rewritten. Everything
   else in the file survives byte-for-byte, so documents keep working in Word,

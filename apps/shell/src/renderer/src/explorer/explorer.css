@@ -231,7 +231,7 @@
   background: var(--ex-hover);
 }
 .ex-address-edit {
-  margin-left: auto;
+  margin-inline-start: auto;
   width: 25px;
 }
 .ex-breadcrumbs {
@@ -320,7 +320,6 @@
 .ex-body {
   flex: 1;
   display: flex;
-  direction: ltr;
   min-height: 0;
   min-width: 0;
   overflow: hidden;
@@ -345,6 +344,20 @@ html[data-ai-panel-side='right'] .ex-body > .ex-center {
 }
 html[data-ai-panel-side='right'] .ex-body > .nawa-workspace-control-panel {
   order: 4;
+}
+/* Navigation follows the reading direction. The chosen assistant side refers
+   to the physical side of the file area in either language. */
+html[dir='rtl'] .ex-body > .ex-center {
+  order: 2;
+}
+html[dir='rtl'] .ex-body > .nawa-workspace-control-panel {
+  order: 4;
+}
+html[dir='rtl'][data-ai-panel-side='right'] .ex-body > .ex-center {
+  order: 4;
+}
+html[dir='rtl'][data-ai-panel-side='right'] .ex-body > .nawa-workspace-control-panel {
+  order: 2;
 }
 .ex-navigation {
   width: var(--ex-nav-width);
@@ -417,7 +430,7 @@ html[data-ai-panel-side='right'] .ex-body > .nawa-workspace-control-panel {
 .ex-nav-item.is-current::before {
   content: '';
   position: absolute;
-  left: 0;
+  inset-inline-start: 0;
   top: 9px;
   bottom: 9px;
   width: 3px;
@@ -583,7 +596,7 @@ html[data-ai-panel-side='right'] .ex-body > .nawa-workspace-control-panel {
   width: 5px;
   z-index: 3;
   background: var(--ex-bg);
-  border-left: 1px solid var(--ex-line);
+  border-inline-start: 1px solid var(--ex-line);
   cursor: col-resize;
   touch-action: none;
 }
@@ -677,7 +690,7 @@ html[data-ai-panel-side='right'] .ex-body > .nawa-workspace-control-panel {
   border-bottom: 1px solid var(--ex-line);
   color: var(--ex-muted);
   font-size: 11px;
-  padding-right: 10px;
+  padding-inline-end: 10px;
 }
 .ex-list-heading button {
   display: flex;
@@ -711,7 +724,7 @@ html[data-ai-panel-side='right'] .ex-body > .nawa-workspace-control-panel {
 .ex-file-row {
   border: 1px solid transparent;
   border-radius: 4px;
-  padding-right: 9px;
+  padding-inline-end: 9px;
   font-size: 12px;
   cursor: default;
   user-select: none;
@@ -784,7 +797,7 @@ html[data-ai-panel-side='right'] .ex-body > .nawa-workspace-control-panel {
 }
 .ex-starred-mark {
   color: var(--ex-folder-back);
-  margin-left: auto;
+  margin-inline-start: auto;
 }
 .ex-file-row:not(.is-selected):not(:hover) .ex-check-cell input,
 .ex-tile:not(.is-selected):not(:hover) .ex-check-cell input {
@@ -812,7 +825,7 @@ html[data-ai-panel-side='right'] .ex-body > .nawa-workspace-control-panel {
 .ex-tile .ex-check-cell {
   position: absolute;
   top: 7px;
-  left: 7px;
+  inset-inline-start: 7px;
 }
 .ex-tile .ex-file-name {
   flex-direction: column;
@@ -829,7 +842,7 @@ html[data-ai-panel-side='right'] .ex-body > .nawa-workspace-control-panel {
 .ex-tile .ex-starred-mark {
   position: absolute;
   top: 8px;
-  right: 9px;
+  inset-inline-end: 9px;
 }
 .ex-tile-meta {
   font-size: 10px;
@@ -1261,7 +1274,7 @@ html[data-ai-panel-side='right'] .ex-body > .nawa-workspace-control-panel {
 }
 .ex-status-divider {
   height: 13px;
-  border-left: 1px solid var(--ex-line);
+  border-inline-start: 1px solid var(--ex-line);
 }
 .ex-empty {
   display: flex;
@@ -1395,7 +1408,7 @@ html[data-ai-panel-side='right'] .ex-body > .nawa-workspace-control-panel {
   justify-content: center;
 }
 .ex-menu kbd {
-  margin-left: auto;
+  margin-inline-start: auto;
   font: inherit;
   color: var(--ex-muted);
   font-size: 10px;
@@ -1466,7 +1479,7 @@ html[data-ai-panel-side='right'] .ex-body > .nawa-workspace-control-panel {
 }
 .ex-legacy-back {
   position: absolute;
-  right: 20px;
+  inset-inline-end: 20px;
   bottom: 16px;
   z-index: 40;
   border: 1px solid var(--ex-strong);
@@ -1521,8 +1534,8 @@ html[data-ai-panel-side='right'] .ex-body > .nawa-workspace-control-panel {
   }
   .ex-address-row {
     gap: 8px;
-    padding-left: 9px;
-    padding-right: 10px;
+    padding-inline-start: 9px;
+    padding-inline-end: 10px;
   }
 }
 @media (max-width: 700px) {
@@ -1575,8 +1588,8 @@ html[data-ai-panel-side='right'] .ex-body > .nawa-workspace-control-panel {
   width: 5px;
   height: 5px;
   flex: 0 0 5px;
-  margin-left: auto;
-  margin-right: 9px;
+  margin-inline-start: auto;
+  margin-inline-end: 9px;
   border-radius: 50%;
   background: var(--ex-success);
 }
@@ -1682,7 +1695,7 @@ html[data-ai-panel-side='right'] .ex-body > .nawa-workspace-control-panel {
   box-shadow: var(--ex-shadow);
 }
 .ex-settings-notice button {
-  margin-left: 15px;
+  margin-inline-start: 15px;
   border: 0;
   background: transparent;
   color: inherit;

@@ -78,6 +78,7 @@ export function findElectronRequires(bundleText) {
 
 async function bundle() {
   const cliVersion = resolveCliVersion(process.env, version)
+  const licensePolicy = JSON.parse(process.env.NAWA_CLI_LICENSE_POLICY || 'null')
   await build({
     entryPoints: [join(here, 'src/cli.ts')],
     outfile: CLI_BUNDLE,
@@ -91,11 +92,13 @@ async function bundle() {
     define: {
       'import.meta.url': '__cliImportMetaUrl',
       __GENOFFICE_VERSION__: JSON.stringify(cliVersion),
+      __NAWA_OFFLINE_LICENSE_POLICY__: JSON.stringify(licensePolicy),
     },
     banner: {
       js: [
         "const __cliImportMetaUrl = require('node:url').pathToFileURL(__filename).href;",
         cliVersionBanner(cliVersion),
+        `const __cliLicensePolicy = ${JSON.stringify(licensePolicy)};`,
       ].join('\n'),
     },
     jsx: 'automatic',

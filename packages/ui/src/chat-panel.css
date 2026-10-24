@@ -71,7 +71,7 @@ body:has(.nawa-chat-panel.ai-panel-resizing) iframe {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 4px;
-  margin-left: auto;
+  margin-inline-start: auto;
 }
 .nawa-chat-header .ai-header-btn,
 .nawa-chat-header .ex-tool {
@@ -118,7 +118,6 @@ body:has(.nawa-chat-panel.ai-panel-resizing) iframe {
   margin: 0;
   padding: 0;
   border: 0;
-  direction: ltr;
 }
 .nawa-chat-conversation-row > :first-child {
   flex: 1;
@@ -262,7 +261,6 @@ body:has(.nawa-chat-panel.ai-panel-resizing) iframe {
   align-items: center;
   gap: 8px;
   padding: 4px 8px 8px 10px;
-  direction: ltr;
 }
 .nawa-chat-panel:is(.ai-panel, .copilot, .workspace-chat-main) .ai-send-btn {
   display: inline-flex;

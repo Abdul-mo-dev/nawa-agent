@@ -19,14 +19,15 @@
   height: 26px;
   /* right 5px: caret glyph right edge lands 6px from the outer edge, matching
    * the format-pane caret alignment line */
-  padding: 0 5px 0 6px;
+  padding-block: 0;
+  padding-inline: 6px 5px;
   border: 1px solid var(--border-strong);
   border-radius: 3px;
   background: var(--surface);
   color: var(--text);
   font-family: inherit;
   font-size: 12px;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 
@@ -61,7 +62,7 @@
   position: fixed;
   position-anchor: --gs-dd;
   top: calc(anchor(bottom) + 2px);
-  left: anchor(left);
+  inset-inline-start: anchor(start);
   min-width: anchor-size(width);
   /* flip-inline: a popover wider than its trigger near the window's right edge would
    * otherwise run offscreen and clip (fixed positioning clips at the viewport) —
@@ -96,7 +97,7 @@
   padding: 5px 6px;
   font-family: inherit;
   font-size: 12px;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 

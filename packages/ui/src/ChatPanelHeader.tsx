@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import type { Lang } from '@genoffice/i18n'
+import { htmlDir, type Lang } from '@genoffice/i18n'
 import { CHAT_LABELS } from './ChatMessageActions'
 import './chat-panel.css'
 
@@ -62,7 +62,7 @@ export function ChatPanelHeader({
   className?: string | undefined
 }) {
   return (
-    <header className={`ai-panel-header nawa-chat-header ${className}`} dir="ltr">
+    <header className={`ai-panel-header nawa-chat-header ${className}`} dir={htmlDir(lang)}>
       <span className="ai-panel-title nawa-chat-brand" dir="ltr">
         {brand}
         <span>Nawa</span>

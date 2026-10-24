@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactElement } from 'react'
 import type { TabsApi, TabSummary } from '../../shared/tabs-api'
-import { TEAR_OFF_SLACK, insertionIndexForX, isBeyondBand } from '../../shared/tab-drag-geometry'
+import {
+  TEAR_OFF_SLACK,
+  insertionIndexForX,
+  isBeyondBand,
+  tabDragPosition,
+} from '../../shared/tab-drag-geometry'
 import { notifyFilesChanged } from './file-events'
 import { useI18n } from './locale'
 import { DocumentIcon } from './explorer/Icons'
@@ -168,7 +173,8 @@ export function renamedFileName(currentPath: string, typedName: string): string 
 }
 
 export function TabBar() {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
+  const rtl = lang === 'ar'
   const [tabs, setTabs] = useState<TabSummary[]>([])
   const stripRef = useRef<HTMLDivElement>(null)
 
@@ -316,7 +322,12 @@ export function TabBar() {
       const stripLeft = strip.getBoundingClientRect().left - strip.scrollLeft
       const slot = rects[index]
       const last = rects[rects.length - 1]
-      const edge = slot ? slot.left : last ? last.left + last.width : preview.x
+      const reversed = rects.length > 1 && rects[0].left > last.left
+      const edge = slot
+        ? slot.left + (reversed ? slot.width : 0)
+        : last
+          ? last.left + (reversed ? 0 : last.width)
+          : preview.x
       setDockX(Math.round(edge - stripLeft))
     })
   }, [])
@@ -365,30 +376,13 @@ export function TabBar() {
       })
       return
     }
-    // keep the tab inside the strip; slot 0 (Home) is off limits
-    const last = drag.lefts.length - 1
-    const minDx = drag.lefts[1] - drag.lefts[drag.from]
-    const maxDx =
-      drag.lefts[last] + drag.widths[last] - drag.widths[drag.from] - drag.lefts[drag.from]
-    dx = Math.min(Math.max(dx, minDx), Math.max(minDx, maxDx))
-    // Chrome's rule: swap once the grabbed tab's leading edge crosses
-    // a neighbour's midpoint (the clamped center can only ever *touch*
-    // the first slot's midpoint, so edge-based tests have no dead spot)
-    const draggedLeft = drag.lefts[drag.from] + dx
-    const draggedRight = draggedLeft + drag.widths[drag.from]
-    let target = drag.from
-    for (let i = 1; i < drag.from; i++) {
-      if (draggedLeft < drag.lefts[i] + drag.widths[i] / 2) {
-        target = i
-        break
-      }
-    }
-    for (let i = last; i > drag.from; i--) {
-      if (draggedRight > drag.lefts[i] + drag.widths[i] / 2) {
-        target = i
-        break
-      }
-    }
+    const position = tabDragPosition(
+      drag.lefts.map((left, i) => ({ left, width: drag.widths[i] })),
+      drag.from,
+      dx,
+    )
+    dx = position.dx
+    const target = position.target
     drag.target = target
     setDragVisual({
       id: drag.id,
@@ -409,7 +403,7 @@ export function TabBar() {
       if (strip.scrollWidth <= strip.clientWidth) return
       if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return
       event.preventDefault()
-      strip.scrollLeft += event.deltaY
+      strip.scrollLeft += event.deltaY * (getComputedStyle(strip).direction === 'rtl' ? -1 : 1)
     }
     strip.addEventListener('wheel', onWheel, { passive: false })
     return () => strip.removeEventListener('wheel', onWheel)
@@ -471,9 +465,9 @@ export function TabBar() {
             if (dragVisual.id === tab.id) {
               dragStyle = { transform: `translateX(${dragVisual.dx}px)` }
             } else if (dragVisual.target <= index && index < dragVisual.from) {
-              dragStyle = { transform: `translateX(${dragVisual.width}px)` }
+              dragStyle = { transform: `translateX(${dragVisual.width * (rtl ? -1 : 1)}px)` }
             } else if (dragVisual.from < index && index <= dragVisual.target) {
-              dragStyle = { transform: `translateX(-${dragVisual.width}px)` }
+              dragStyle = { transform: `translateX(${dragVisual.width * (rtl ? 1 : -1)}px)` }
             }
           }
           return (
@@ -579,7 +573,9 @@ export function TabBar() {
                   onBlur={commitRename}
                 />
               ) : (
-                <span className="tab-title">{tab.title}</span>
+                <span className="tab-title" dir="auto">
+                  {tab.title}
+                </span>
               )}
               {tab.closable && (
                 <button

@@ -7,6 +7,7 @@ import { execSync, spawn } from 'node:child_process'
 import { registerWorkspaceIpc } from './workspace-ipc'
 import { registerLocalModelsIpc } from './local-models/ipc'
 import { registerRuntimeSetupIpc } from './runtime-setup/ipc'
+import { requirePcApproval } from './offline-license'
 import { PREVIEW_RE, registerFilePreviewIpc } from './file-preview'
 import { configureDirectoryNative } from './directory-actions/native-runtime'
 import { assertDirectoryStagePicker } from '../../../../packages/electron-utils/src/directory-stage'
@@ -3703,6 +3704,7 @@ async function runHeadlessAiSettingsEntry(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  if (!(await requirePcApproval(headlessAiSettings || headlessArgv.kind !== 'none'))) return
   // first scan waits for the windows to come up; later ones follow folder changes
   setTimeout(() => ensureFileIndexer()?.refresh(), 4000)
   installRendererProtocol({

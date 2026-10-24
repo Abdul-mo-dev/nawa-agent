@@ -5,9 +5,16 @@ import type { ReactElement, ReactNode } from 'react'
 /// from CSS, which also pins the PAINTED stroke to ~1.5px (20px+ glyphs) /
 /// ~1.25px (13-16px glyphs) via stroke-width overrides in styles.css —
 /// proportional scaling would leave small glyphs hairline and big ones fat.
-function Icon({ children }: { readonly children: ReactNode }): ReactElement {
+function Icon({
+  children,
+  directional = false,
+}: {
+  readonly children: ReactNode
+  directional?: boolean
+}): ReactElement {
   return (
     <svg
+      className={directional ? 'ui-directional-icon' : undefined}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -188,7 +195,7 @@ export function SaveAsIcon(): ReactElement {
 /// and slides ribbons, so the three apps' tab-row arrows read identically.
 export function UndoIcon(): ReactElement {
   return (
-    <Icon>
+    <Icon directional>
       <path d="M5.91026 4L2.5 7.14791L5.91026 10.8205" />
       <path d="M3.96154 7.41028H15.1636C18.5169 7.41028 21.3646 10.1484 21.4953 13.5C21.6334 17.0416 18.707 20.0769 15.1636 20.0769H6.88384" />
     </Icon>
@@ -197,7 +204,7 @@ export function UndoIcon(): ReactElement {
 
 export function RedoIcon(): ReactElement {
   return (
-    <Icon>
+    <Icon directional>
       <path d="M18.0897 4L21.5 7.14791L18.0897 10.8205" />
       <path d="M20.0385 7.41028H8.83636C5.4831 7.41028 2.63537 10.1484 2.5047 13.5C2.36657 17.0416 5.29296 20.0769 8.83636 20.0769H17.1162" />
     </Icon>

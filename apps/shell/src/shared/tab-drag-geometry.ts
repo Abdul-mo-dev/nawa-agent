@@ -62,12 +62,42 @@ export interface TabRect {
 /**
  * Insertion slot for a tab dropped at horizontal position `x`, given the
  * strip's current tab rectangles in order. Slot 0 is Home (pinned), so the
- * result is clamped to [1, rects.length]: `x` left of a tab's midpoint means
- * "before it", past every midpoint means "append".
+ * result is clamped to [1, rects.length]. Geometry is in DOM order, which
+ * runs right-to-left in Arabic; crossing a midpoint follows that order.
  */
 export function insertionIndexForX(rects: readonly TabRect[], x: number): number {
+  const rtl = rects.length > 1 && rects[0].left > rects[rects.length - 1].left
   for (let i = 1; i < rects.length; i++) {
-    if (x < rects[i].left + rects[i].width / 2) return i
+    const midpoint = rects[i].left + rects[i].width / 2
+    if (rtl ? x > midpoint : x < midpoint) return i
   }
   return Math.max(1, rects.length)
+}
+
+/** Clamp a dragged tab to the document slots and swap at neighbour midpoints.
+ * Use logical coordinates for the calculation, then return a physical delta. */
+export function tabDragPosition(rects: readonly TabRect[], from: number, deltaX: number) {
+  const last = rects.length - 1
+  if (from < 1 || from > last) return { dx: 0, target: from }
+  const sign = rects[0].left > rects[last].left ? -1 : 1
+  const starts = rects.map((r) => (sign === -1 ? -r.left - r.width : r.left))
+  const min = starts[1] - starts[from]
+  const max = starts[last] + rects[last].width - rects[from].width - starts[from]
+  const delta = Math.min(Math.max(deltaX * sign, min), Math.max(min, max))
+  const leading = starts[from] + delta
+  const trailing = leading + rects[from].width
+  let target = from
+  for (let i = 1; i < from; i++) {
+    if (leading < starts[i] + rects[i].width / 2) {
+      target = i
+      break
+    }
+  }
+  for (let i = last; i > from; i--) {
+    if (trailing > starts[i] + rects[i].width / 2) {
+      target = i
+      break
+    }
+  }
+  return { dx: delta * sign, target }
 }

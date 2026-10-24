@@ -260,6 +260,7 @@ export function useEditorSlot(ref: RefObject<HTMLElement | null>, suspended: boo
       const rect = element.getBoundingClientRect()
       window.nawaExplorer?.setLayout({
         left: rect.left,
+        right: Math.max(0, window.innerWidth - rect.right),
         top: rect.top,
         bottom: Math.max(0, window.innerHeight - rect.bottom),
         suspended,
@@ -271,10 +272,17 @@ export function useEditorSlot(ref: RefObject<HTMLElement | null>, suspended: boo
     }
     const observer = new ResizeObserver(queue)
     observer.observe(element)
+    // Mirroring or moving a dock can change position without changing size.
+    const directionObserver = new MutationObserver(queue)
+    directionObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['dir', 'data-ai-panel-side'],
+    })
     window.addEventListener('resize', queue)
     measure()
     return () => {
       observer.disconnect()
+      directionObserver.disconnect()
       cancelAnimationFrame(frame)
       window.removeEventListener('resize', queue)
     }

@@ -1229,6 +1229,7 @@ export function ExplorerHome({ editorTab, onOpenLegacy }: Props) {
             <Splitter
               label={t('navigation')}
               className="ex-navigation-splitter"
+              reverse={lang === 'ar'}
               value={effectiveNavWidth}
               min={180}
               max={380}

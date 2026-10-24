@@ -9,21 +9,15 @@ html[data-ai-font-size] .ai-composer {
 /* Panel positions are physical; localized contents keep their text direction.
    Low-specificity content rules preserve each document canvas's own direction. */
 .app-main,
-.sheet-body,
-.app-content > .workspace,
-.app-content > .pdf-body {
+.sheet-body {
   direction: ltr;
 }
 
-:where(
-  html[dir='rtl']
-    :is(.app-main, .sheet-body, .app-content > .workspace, .app-content > .pdf-body)
-    > *
-) {
+:where(html[dir='rtl'] :is(.app-main, .sheet-body) > *) {
   direction: rtl;
 }
 
-/* Move only the assistant; document navigation retains its existing ordering. */
+/* Move only the assistant; editor navigation follows the UI direction. */
 html[data-ai-panel-side='right'] {
   --ai-panel-border-left: 1px;
   --ai-panel-border-right: 0px;

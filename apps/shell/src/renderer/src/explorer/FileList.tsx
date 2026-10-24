@@ -109,6 +109,7 @@ export function FileList({
   }
   const keyboard = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.target instanceof HTMLInputElement) return
+    const rtl = getComputedStyle(e.currentTarget).direction === 'rtl'
     const ctrl = e.ctrlKey || e.metaKey
     const index = Math.max(
       0,
@@ -117,8 +118,9 @@ export function FileList({
     let next: number | undefined
     if (e.key === 'ArrowDown') next = Math.min(items.length - 1, index + columns)
     else if (e.key === 'ArrowUp') next = Math.max(0, index - columns)
-    else if (tile && e.key === 'ArrowRight') next = Math.min(items.length - 1, index + 1)
-    else if (tile && e.key === 'ArrowLeft') next = Math.max(0, index - 1)
+    else if (tile && e.key === (rtl ? 'ArrowLeft' : 'ArrowRight'))
+      next = Math.min(items.length - 1, index + 1)
+    else if (tile && e.key === (rtl ? 'ArrowRight' : 'ArrowLeft')) next = Math.max(0, index - 1)
     else if (e.key === 'Home') next = 0
     else if (e.key === 'End') next = items.length - 1
     else if (e.key === 'PageDown')

@@ -282,7 +282,7 @@ export function Markdown({
         }
         if (b.kind === 'code') {
           return (
-            <pre key={i} className="ai-md-pre">
+            <pre key={i} className="ai-md-pre" dir="ltr">
               <code>{b.lines.join('\n')}</code>
             </pre>
           )

@@ -48,8 +48,16 @@ body.overlay-title-bar .tab-bar-drag-spacer {
   width: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw));
 }
 
+/* Native caption buttons keep the OS position while the tab UI mirrors. */
+html[dir='rtl'] .tab-bar-drag-spacer {
+  order: 4;
+}
+html[dir='rtl'] .tab-bar-caption-spacer {
+  order: -1;
+}
+
 .tab-app-menu-btn {
-  margin-right: 2px;
+  margin-inline-end: 2px;
 }
 
 /* scrollable middle section; empty space stays part of the window drag region.
@@ -80,7 +88,8 @@ body.overlay-title-bar .tab-bar-drag-spacer {
    * 3px above the tab's geometric center */
   margin-top: 6px;
   /* 12px left = 3px plate inset + 9px icon-to-plate, per Chrome @2x */
-  padding: 0 8px 6px 12px;
+  padding-block: 0 6px;
+  padding-inline: 12px 8px;
   /* Chrome tabs shrink under pressure but never grow past 240px */
   flex: 0 1 240px;
   min-width: 104px;
@@ -105,14 +114,14 @@ body.overlay-title-bar .tab-bar-drag-spacer {
   /* 27px = 3px plate inset + 24px from "GenOffice" to the plate's edge, so the
    * label gets a real 24px of breathing room (the 9px the other tabs' icons
    * get reads too tight after a word) */
-  padding-right: 27px;
+  padding-inline-end: 27px;
 }
 
 /* thin separator between adjacent inactive tabs */
 .tab-item:not(.active):not(:first-child)::before {
   content: '';
   position: absolute;
-  left: 0;
+  inset-inline-start: 0;
   /* centered on the content line (3px above tab center, like the icons) */
   top: calc(50% - 3px);
   width: 1px;
@@ -137,7 +146,7 @@ body.overlay-title-bar .tab-bar-drag-spacer {
 .tab-new-btn::before {
   content: '';
   position: absolute;
-  left: -2.5px;
+  inset-inline-start: -2.5px;
   top: 50%;
   width: 1px;
   height: 16px;
@@ -279,7 +288,7 @@ body.overlay-title-bar .tab-bar-drag-spacer {
 
 /* "+" new tab button: lives inside the strip so it hugs the last tab, Chrome-style */
 .tab-new-btn {
-  margin-left: 4px;
+  margin-inline-start: 4px;
 }
 
 .tab-overflow-btn {
@@ -290,7 +299,7 @@ body.overlay-title-bar .tab-bar-drag-spacer {
 .tab-overflow-btn::before {
   content: '';
   position: absolute;
-  left: -6px;
+  inset-inline-start: -6px;
   top: 50%;
   width: 1px;
   height: 16px;

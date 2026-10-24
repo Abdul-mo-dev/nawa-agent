@@ -2233,7 +2233,9 @@ export function Home({ initialTarget }: { initialTarget?: HomeTarget } = {}) {
             <FileBadge ext={item.ext} size={30} />
             <span className="quick-text">
               <span className="quick-title-row">
-                <span className="quick-title">{item.title}</span>
+                <span className="quick-title" dir="auto">
+                  {item.title}
+                </span>
                 <span className="ai-chip">AI</span>
               </span>
               <span className="quick-sub">{item.sub}</span>
@@ -2250,7 +2252,9 @@ export function Home({ initialTarget }: { initialTarget?: HomeTarget } = {}) {
           </span>
           <span className="quick-text">
             <span className="quick-title-row">
-              <span className="quick-title">{t('openLocal')}</span>
+              <span className="quick-title" dir="auto">
+                {t('openLocal')}
+              </span>
             </span>
             <span className="quick-sub">{OPEN_LOCAL_EXTENSIONS}</span>
           </span>

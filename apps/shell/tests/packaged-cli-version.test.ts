@@ -29,12 +29,14 @@ function loadConfig(opts: {
   missing?: string
   rootCanvasVersion?: string
   forbiddenEmbedding?: 'input' | 'import'
+  missingLicenseBanner?: boolean
 }): {
   config: { beforePack: (context: { electronPlatformName: string }) => Promise<void> }
   rebuilds: Rebuild[]
 } {
   const rebuilds: Rebuild[] = []
   let baked = opts.baked
+  let licenseBanner = opts.missingLicenseBanner ? '' : 'const __cliLicensePolicy = null;\n'
   const configModule = { exports: {} as Record<string, unknown> }
   runInNewContext(readFileSync(resolve(shellRoot, 'electron-builder.cjs'), 'utf8'), {
     module: configModule,
@@ -46,7 +48,10 @@ function loadConfig(opts: {
         return {
           execFileSync: (_file: string, args: string[], runOpts: { env?: NodeJS.ProcessEnv }) => {
             rebuilds.push({ script: args[0], appVersion: runOpts.env?.GENOFFICE_APP_VERSION })
-            if (opts.rebuildApplies !== false) baked = runOpts.env?.GENOFFICE_APP_VERSION ?? baked
+            if (opts.rebuildApplies !== false) {
+              baked = runOpts.env?.GENOFFICE_APP_VERSION ?? baked
+              licenseBanner = `const __cliLicensePolicy = ${runOpts.env?.NAWA_CLI_LICENSE_POLICY ?? 'null'};\n`
+            }
             return Buffer.from('')
           },
         }
@@ -80,7 +85,7 @@ function loadConfig(opts: {
               })
             }
             if (String(path).endsWith('genoffice.cjs')) {
-              return `const __cliAppVersion = ${JSON.stringify(baked)};\n`
+              return `const __cliAppVersion = ${JSON.stringify(baked)};\n${licenseBanner}`
             }
             // Packaging also gates on a generated third-party notice. Serve a
             // valid one so the CLI version check is what these tests exercise.
@@ -127,6 +132,26 @@ describe('packaged CLI version agreement', () => {
     const { config, rebuilds } = loadConfig({ baked: shellPackage.version })
     await config.beforePack({ electronPlatformName: 'linux' })
     expect(rebuilds).toEqual([])
+  })
+
+  it('rebuilds when the version matches but the approval-policy banner is absent', async () => {
+    const { config, rebuilds } = loadConfig({
+      baked: shellPackage.version,
+      missingLicenseBanner: true,
+    })
+    await config.beforePack({ electronPlatformName: 'linux' })
+    expect(rebuilds).toHaveLength(1)
+  })
+
+  it('fails closed when rebuilding does not embed the expected approval policy', async () => {
+    const { config } = loadConfig({
+      baked: shellPackage.version,
+      missingLicenseBanner: true,
+      rebuildApplies: false,
+    })
+    await expect(config.beforePack({ electronPlatformName: 'linux' })).rejects.toThrow(
+      /approval policy/,
+    )
   })
 
   it('fails the package when the bundle still disagrees after the rebuild', async () => {

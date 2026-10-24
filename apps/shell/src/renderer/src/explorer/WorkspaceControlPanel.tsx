@@ -142,7 +142,7 @@ export function WorkspaceControlPanel(props: Props) {
             onMove={(side) => window.aiOffice.setAiPanelPrefs({ side })}
           />
         </ChatPanelHeader>
-        <div className="nawa-chat-context-toolbar" dir="ltr">
+        <div className="nawa-chat-context-toolbar">
           <div className="nawa-workspace-index">
             <PanelVisibility.Provider value={visible}>
               <IndexSelectedButton

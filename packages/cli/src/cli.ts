@@ -34,8 +34,10 @@ import {
   type Warning,
 } from './result'
 import { didYouMean } from './suggest'
+import { assertOfflineLicense } from '@genoffice/electron-utils/offline-license'
 
 declare const __GENOFFICE_VERSION__: string | undefined
+declare const __NAWA_OFFLINE_LICENSE_POLICY__: unknown
 
 /** The @genoffice/cli package version: inlined by build.mjs, read from disk when running from source. */
 export const VERSION: string =
@@ -100,6 +102,26 @@ export async function runCli(argv: readonly string[], opts: RunOptions = {}): Pr
     if (json) io.stdout(JSON.stringify(toJsonError(name, err)))
     else io.stderr(formatHumanError(err))
     return err.code
+  }
+
+  // The packager embeds this policy; source/workspace runs have no license gate.
+  // Do not infer enforcement from a removable file or an environment variable.
+  if (
+    typeof __NAWA_OFFLINE_LICENSE_POLICY__ !== 'undefined' &&
+    __NAWA_OFFLINE_LICENSE_POLICY__ !== null
+  ) {
+    try {
+      const bundleDirectory =
+        typeof __dirname === 'string' ? __dirname : dirname(fileURLToPath(import.meta.url))
+      assertOfflineLicense(join(bundleDirectory, '..'), __NAWA_OFFLINE_LICENSE_POLICY__)
+    } catch (error) {
+      return fail(
+        new CliError(EXIT.app, error instanceof Error ? error.message : String(error), undefined, {
+          reason: 'license_required',
+          suggestion: 'open Nawa to export a PC approval request and import your signed license',
+        }),
+      )
+    }
   }
 
   if (flagBool(args, 'version')) {

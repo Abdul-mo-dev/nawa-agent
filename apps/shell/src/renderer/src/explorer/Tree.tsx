@@ -104,6 +104,7 @@ export function DirectoryTree({
     folder: boolean,
     parent?: string,
   ) => {
+    const rtl = getComputedStyle(e.currentTarget).direction === 'rtl'
     const rows = [...(tree.current?.querySelectorAll<HTMLElement>('[role="treeitem"]') ?? [])]
     const index = rows.findIndex((row) => row.dataset.path === path)
     let next: HTMLElement | undefined
@@ -111,10 +112,10 @@ export function DirectoryTree({
     else if (e.key === 'ArrowUp') next = rows[Math.max(0, index - 1)]
     else if (e.key === 'Home') next = rows[0]
     else if (e.key === 'End') next = rows[rows.length - 1]
-    else if (e.key === 'ArrowRight' && folder) {
+    else if (e.key === (rtl ? 'ArrowLeft' : 'ArrowRight') && folder) {
       if (!expandedRef.current.has(path)) toggle(path)
       else next = rows[index + 1]
-    } else if (e.key === 'ArrowLeft') {
+    } else if (e.key === (rtl ? 'ArrowRight' : 'ArrowLeft')) {
       if (folder && expandedRef.current.has(path)) toggle(path)
       else if (parent) focusRow(parent)
     } else if (e.key === 'Enter' || e.key === ' ') {

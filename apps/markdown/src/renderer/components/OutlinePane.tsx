@@ -40,7 +40,8 @@ export function OutlinePane({
   }
   const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
     if (!drag.current) return
-    onResize(clampOutlineWidth(drag.current.width + e.clientX - drag.current.x))
+    const sign = getComputedStyle(e.currentTarget).direction === 'rtl' ? -1 : 1
+    onResize(clampOutlineWidth(drag.current.width + (e.clientX - drag.current.x) * sign))
   }
   const onPointerUp = () => {
     drag.current = null
@@ -60,7 +61,7 @@ export function OutlinePane({
                 key={`${item.pos}-${index}`}
                 type="button"
                 className="md-outline-item"
-                style={{ paddingLeft: 10 + (item.level - 1) * 14 }}
+                style={{ paddingInlineStart: 10 + (item.level - 1) * 14 }}
                 data-tip={item.text}
                 title={item.text}
                 onClick={() => onJump(item.pos)}

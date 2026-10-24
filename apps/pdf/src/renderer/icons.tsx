@@ -434,8 +434,17 @@ export const IconPrint = () => (
 )
 /** Design-supplied glyphs on the 1:16 stroke:canvas ratio (24-canvas / 1.5 stroke),
  *  geometry shared with docs/slides/sheets. */
-export const IconRatio = ({ size = 16, children }: { size?: number; children: ReactNode }) => (
+export const IconRatio = ({
+  size = 16,
+  children,
+  directional = false,
+}: {
+  size?: number
+  children: ReactNode
+  directional?: boolean
+}) => (
   <svg
+    className={directional ? 'ui-directional-icon' : undefined}
     width={size}
     height={size}
     viewBox="0 0 24 24"
@@ -450,13 +459,13 @@ export const IconRatio = ({ size = 16, children }: { size?: number; children: Re
   </svg>
 )
 export const IconUndo = () => (
-  <IconRatio>
+  <IconRatio directional>
     <path d="M5.91026 4L2.5 7.14791L5.91026 10.8205" />
     <path d="M3.96154 7.41028H15.1636C18.5169 7.41028 21.3646 10.1484 21.4953 13.5C21.6334 17.0416 18.707 20.0769 15.1636 20.0769H6.88384" />
   </IconRatio>
 )
 export const IconRedo = () => (
-  <IconRatio>
+  <IconRatio directional>
     <path d="M18.0897 4L21.5 7.14791L18.0897 10.8205" />
     <path d="M20.0385 7.41028H8.83636C5.4831 7.41028 2.63537 10.1484 2.5047 13.5C2.36657 17.0416 5.29296 20.0769 8.83636 20.0769H17.1162" />
   </IconRatio>

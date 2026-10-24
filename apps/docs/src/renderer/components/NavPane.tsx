@@ -472,10 +472,11 @@ export function NavPane({
     const startX = e.clientX
     const startW = width
     const el = e.currentTarget
+    const sign = getComputedStyle(el).direction === 'rtl' ? -1 : 1
     el.setPointerCapture(e.pointerId)
     let next = startW
     const move = (ev: PointerEvent) => {
-      next = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startW + ev.clientX - startX))
+      next = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startW + (ev.clientX - startX) * sign))
       setWidth(next)
     }
     const up = () => {
@@ -582,7 +583,7 @@ export function NavPane({
                   data-tip={row.node.ref.text}
                   tabIndex={0}
                   draggable={canEdit}
-                  style={{ paddingLeft: 6 + row.depth * 14 }}
+                  style={{ paddingInlineStart: 6 + row.depth * 14 }}
                   onClick={() => jumpToHeading(row.node.ref.pos)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') jumpToHeading(row.node.ref.pos)

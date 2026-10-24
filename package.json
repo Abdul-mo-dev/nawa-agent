@@ -17,6 +17,9 @@
     "packages/*"
   ],
   "scripts": {
+    "license:admin": "node tools/licensing/admin.cjs",
+    "license:helper": "node tools/licensing/build.cjs",
+    "license:test": "node --test tools/licensing/authority.test.cjs tools/licensing/native.test.cjs tools/licensing/approve-script.test.cjs",
     "postinstall": "install-electron",
     "format": "node tools/format-changed.mjs --write",
     "format:check": "node tools/format-changed.mjs --check",

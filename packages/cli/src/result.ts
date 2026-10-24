@@ -35,6 +35,7 @@ export type ErrorReason =
   | 'outside_allowed_roots'
   | 'conversion_failed'
   | 'app_unavailable'
+  | 'license_required'
   | 'app_crashed'
   | 'invalid_usage'
 

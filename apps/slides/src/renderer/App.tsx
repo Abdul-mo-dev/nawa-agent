@@ -448,13 +448,14 @@ export function App() {
     e.preventDefault()
     const list = thumbsListRef.current
     if (!list) return
-    const left = list.getBoundingClientRect().left
+    const bounds = list.getBoundingClientRect()
+    const rtl = getComputedStyle(list).direction === 'rtl'
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
     let w = thumbsW
     let raf = 0
     const onMove = (ev: PointerEvent) => {
-      w = clampThumbsW(ev.clientX - left)
+      w = clampThumbsW(rtl ? bounds.right - ev.clientX : ev.clientX - bounds.left)
       if (!raf)
         raf = requestAnimationFrame(() => {
           raf = 0

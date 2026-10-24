@@ -46,7 +46,7 @@ export function Icon({
 }) {
   return (
     <svg
-      className={`ex-icon ${className}`}
+      className={`ex-icon ${['left', 'right', 'chevron', 'pane', 'list', 'sort'].includes(name) ? 'ex-directional-icon' : ''} ${className}`}
       width={size}
       height={size}
       viewBox="0 0 24 24"

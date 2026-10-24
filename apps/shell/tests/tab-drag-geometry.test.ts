@@ -6,6 +6,7 @@ import {
   TEAR_OFF_SLACK,
   dockBand,
   insertionIndexForX,
+  tabDragPosition,
   isBeyondBand,
   pointInRect,
 } from '../src/shared/tab-drag-geometry'
@@ -100,5 +101,46 @@ describe('insertionIndexForX', () => {
   it('appends at slot 1 when only Home is open', () => {
     expect(insertionIndexForX([{ left: 0, width: 60 }], 500)).toBe(1)
     expect(insertionIndexForX([], 500)).toBe(1)
+  })
+  it('follows DOM order in a mirrored strip, including unequal widths', () => {
+    const rtl = [
+      { left: 400, width: 60 },
+      { left: 240, width: 160 },
+      { left: 140, width: 100 },
+    ]
+    expect(insertionIndexForX(rtl, 500)).toBe(1)
+    expect(insertionIndexForX(rtl, 321)).toBe(1)
+    expect(insertionIndexForX(rtl, 319)).toBe(2)
+    expect(insertionIndexForX(rtl, 191)).toBe(2)
+    expect(insertionIndexForX(rtl, 189)).toBe(3)
+    expect(insertionIndexForX(rtl, -50)).toBe(3)
+  })
+})
+
+describe('tabDragPosition', () => {
+  const rects = [
+    { left: 0, width: 60 },
+    { left: 60, width: 120 },
+    { left: 180, width: 80 },
+    { left: 260, width: 100 },
+  ]
+  const mirrored = rects.map((r) => ({ left: 500 - r.left - r.width, width: r.width }))
+  it.each([
+    [1, 90, 2],
+    [1, 1000, 3],
+    [3, -90, 2],
+    [3, -1000, 1],
+    [2, 0, 2],
+  ])('moves slot %i by %i consistently in both directions', (from, dx, target) => {
+    const ltr = tabDragPosition(rects, from, dx)
+    const rtl = tabDragPosition(mirrored, from, -dx)
+    expect(ltr.target).toBe(target)
+    expect(rtl.target).toBe(target)
+    expect(rtl.dx).toBe(-ltr.dx)
+  })
+  it('keeps Home pinned and clamps dragging at both ends', () => {
+    expect(tabDragPosition(rects, 0, 100)).toEqual({ dx: 0, target: 0 })
+    expect(tabDragPosition(rects, 1, -100)).toEqual({ dx: 0, target: 1 })
+    expect(tabDragPosition(mirrored, 1, 100)).toEqual({ dx: -0, target: 1 })
   })
 })

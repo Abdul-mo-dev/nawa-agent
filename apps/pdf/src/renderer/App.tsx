@@ -412,12 +412,13 @@ export default function App() {
     e.preventDefault()
     const startX = e.clientX
     const startW = sidebarW
+    const sign = getComputedStyle(e.currentTarget).direction === 'rtl' ? -1 : 1
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
     let w = startW
     let raf = 0
     const onMove = (ev: PointerEvent) => {
-      w = clampSidebarW(startW + ev.clientX - startX)
+      w = clampSidebarW(startW + (ev.clientX - startX) * sign)
       if (!raf)
         raf = requestAnimationFrame(() => {
           raf = 0

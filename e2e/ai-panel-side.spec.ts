@@ -49,7 +49,12 @@ for (const app of ['docs', 'sheets', 'slides', 'pdf', 'markdown', 'html']) {
           const box = (await dock.boundingBox())!
           const docBox = (await document.boundingBox())!
           expect(side === 'left' ? box.x < docBox.x : box.x > docBox.x).toBe(true)
-          expect((await nav.boundingBox())!.x).toBeCloseTo(docBox.x, 0)
+          const navBox = (await nav.boundingBox())!
+          const mirrorNavigation = dir === 'rtl' && !sheets
+          expect(mirrorNavigation ? navBox.x + navBox.width : navBox.x).toBeCloseTo(
+            mirrorNavigation ? docBox.x + docBox.width : docBox.x,
+            0,
+          )
           const handle = (await page.locator('.ai-panel-resizer').boundingBox())!
           expect(
             Math.abs(

@@ -28,6 +28,7 @@
 
 const { execFileSync } = require('node:child_process')
 const { existsSync, readFileSync, rmSync, statSync } = require('node:fs')
+const { createHash } = require('node:crypto')
 const { join } = require('node:path')
 const editorExtensions = require(join(__dirname, '../../packages/file-formats/src/extensions.json'))
 const previewExtensions = require(
@@ -478,19 +479,28 @@ function bundledCliVersion(bundlePath) {
  * it here with the app version whenever the two disagree, so the packaged
  * command line can never answer with the workspace CLI version.
  */
-function ensureCliBundleCarriesAppVersion() {
+function ensureCliBundleCarriesAppVersion(licensePolicy = null) {
   const bundlePath = join(__dirname, CLI_BUNDLE_REL)
   const appVersion = packagedAppVersion()
-  if (bundledCliVersion(bundlePath) === appVersion) return
+  const licenseBanner = `const __cliLicensePolicy = ${JSON.stringify(licensePolicy)};`
+  if (
+    bundledCliVersion(bundlePath) === appVersion &&
+    readFileSync(bundlePath, 'utf8').includes(licenseBanner)
+  )
+    return
   execFileSync(process.execPath, [join(__dirname, CLI_BUILD_REL)], {
     stdio: 'inherit',
-    env: { ...process.env, [CLI_VERSION_ENV]: appVersion },
+    env: {
+      ...process.env,
+      [CLI_VERSION_ENV]: appVersion,
+      NAWA_CLI_LICENSE_POLICY: JSON.stringify(licensePolicy),
+    },
   })
   const baked = bundledCliVersion(bundlePath)
-  if (baked !== appVersion) {
+  if (baked !== appVersion || !readFileSync(bundlePath, 'utf8').includes(licenseBanner)) {
     throw new Error(
       `packaged genoffice CLI reports ${baked ?? 'no version'} but the app ships ${appVersion} ` +
-        `(rebuild it with ${CLI_VERSION_ENV}=${appVersion})`,
+        `or its PC approval policy is missing (rebuild it with ${CLI_VERSION_ENV}=${appVersion})`,
     )
   }
 }
@@ -816,6 +826,10 @@ const config = {
     ],
     extraResources: [
       {
+        from: 'build/offline-license/nawa-license.exe',
+        to: 'licensing/nawa-license.exe',
+      },
+      {
         from: WIN_SIDECAR,
         to: 'native/xlsx-sidecar.exe',
       },
@@ -921,7 +935,32 @@ const config = {
     assertNativeSidecar(context.electronPlatformName)
     assertPackagedImageRuntimeVersion()
     assertTextRuntimeHasNoImageBackend()
-    ensureCliBundleCarriesAppVersion()
+    let licensePolicy = null
+    if (context.electronPlatformName === 'win32') {
+      const { buildLicenseHelper, outputDirectory } = require('../../tools/licensing/build.cjs')
+      licensePolicy = buildLicenseHelper()
+      const helper = join(outputDirectory, 'nawa-license.exe')
+      if (winSignMode) {
+        execFileSync(
+          process.execPath,
+          [join(__dirname, '../../scripts/win-sign.cjs'), winSignMode, helper],
+          { stdio: 'inherit' },
+        )
+      }
+      licensePolicy.helperSha256 = createHash('sha256').update(readFileSync(helper)).digest('hex')
+      context.packager.config.extraMetadata = {
+        ...context.packager.config.extraMetadata,
+        nawaOfflineLicense: licensePolicy,
+      }
+      // app.asar is the only main-code source; validate its embedded integrity.
+      // RunAsNode stays enabled because Nawa's CLI and embedding workers use it.
+      context.packager.config.electronFuses = {
+        ...context.packager.config.electronFuses,
+        onlyLoadAppFromAsar: true,
+        enableEmbeddedAsarIntegrityValidation: true,
+      }
+    }
+    ensureCliBundleCarriesAppVersion(licensePolicy)
     if (context.electronPlatformName === 'darwin' && includeMacX64) {
       assertUniversalSidecar()
       assertUniversalVisionOcr()

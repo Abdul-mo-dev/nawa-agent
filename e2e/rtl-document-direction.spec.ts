@@ -2,10 +2,10 @@ import { test, expect, type Page } from '@playwright/test'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { launchShell, closeAndSaveVideo, waitForPageWithUrl } from './helpers'
+import { launchShell, closeAndSaveVideo, waitForPageWithUrl, screenshotPath } from './helpers'
 
 /**
- * Arabic changes UI text direction while the layout and document stay in place.
+ * Arabic mirrors UI chrome while documents retain their own direction.
  *
  * `dir="rtl"` on <html> is inherited by everything, so an English document
  * opened under the Arabic UI was laid out — and, for the canvas editors, drawn —
@@ -42,7 +42,7 @@ test('the UI uses Arabic text direction under ar', async () => {
 })
 
 for (const { name, create, url, host } of APPS) {
-  test(`${name}: Arabic keeps the toolbar layout and document direction`, async () => {
+  test(`${name}: Arabic mirrors toolbars and preserves document direction`, async () => {
     test.setTimeout(240_000)
     const defaultSaveDir = await mkdtemp(join(tmpdir(), 'nawa-rtl-layout-'))
     const launched = await launchShell({
@@ -61,13 +61,13 @@ for (const { name, create, url, host } of APPS) {
       const originalTabs = await tabs.boundingBox()
       await launched.page.evaluate(() => window.aiOffice.setLanguage('ar'))
       await expect(page.locator('html')).toHaveAttribute('dir', 'rtl')
-      await expect(tabs).toHaveCSS('direction', 'ltr')
-      await expect(page.locator('[data-ribbon-body]').first()).toHaveCSS('direction', 'ltr')
+      await expect(tabs).toHaveCSS('direction', 'rtl')
+      await expect(page.locator('[data-ribbon-body]').first()).toHaveCSS('direction', 'rtl')
       await expect(firstTab).toHaveCSS('direction', 'rtl')
       const localizedTabs = await tabs.boundingBox()
       expect(localizedTabs!.x).toBeCloseTo(originalTabs!.x, 0)
-      // Translated labels can change width; the first tab stays at the leading edge.
-      expect((await firstTab.boundingBox())!.x).toBeLessThan(
+      // The leading edge is now on the right.
+      expect((await firstTab.boundingBox())!.x).toBeGreaterThan(
         localizedTabs!.x + localizedTabs!.width / 2,
       )
       // the assertion the review asked for
@@ -76,6 +76,10 @@ for (const { name, create, url, host } of APPS) {
       // which is what sent zoom-to-cursor jumping in docs, pdf and slides
       const scrollLeft = await surface.evaluate((el) => el.scrollLeft)
       expect(scrollLeft).toBeGreaterThanOrEqual(0)
+      await page.screenshot({ path: screenshotPath(`arabic-${name}-interface`) })
+      await launched.page.evaluate(() => window.aiOffice.setLanguage('en'))
+      await expect(tabs).toHaveCSS('direction', 'ltr')
+      expect(await directionOf(page, host)).toBe('ltr')
     } finally {
       await closeAndSaveVideo(launched, `rtl-${name}`)
     }

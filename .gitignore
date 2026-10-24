@@ -38,6 +38,13 @@ __pycache__/
 # Never committable — a stray `git add -A` would push user files public.
 /working_dir/
 
+# Generated offline activation helper. The public authority JSON is tracked;
+# administrator private keys live outside this checkout and are never packaged.
+/apps/shell/build/offline-license/
+*.nawa-license
+*.nawa-request
+issuer-private.*
+
 # One-off verification tests kept while chasing a fix; promote to a real test
 # file (or delete) instead of committing them under this name.
 _scratch-*

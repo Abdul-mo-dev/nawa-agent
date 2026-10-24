@@ -26,8 +26,9 @@ async function directoryPosition(page: Page, panel: Locator, side: 'left' | 'rig
   const nav = (await page.locator('.ex-navigation').boundingBox())!
   const content = (await page.locator('.ex-center').boundingBox())!
   const chat = (await panel.boundingBox())!
-  expect(nav.x).toBeLessThan(content.x)
-  expect(nav.x + nav.width).toBeLessThanOrEqual(chat.x)
+  const rtl = (await page.locator('html').getAttribute('dir')) === 'rtl'
+  expect(rtl ? nav.x > content.x : nav.x < content.x).toBe(true)
+  expect(rtl ? nav.x >= chat.x + chat.width : nav.x + nav.width <= chat.x).toBe(true)
   expect(side === 'left' ? chat.x < content.x : chat.x > content.x).toBe(true)
 }
 
@@ -83,6 +84,7 @@ test('chat positions stay physical across language changes and synchronize betwe
     await expect(page.locator('.ex-navigation')).toHaveCSS('direction', 'rtl')
     await expect(page.locator('.ex-center')).toHaveCSS('direction', 'rtl')
     await expect(panel).toHaveCSS('direction', 'rtl')
+    await expect(panel.locator('.nawa-chat-header')).toHaveCSS('direction', 'rtl')
     const moveLeft = panel.getByRole('button', { name: AI_PANEL_SIDE_LABELS.ar.left, exact: true })
     await expect(moveLeft).toHaveAttribute('data-tip', AI_PANEL_SIDE_LABELS.ar.left)
     await moveLeft.click()
@@ -108,6 +110,9 @@ test('chat positions stay physical across language changes and synchronize betwe
     const editor = await waitForPageWithUrl(launched.app, '://docs/')
     await expect(editor.locator('.ProseMirror').first()).toBeVisible()
     await expect(editor.locator('html')).toHaveAttribute('dir', 'rtl')
+    await expect
+      .poll(async () => editor.evaluate(() => innerWidth))
+      .toBeCloseTo((await page.locator('.ex-center').boundingBox())!.width, 0)
     await expect(editor.locator('.ai-panel')).toHaveCSS('direction', 'rtl')
     await expect(editor.locator('.editor-scroll')).toHaveCSS('direction', 'ltr')
     const dock = editor.locator('.ai-dock'),

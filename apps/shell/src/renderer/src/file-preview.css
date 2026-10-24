@@ -11,7 +11,6 @@
 }
 .file-preview-toolbar {
   display: flex;
-  direction: ltr;
   align-items: center;
   gap: 8px;
   padding: 10px 12px;
@@ -55,6 +54,7 @@
   overflow: hidden;
 }
 .file-preview-content {
+  direction: var(--ui-text-direction);
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -108,6 +108,7 @@
   background: var(--canvas);
 }
 .file-preview-image-tools {
+  direction: var(--ui-text-direction);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -144,6 +145,7 @@
   user-select: none;
 }
 .file-preview-ai {
+  direction: var(--ui-text-direction);
   width: var(--ai-panel-width, 360px);
   min-width: 280px;
   max-width: 100%;
@@ -176,7 +178,7 @@ html[data-ai-panel-side='right'] .file-preview-ai {
   border: 0;
 }
 .preview-assistant-header {
-  direction: ltr;
+  direction: var(--ui-text-direction);
   display: flex;
   align-items: center;
   gap: 8px;

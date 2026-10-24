@@ -12,6 +12,42 @@
 !define GENOFFICE_PATH_MAX 7900
 
 !ifndef BUILD_UNINSTALLER
+; This runs before the install section writes application files. It is also
+; used during updates; a valid existing approval returns without showing UI.
+; Silent deployment accepts /NAWALICENSE=FILE. /NAWAREQUEST=FILE exports a
+; request and exits without installing; /NAWASOFTWARE explicitly requests the
+; weaker software-key alternative for administrator review.
+!macro customInit
+  InitPluginsDir
+  File /oname=$PLUGINSDIR\nawa-license.exe "${BUILD_RESOURCES_DIR}\offline-license\nawa-license.exe"
+  ${GetParameters} $R0
+  ; Forward the original arguments so the native helper uses Windows quoting
+  ; rules, including fully quoted /OPTION=path tokens with embedded spaces.
+  ${If} ${Silent}
+    nsExec::ExecToStack '"$PLUGINSDIR\nawa-license.exe" installer $R0'
+    Pop $0
+    Pop $1
+  ${Else}
+    ClearErrors
+    ExecWait '"$PLUGINSDIR\nawa-license.exe" installer $R0' $0
+    ${If} ${Errors}
+      StrCpy $0 3
+    ${EndIf}
+  ${EndIf}
+  ${If} $0 == 10
+    ; Request collection and approval-only preflight never install files.
+    SetErrorLevel 0
+    Quit
+  ${EndIf}
+  ${If} $0 != 0
+    ${IfNot} ${Silent}
+      MessageBox MB_OK|MB_ICONINFORMATION "Nawa was not installed. This PC and Windows account need a valid signed approval."
+    ${EndIf}
+    SetErrorLevel 3
+    Quit
+  ${EndIf}
+!macroend
+
 !macro customFinishPage
   !define MUI_FINISHPAGE_TEXT "Nawa is installed. On first launch, setup can download the default chat and embedding models, their chat template, and missing Office conversion tools. Allow internet access and about 12 GiB free disk space."
   !ifndef HIDE_RUN_AFTER_FINISH

@@ -266,7 +266,7 @@ html[data-doc-theme='light'] .doc-page {
 }
 
 .status-save {
-  margin-left: auto;
+  margin-inline-start: auto;
 }
 
 .status-failed {
@@ -2051,7 +2051,7 @@ html.genoffice-popover-open .ribbon-tabs {
 }
 
 .status-item {
-  margin-right: 14px;
+  margin-inline-end: 14px;
   flex-shrink: 0;
 }
 
@@ -2128,7 +2128,7 @@ html.genoffice-popover-open .ribbon-tabs {
   flex-shrink: 0;
   width: 232px;
   min-height: 0;
-  border-right: 1px solid var(--border);
+  border-inline-end: 1px solid var(--border);
   padding: 8px 4px;
   overflow-y: auto;
 }
@@ -2170,10 +2170,10 @@ html.genoffice-popover-open .ribbon-tabs {
   width: 100%;
   border: none;
   background: none;
-  text-align: left;
+  text-align: start;
   padding-top: 5px;
   padding-bottom: 5px;
-  padding-right: 8px;
+  padding-inline-end: 8px;
   font-size: 12.5px;
   line-height: 1.35;
   color: var(--text);

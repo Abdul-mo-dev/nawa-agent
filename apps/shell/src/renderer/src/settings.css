@@ -317,7 +317,7 @@
 }
 
 .set-pane-actions .set-ai-status {
-  margin-right: 0;
+  margin-inline-end: 0;
 }
 
 .set-field {
@@ -352,7 +352,7 @@
 .set-field-value {
   font-size: 14px;
   color: var(--text-secondary);
-  text-align: right;
+  text-align: end;
   user-select: text;
   word-break: break-all;
 }
@@ -474,13 +474,13 @@
   content: '';
   position: absolute;
   top: 2px;
-  left: 2px;
+  inset-inline-start: 2px;
   width: 18px;
   height: 18px;
   border-radius: 50%;
   background: var(--surface);
   box-shadow: var(--shadow-modal-strong);
-  transition: left 0.15s ease;
+  transition: inset-inline-start 0.15s ease;
 }
 
 .set-switch[aria-checked='true'] {
@@ -488,7 +488,7 @@
 }
 
 .set-switch[aria-checked='true']::after {
-  left: 20px;
+  inset-inline-start: 20px;
 }
 
 .set-switch:disabled {
@@ -586,7 +586,7 @@
   display: inline-flex;
   width: 16px;
   height: 16px;
-  margin-right: 8px;
+  margin-inline-end: 8px;
   color: var(--text-primary);
 }
 
@@ -671,7 +671,7 @@
 .set-num-input {
   width: 64px;
   min-width: 0;
-  text-align: right;
+  text-align: end;
 }
 
 .set-input:focus {
@@ -694,7 +694,7 @@
   align-items: center;
   gap: 6px;
   min-width: 0;
-  margin-right: auto; /* status hugs the left edge, action buttons stay right */
+  margin-inline-end: auto; /* status leads; action buttons trail */
   padding: 4px 10px 4px 8px;
   border: 1px solid var(--border-subtle);
   border-radius: 999px;
@@ -760,7 +760,7 @@
 }
 
 .set-pane-subhead .set-ai-status {
-  margin-right: 0;
+  margin-inline-end: 0;
   padding: 2px 8px 2px 6px;
   font-size: 12px;
 }
@@ -827,7 +827,7 @@
 }
 
 .set-intg-version {
-  margin-left: auto;
+  margin-inline-start: auto;
   font-size: 12px;
   font-weight: 400;
   color: var(--text-tertiary);
@@ -1006,7 +1006,7 @@
 }
 
 .set-intg-path {
-  text-align: left;
+  text-align: start;
 }
 
 /* Settings → About: the one-click update entry next to the version row */

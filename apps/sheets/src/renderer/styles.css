@@ -1136,7 +1136,7 @@ html.genoffice-popover-open .ribbon-tabs {
   cursor: pointer;
   font: inherit;
   color: inherit;
-  text-align: left;
+  text-align: start;
 }
 
 .ribbon-tool.as-button:not(.large):hover {
@@ -1746,7 +1746,7 @@ button.check-item:hover {
   background: transparent;
   color: inherit;
   font-size: 12px;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 
